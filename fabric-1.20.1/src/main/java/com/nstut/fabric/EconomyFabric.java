@@ -13,5 +13,8 @@ public final class EconomyFabric implements ModInitializer {
 
         // Run our common setup.
         Economy.init();
+        
+        // Register commands
+        EconomyCommands.register();
     }
 }

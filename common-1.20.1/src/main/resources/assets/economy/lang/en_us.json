@@ -1,0 +1,7 @@
+{
+  "block.economy.market": "Market",
+  "block.economy.trading": "Trading Terminal",
+  "item.economy.market": "Market",
+  "item.economy.trading": "Trading Terminal",
+  "itemGroup.economy": "Economy"
+}
