@@ -2,7 +2,6 @@
   "replace": false,
   "values": [
     "economy:market",
-    "economy:trading",
     "economy:vault"
   ]
 }

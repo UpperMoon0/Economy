@@ -11,7 +11,7 @@
       "entries": [
         {
           "type": "minecraft:item",
-          "name": "economy:trading"
+          "name": "economy:market"
         }
       ],
       "rolls": 1.0

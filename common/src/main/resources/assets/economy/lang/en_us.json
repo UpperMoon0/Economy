@@ -1,9 +1,7 @@
 {
   "block.economy.market": "Market",
-  "block.economy.trading": "Trading Terminal",
   "block.economy.vault": "Vault",
   "item.economy.market": "Market",
-  "item.economy.trading": "Trading Terminal",
   "item.economy.vault": "Vault",
   "itemGroup.economy": "Economy",
   "message.economy.vault.not_owner": "This vault does not belong to you."
