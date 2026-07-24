@@ -1,18 +1,18 @@
 package com.nstut.forge;
 
-import dev.architectury.platform.forge.EventBuses;
-import net.minecraftforge.fml.common.Mod;
-import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
-
 import com.nstut.Economy;
+import com.nstut.economy.blocks.BlockRegistries;
+import com.nstut.economy.items.ItemRegistries;
+import net.minecraftforge.eventbus.api.IEventBus;
+import net.minecraftforge.fml.common.Mod;
 
 @Mod(Economy.MOD_ID)
 public final class EconomyForge {
-    public EconomyForge() {
-        // Submit our event bus to let Architectury API register our content on the right time.
-        EventBuses.registerModEventBus(Economy.MOD_ID, FMLJavaModLoadingContext.get().getModEventBus());
+    public EconomyForge(IEventBus modEventBus) {
+        BlockRegistries.BLOCKS.register(modEventBus);
+        BlockRegistries.BLOCK_ENTITIES.register(modEventBus);
+        ItemRegistries.ITEMS.register(modEventBus);
 
-        // Run our common setup.
         Economy.init();
     }
 }
