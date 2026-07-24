@@ -3,6 +3,7 @@ package com.nstut.forge;
 import com.nstut.Economy;
 import com.nstut.economy.blocks.BlockRegistries;
 import com.nstut.economy.items.ItemRegistries;
+import com.nstut.forge.network.MarketNetwork;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 
@@ -17,6 +18,8 @@ public final class EconomyForge {
         BlockRegistries.MENUS.register(modEventBus);
         ItemRegistries.ITEMS.register(modEventBus);
         ItemRegistries.CREATIVE_TABS.register(modEventBus);
+
+        MarketNetwork.init();
 
         Economy.init();
     }

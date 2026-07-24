@@ -3,86 +3,105 @@ package com.nstut.economy.core;
 import com.nstut.economy.api.IAccountManager;
 import com.nstut.economy.api.IBankAccount;
 import com.nstut.economy.config.EconomyConfig;
+import com.nstut.economy.data.EconomyAccountData;
 
+import java.math.BigDecimal;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
-/**
- * Implementation of IAccountManager.
- * Manages all bank accounts in the economy system.
- */
 public class AccountManager implements IAccountManager {
-    
+
     private final Map<UUID, BankAccount> accounts;
     private final BankAccount serverAccount;
     private final BankAccount taxAccount;
-    
+    private EconomyAccountData backingData;
+
     public AccountManager() {
         this.accounts = new HashMap<>();
-        
-        // Create system accounts with infinite balance
-        this.serverAccount = new BankAccount(UUID.fromString("00000000-0000-0000-0000-000000000001"), 
-                                             new java.math.BigDecimal("999999999999"));
-        this.taxAccount = new BankAccount(UUID.fromString("00000000-0000-0000-0000-000000000002"), 
-                                          java.math.BigDecimal.ZERO);
-        
-        // Set this as the singleton instance
+
+        this.serverAccount = new BankAccount(UUID.fromString("00000000-0000-0000-0000-000000000001"),
+                                             new BigDecimal("999999999999"));
+        this.taxAccount = new BankAccount(UUID.fromString("00000000-0000-0000-0000-000000000002"),
+                                          BigDecimal.ZERO);
+
         AccountManagerHolder.setInstance(this);
     }
-    
+
+    public void setAccountData(EconomyAccountData data) {
+        this.backingData = data;
+    }
+
+    public void loadFrom(EconomyAccountData data) {
+        this.backingData = data;
+        accounts.clear();
+        for (Map.Entry<UUID, BigDecimal> entry : data.getBalances().entrySet()) {
+            BankAccount account = new BankAccount(entry.getKey(), entry.getValue());
+            accounts.put(entry.getKey(), account);
+        }
+    }
+
+    public void saveAll() {
+        if (backingData == null) return;
+        for (Map.Entry<UUID, BankAccount> entry : accounts.entrySet()) {
+            backingData.setBalance(entry.getKey(), entry.getValue().getBalance());
+        }
+    }
+
+    private void markDirty(UUID player) {
+        if (backingData != null) {
+            IBankAccount account = accounts.get(player);
+            if (account != null) {
+                backingData.setBalance(player, account.getBalance());
+            }
+        }
+    }
+
     @Override
     public Optional<IBankAccount> getPlayerAccount(UUID player) {
         return Optional.ofNullable(accounts.get(player));
     }
-    
+
     @Override
     public IBankAccount getOrCreatePlayerAccount(UUID player) {
         return accounts.computeIfAbsent(player, uuid -> {
             EconomyConfig config = EconomyConfig.getInstance();
             BankAccount account = new BankAccount(uuid, config.getStartingBalance());
-            
-            // Record starting balance transaction
+
             account.credit(config.getStartingBalance(), TransactionContext.startingBalance());
-            
+            markDirty(uuid);
             return account;
         });
     }
-    
+
     @Override
     public boolean hasAccount(UUID player) {
         return accounts.containsKey(player);
     }
-    
+
     @Override
     public IBankAccount getServerAccount() {
         return serverAccount;
     }
-    
+
     @Override
     public IBankAccount getTaxAccount() {
         return taxAccount;
     }
-    
+
     @Override
     public boolean deleteAccount(UUID player) {
         return accounts.remove(player) != null;
     }
-    
-    /**
-     * Gets all accounts (for save operations).
-     */
+
     public Map<UUID, BankAccount> getAllAccounts() {
         return new HashMap<>(accounts);
     }
-    
-    /**
-     * Loads accounts from saved data.
-     */
-    public void loadAccounts(Map<UUID, java.math.BigDecimal> savedBalances) {
+
+    public void loadAccounts(Map<UUID, BigDecimal> savedBalances) {
         accounts.clear();
-        for (Map.Entry<UUID, java.math.BigDecimal> entry : savedBalances.entrySet()) {
+        for (Map.Entry<UUID, BigDecimal> entry : savedBalances.entrySet()) {
             BankAccount account = new BankAccount(entry.getKey(), entry.getValue());
             accounts.put(entry.getKey(), account);
         }

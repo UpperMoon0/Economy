@@ -27,6 +27,9 @@ public class VaultBlockEntity extends BlockEntity implements Container {
     public void setOwner(UUID owner) {
         this.owner = owner;
         setChanged();
+        if (level != null && !level.isClientSide) {
+            VaultManager.register(owner, worldPosition, level.dimension().location().toString());
+        }
     }
 
     public UUID getOwner() {
@@ -138,14 +141,14 @@ public class VaultBlockEntity extends BlockEntity implements Container {
     public void onLoad() {
         super.onLoad();
         if (level != null && !level.isClientSide && owner != null) {
-            VaultManager.register(owner, worldPosition);
+            VaultManager.register(owner, worldPosition, level.dimension().location().toString());
         }
     }
 
     @Override
     public void setRemoved() {
         if (level != null && !level.isClientSide && owner != null) {
-            VaultManager.unregister(owner);
+            VaultManager.unregister(owner, worldPosition, level.dimension().location().toString());
         }
         super.setRemoved();
     }

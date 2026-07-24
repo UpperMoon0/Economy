@@ -1,6 +1,12 @@
 {
-  "parent": "minecraft:block/cube_all",
+  "parent": "minecraft:block/cube",
   "textures": {
-    "all": "economy:block/market"
+    "down": "economy:block/casing",
+    "up": "economy:block/casing",
+    "north": "economy:block/market",
+    "south": "economy:block/casing",
+    "west": "economy:block/casing",
+    "east": "economy:block/casing",
+    "particle": "economy:block/casing"
   }
 }

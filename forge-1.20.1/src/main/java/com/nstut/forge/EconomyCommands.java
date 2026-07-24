@@ -3,6 +3,7 @@ package com.nstut.forge;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.DoubleArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
+import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
 import com.nstut.Economy;
 import com.nstut.economy.api.IAccountManager;
@@ -22,8 +23,8 @@ import net.minecraft.commands.Commands;
 import net.minecraft.commands.arguments.EntityArgument;
 import net.minecraft.commands.arguments.item.ItemArgument;
 import net.minecraft.commands.arguments.item.ItemInput;
-import net.minecraft.core.BlockPos;
 import net.minecraft.core.NonNullList;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.HoverEvent;
@@ -31,6 +32,7 @@ import net.minecraft.network.chat.Style;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.event.RegisterCommandsEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
@@ -49,35 +51,186 @@ public class EconomyCommands {
         CommandDispatcher<CommandSourceStack> dispatcher = event.getDispatcher();
         CommandBuildContext buildContext = event.getBuildContext();
 
-        registerBalanceCommand(dispatcher);
-        registerPayCommand(dispatcher);
-        registerAdminCommands(dispatcher);
-        registerVaultCommand(dispatcher);
-        registerSellCommand(dispatcher, buildContext);
-        registerBuyCommand(dispatcher, buildContext);
-        registerOffersCommand(dispatcher, buildContext);
-        registerMyOffersCommand(dispatcher);
-        registerCancelOfferCommand(dispatcher);
-        registerAcceptOfferCommand(dispatcher, buildContext);
+        dispatcher.register(buildEconomyNode("economy", buildContext));
+        dispatcher.register(buildEconomyNode("eco", buildContext));
     }
 
-    private static void registerBalanceCommand(CommandDispatcher<CommandSourceStack> dispatcher) {
-        dispatcher.register(Commands.literal("balance")
-            .executes(context -> {
-                if (context.getSource().getEntity() instanceof ServerPlayer player) {
-                    return showBalance(context, player);
-                }
-                context.getSource().sendFailure(Component.literal("This command can only be used by players"));
-                return 0;
-            })
-            .then(Commands.argument("player", EntityArgument.player())
-                .requires(source -> source.hasPermission(2))
+    private static LiteralArgumentBuilder<CommandSourceStack> buildEconomyNode(String rootName, CommandBuildContext buildContext) {
+        return Commands.literal(rootName)
+            .then(Commands.literal("balance")
                 .executes(context -> {
-                    ServerPlayer target = EntityArgument.getPlayer(context, "player");
-                    return showBalance(context, target);
+                    if (context.getSource().getEntity() instanceof ServerPlayer player) {
+                        return showBalance(context, player);
+                    }
+                    context.getSource().sendFailure(Component.literal("This command can only be used by players"));
+                    return 0;
+                })
+                .then(Commands.argument("player", EntityArgument.player())
+                    .requires(source -> source.hasPermission(2))
+                    .executes(context -> {
+                        ServerPlayer target = EntityArgument.getPlayer(context, "player");
+                        return showBalance(context, target);
+                    })
+                )
+            )
+            .then(Commands.literal("pay")
+                .then(Commands.argument("player", EntityArgument.player())
+                    .then(Commands.argument("amount", DoubleArgumentType.doubleArg(0.01))
+                        .executes(context -> {
+                            if (!(context.getSource().getEntity() instanceof ServerPlayer sender)) {
+                                context.getSource().sendFailure(Component.literal("Only players can send money"));
+                                return 0;
+                            }
+                            ServerPlayer receiver = EntityArgument.getPlayer(context, "player");
+                            if (sender.getUUID().equals(receiver.getUUID())) {
+                                context.getSource().sendFailure(Component.literal("You cannot pay yourself"));
+                                return 0;
+                            }
+                            BigDecimal amount = BigDecimal.valueOf(DoubleArgumentType.getDouble(context, "amount"));
+                            IAccountManager accounts = IAccountManager.getInstance();
+                            IBankAccount senderAccount = accounts.getOrCreatePlayerAccount(sender.getUUID());
+                            IBankAccount receiverAccount = accounts.getOrCreatePlayerAccount(receiver.getUUID());
+
+                            EconomyConfig config = EconomyConfig.getInstance();
+                            if (senderAccount.transferTo(receiverAccount, amount,
+                                TransactionContext.transfer("Payment from " + sender.getName().getString(), receiver.getUUID()))) {
+                                String amtStr = config.getCurrencySymbol() + amount.toPlainString();
+                                context.getSource().sendSuccess(() ->
+                                    Component.literal("Paid " + amtStr + " to " + receiver.getName().getString()), false);
+                                receiver.sendSystemMessage(Component.literal("Received " + amtStr + " from " + sender.getName().getString()));
+                                return 1;
+                            } else {
+                                context.getSource().sendFailure(Component.literal("Insufficient funds"));
+                                return 0;
+                            }
+                        })
+                    )
+                )
+            )
+            .then(Commands.literal("vault")
+                .executes(context -> {
+                    if (!(context.getSource().getEntity() instanceof ServerPlayer player)) {
+                        context.getSource().sendFailure(Component.literal("This command can only be used by players"));
+                        return 0;
+                    }
+                    var record = VaultManager.getVaultRecord(player.getUUID());
+                    if (record == null) {
+                        context.getSource().sendFailure(Component.literal("You do not have a Vault block. Place one to store trade items."));
+                        return 0;
+                    }
+                    context.getSource().sendSuccess(() ->
+                        Component.literal("Your vault is at " + record.pos.toShortString() +
+                            " in dimension " + record.dimension),
+                        false
+                    );
+                    return 1;
                 })
             )
-        );
+            .then(Commands.literal("sell")
+                .then(Commands.argument("item", ItemArgument.item(buildContext))
+                    .then(Commands.argument("quantity", IntegerArgumentType.integer(1, 3456))
+                        .then(Commands.argument("price", DoubleArgumentType.doubleArg(0.01))
+                            .executes(context -> createSellOrder(context))
+                        )
+                    )
+                )
+            )
+            .then(Commands.literal("buy")
+                .then(Commands.argument("item", ItemArgument.item(buildContext))
+                    .then(Commands.argument("quantity", IntegerArgumentType.integer(1, 3456))
+                        .then(Commands.argument("price", DoubleArgumentType.doubleArg(0.01))
+                            .executes(context -> createBuyOrder(context))
+                        )
+                    )
+                )
+            )
+            .then(Commands.literal("order")
+                .then(Commands.literal("buy")
+                    .then(Commands.argument("item", ItemArgument.item(buildContext))
+                        .then(Commands.argument("quantity", IntegerArgumentType.integer(1, 3456))
+                            .then(Commands.argument("price", DoubleArgumentType.doubleArg(0.01))
+                                .executes(context -> createBuyOrder(context))
+                            )
+                        )
+                    )
+                )
+                .then(Commands.literal("sell")
+                    .then(Commands.argument("item", ItemArgument.item(buildContext))
+                        .then(Commands.argument("quantity", IntegerArgumentType.integer(1, 3456))
+                            .then(Commands.argument("price", DoubleArgumentType.doubleArg(0.01))
+                                .executes(context -> createSellOrder(context))
+                            )
+                        )
+                    )
+                )
+            )
+            .then(Commands.literal("serverorder")
+                .requires(source -> source.hasPermission(2))
+                .then(Commands.literal("buy")
+                    .then(Commands.argument("item", ItemArgument.item(buildContext))
+                        .then(Commands.argument("quantity", IntegerArgumentType.integer(1, 3456))
+                            .then(Commands.argument("price", DoubleArgumentType.doubleArg(0.01))
+                                .executes(context -> createServerBuyOrder(context))
+                            )
+                        )
+                    )
+                )
+                .then(Commands.literal("sell")
+                    .then(Commands.argument("item", ItemArgument.item(buildContext))
+                        .then(Commands.argument("quantity", IntegerArgumentType.integer(1, 3456))
+                            .then(Commands.argument("price", DoubleArgumentType.doubleArg(0.01))
+                                .executes(context -> createServerSellOrder(context))
+                            )
+                        )
+                    )
+                )
+            )
+            .then(Commands.literal("orders")
+                .executes(context -> listOrders(context, null, rootName))
+                .then(Commands.argument("item", ItemArgument.item(buildContext))
+                    .executes(context -> {
+                        ItemInput itemInput = ItemArgument.getItem(context, "item");
+                        return listOrders(context, itemInput.getItem(), rootName);
+                    })
+                )
+            )
+            .then(Commands.literal("myorders")
+                .executes(context -> listMyOrders(context))
+            )
+            .then(Commands.literal("cancelorder")
+                .then(Commands.argument("index", IntegerArgumentType.integer(1))
+                    .executes(context -> cancelOrder(context))
+                )
+            )
+            .then(Commands.literal("acceptorder")
+                .then(Commands.argument("index", IntegerArgumentType.integer(1))
+                    .executes(context -> acceptOrder(context))
+                )
+            )
+            .then(Commands.literal("give")
+                .requires(source -> source.hasPermission(2))
+                .then(Commands.argument("player", EntityArgument.player())
+                    .then(Commands.argument("amount", DoubleArgumentType.doubleArg(0.01))
+                        .executes(context -> adminGive(context))
+                    )
+                )
+            )
+            .then(Commands.literal("take")
+                .requires(source -> source.hasPermission(2))
+                .then(Commands.argument("player", EntityArgument.player())
+                    .then(Commands.argument("amount", DoubleArgumentType.doubleArg(0.01))
+                        .executes(context -> adminTake(context))
+                    )
+                )
+            )
+            .then(Commands.literal("set")
+                .requires(source -> source.hasPermission(2))
+                .then(Commands.argument("player", EntityArgument.player())
+                    .then(Commands.argument("amount", DoubleArgumentType.doubleArg(0))
+                        .executes(context -> adminSet(context))
+                    )
+                )
+            );
     }
 
     private static int showBalance(CommandContext<CommandSourceStack> context, ServerPlayer player) {
@@ -92,190 +245,148 @@ public class EconomyCommands {
         return 1;
     }
 
-    private static void registerPayCommand(CommandDispatcher<CommandSourceStack> dispatcher) {
-        dispatcher.register(Commands.literal("pay")
-            .then(Commands.argument("player", EntityArgument.player())
-                .then(Commands.argument("amount", DoubleArgumentType.doubleArg(0.01))
-                    .executes(context -> {
-                        if (!(context.getSource().getEntity() instanceof ServerPlayer sender)) {
-                            context.getSource().sendFailure(Component.literal("This command can only be used by players"));
-                            return 0;
-                        }
-                        ServerPlayer target = EntityArgument.getPlayer(context, "player");
-                        BigDecimal amount = BigDecimal.valueOf(DoubleArgumentType.getDouble(context, "amount"));
-
-                        if (sender.getUUID().equals(target.getUUID())) {
-                            context.getSource().sendFailure(Component.literal("You cannot pay yourself"));
-                            return 0;
-                        }
-
-                        IAccountManager accounts = IAccountManager.getInstance();
-                        IBankAccount senderAccount = accounts.getOrCreatePlayerAccount(sender.getUUID());
-                        IBankAccount targetAccount = accounts.getOrCreatePlayerAccount(target.getUUID());
-
-                        if (senderAccount.transferTo(targetAccount, amount,
-                                TransactionContext.transfer("Payment from " + sender.getName().getString(), sender.getUUID()))) {
-                            EconomyConfig config = EconomyConfig.getInstance();
-                            String amt = amount.setScale(2, RoundingMode.HALF_UP).toPlainString();
-                            context.getSource().sendSuccess(() ->
-                                Component.literal("Paid " + config.getCurrencySymbol() + amt + " to " + target.getName().getString()),
-                                false
-                            );
-                            target.sendSystemMessage(Component.literal("Received " + config.getCurrencySymbol() + amt + " from " + sender.getName().getString()));
-                            return 1;
-                        } else {
-                            context.getSource().sendFailure(Component.literal("Insufficient funds"));
-                            return 0;
-                        }
-                    })
-                )
-            )
+    private static int adminGive(CommandContext<CommandSourceStack> context) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        ServerPlayer target = EntityArgument.getPlayer(context, "player");
+        BigDecimal amount = BigDecimal.valueOf(DoubleArgumentType.getDouble(context, "amount"));
+        IAccountManager accounts = IAccountManager.getInstance();
+        IBankAccount account = accounts.getOrCreatePlayerAccount(target.getUUID());
+        account.credit(amount, TransactionContext.adminGive("Admin command"));
+        EconomyConfig config = EconomyConfig.getInstance();
+        context.getSource().sendSuccess(() ->
+            Component.literal("Gave " + config.getCurrencySymbol() + amount.toPlainString() + " to " + target.getName().getString()),
+            true
         );
+        return 1;
     }
 
-    private static void registerAdminCommands(CommandDispatcher<CommandSourceStack> dispatcher) {
-        dispatcher.register(Commands.literal("economy")
-            .requires(source -> source.hasPermission(2))
-            .then(Commands.literal("give")
-                .then(Commands.argument("player", EntityArgument.player())
-                    .then(Commands.argument("amount", DoubleArgumentType.doubleArg(0.01))
-                        .executes(context -> {
-                            ServerPlayer target = EntityArgument.getPlayer(context, "player");
-                            BigDecimal amount = BigDecimal.valueOf(DoubleArgumentType.getDouble(context, "amount"));
-                            IAccountManager accounts = IAccountManager.getInstance();
-                            IBankAccount account = accounts.getOrCreatePlayerAccount(target.getUUID());
-                            account.credit(amount, TransactionContext.adminGive("Admin command"));
-                            EconomyConfig config = EconomyConfig.getInstance();
-                            context.getSource().sendSuccess(() ->
-                                Component.literal("Gave " + config.getCurrencySymbol() + amount.toPlainString() + " to " + target.getName().getString()),
-                                true
-                            );
-                            return 1;
-                        })
-                    )
-                )
-            )
-            .then(Commands.literal("take")
-                .then(Commands.argument("player", EntityArgument.player())
-                    .then(Commands.argument("amount", DoubleArgumentType.doubleArg(0.01))
-                        .executes(context -> {
-                            ServerPlayer target = EntityArgument.getPlayer(context, "player");
-                            BigDecimal amount = BigDecimal.valueOf(DoubleArgumentType.getDouble(context, "amount"));
-                            IAccountManager accounts = IAccountManager.getInstance();
-                            IBankAccount account = accounts.getOrCreatePlayerAccount(target.getUUID());
-                            if (account.debit(amount, TransactionContext.adminTake("Admin command"))) {
-                                EconomyConfig config = EconomyConfig.getInstance();
-                                context.getSource().sendSuccess(() ->
-                                    Component.literal("Took " + config.getCurrencySymbol() + amount.toPlainString() + " from " + target.getName().getString()),
-                                    true
-                                );
-                                return 1;
-                            } else {
-                                context.getSource().sendFailure(Component.literal("Player has insufficient funds"));
-                                return 0;
-                            }
-                        })
-                    )
-                )
-            )
-            .then(Commands.literal("set")
-                .then(Commands.argument("player", EntityArgument.player())
-                    .then(Commands.argument("amount", DoubleArgumentType.doubleArg(0))
-                        .executes(context -> {
-                            ServerPlayer target = EntityArgument.getPlayer(context, "player");
-                            BigDecimal amount = BigDecimal.valueOf(DoubleArgumentType.getDouble(context, "amount"));
-                            IAccountManager accounts = IAccountManager.getInstance();
-                            com.nstut.economy.core.BankAccount account =
-                                (com.nstut.economy.core.BankAccount) accounts.getOrCreatePlayerAccount(target.getUUID());
-                            account.setBalance(amount);
-                            EconomyConfig config = EconomyConfig.getInstance();
-                            context.getSource().sendSuccess(() ->
-                                Component.literal("Set " + target.getName().getString() + "'s balance to " + config.getCurrencySymbol() + amount.toPlainString()),
-                                true
-                            );
-                            return 1;
-                        })
-                    )
-                )
-            )
-        );
+    private static int adminTake(CommandContext<CommandSourceStack> context) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        ServerPlayer target = EntityArgument.getPlayer(context, "player");
+        BigDecimal amount = BigDecimal.valueOf(DoubleArgumentType.getDouble(context, "amount"));
+        IAccountManager accounts = IAccountManager.getInstance();
+        IBankAccount account = accounts.getOrCreatePlayerAccount(target.getUUID());
+        if (account.debit(amount, TransactionContext.adminTake("Admin command"))) {
+            EconomyConfig config = EconomyConfig.getInstance();
+            context.getSource().sendSuccess(() ->
+                Component.literal("Took " + config.getCurrencySymbol() + amount.toPlainString() + " from " + target.getName().getString()),
+                true
+            );
+            return 1;
+        } else {
+            context.getSource().sendFailure(Component.literal("Player has insufficient funds"));
+            return 0;
+        }
     }
 
-    private static void registerVaultCommand(CommandDispatcher<CommandSourceStack> dispatcher) {
-        dispatcher.register(Commands.literal("vault")
-            .executes(context -> {
-                if (!(context.getSource().getEntity() instanceof ServerPlayer player)) {
-                    context.getSource().sendFailure(Component.literal("This command can only be used by players"));
-                    return 0;
-                }
-                BlockPos pos = VaultManager.getVaultPos(player.getUUID());
-                if (pos == null) {
-                    context.getSource().sendFailure(Component.literal("You do not have a Vault block. Place one to store trade items."));
-                    return 0;
-                }
-                context.getSource().sendSuccess(() ->
-                    Component.literal("Your vault is at " + pos.toShortString() +
-                        " in dimension " + player.level().dimension().location()),
-                    false
-                );
-                return 1;
-            })
+    private static int adminSet(CommandContext<CommandSourceStack> context) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        ServerPlayer target = EntityArgument.getPlayer(context, "player");
+        BigDecimal amount = BigDecimal.valueOf(DoubleArgumentType.getDouble(context, "amount"));
+        IAccountManager accounts = IAccountManager.getInstance();
+        com.nstut.economy.core.BankAccount account =
+            (com.nstut.economy.core.BankAccount) accounts.getOrCreatePlayerAccount(target.getUUID());
+        account.setBalance(amount);
+        EconomyConfig config = EconomyConfig.getInstance();
+        context.getSource().sendSuccess(() ->
+            Component.literal("Set " + target.getName().getString() + "'s balance to " + config.getCurrencySymbol() + amount.toPlainString()),
+            true
         );
+        return 1;
     }
 
-    private static void registerSellCommand(CommandDispatcher<CommandSourceStack> dispatcher, CommandBuildContext buildContext) {
-        dispatcher.register(Commands.literal("sell")
-            .then(Commands.argument("item", ItemArgument.item(buildContext))
-                .then(Commands.argument("quantity", IntegerArgumentType.integer(1, 3456))
-                    .then(Commands.argument("price", DoubleArgumentType.doubleArg(0.01))
-                        .executes(context -> createSellOffer(context))
-                    )
-                )
-            )
+    private static int createServerBuyOrder(CommandContext<CommandSourceStack> context) {
+        ItemInput itemInput = ItemArgument.getItem(context, "item");
+        if (itemInput.getItem() == net.minecraft.world.item.Items.AIR) {
+            context.getSource().sendFailure(Component.literal("Cannot create order for Air"));
+            return 0;
+        }
+        int quantity = IntegerArgumentType.getInteger(context, "quantity");
+        BigDecimal pricePerUnit = BigDecimal.valueOf(DoubleArgumentType.getDouble(context, "price"));
+
+        ResourceLocation id = BuiltInRegistries.ITEM.getKey(itemInput.getItem());
+        if (id == null) id = new ResourceLocation("minecraft", itemInput.getItem().toString().toLowerCase().replace(':', '_'));
+        ItemCommodity commodity = new ItemCommodity(id, itemInput.getItem(), BigDecimal.ZERO);
+
+        OfferManager offerManager = Economy.getOfferManager();
+        Offer offer = offerManager.createServerBuyOrder(commodity, quantity, pricePerUnit);
+
+        EconomyConfig config = EconomyConfig.getInstance();
+        String priceStr = offer.getTotalPrice().setScale(2, RoundingMode.HALF_UP).toPlainString();
+        context.getSource().sendSuccess(() ->
+            Component.literal("Server buy order created: " + quantity + "x " +
+                commodity.getDisplayName().getString() + " @ " + config.getCurrencySymbol() +
+                pricePerUnit.setScale(2, RoundingMode.HALF_UP).toPlainString() + " each (total: " +
+                config.getCurrencySymbol() + priceStr + ")"),
+            true
         );
+        return 1;
     }
 
-    private static int createSellOffer(CommandContext<CommandSourceStack> context) {
+    private static int createServerSellOrder(CommandContext<CommandSourceStack> context) {
+        ItemInput itemInput = ItemArgument.getItem(context, "item");
+        if (itemInput.getItem() == net.minecraft.world.item.Items.AIR) {
+            context.getSource().sendFailure(Component.literal("Cannot create order for Air"));
+            return 0;
+        }
+        int quantity = IntegerArgumentType.getInteger(context, "quantity");
+        BigDecimal pricePerUnit = BigDecimal.valueOf(DoubleArgumentType.getDouble(context, "price"));
+
+        ResourceLocation id = BuiltInRegistries.ITEM.getKey(itemInput.getItem());
+        if (id == null) id = new ResourceLocation("minecraft", itemInput.getItem().toString().toLowerCase().replace(':', '_'));
+        ItemCommodity commodity = new ItemCommodity(id, itemInput.getItem(), BigDecimal.ZERO);
+
+        OfferManager offerManager = Economy.getOfferManager();
+        Offer offer = offerManager.createServerSellOrder(commodity, quantity, pricePerUnit);
+
+        EconomyConfig config = EconomyConfig.getInstance();
+        String priceStr = offer.getTotalPrice().setScale(2, RoundingMode.HALF_UP).toPlainString();
+        context.getSource().sendSuccess(() ->
+            Component.literal("Server sell order created: " + quantity + "x " +
+                commodity.getDisplayName().getString() + " @ " + config.getCurrencySymbol() +
+                pricePerUnit.setScale(2, RoundingMode.HALF_UP).toPlainString() + " each (total: " +
+                config.getCurrencySymbol() + priceStr + ")"),
+            true
+        );
+        return 1;
+    }
+
+    private static int createSellOrder(CommandContext<CommandSourceStack> context) {
         if (!(context.getSource().getEntity() instanceof ServerPlayer player)) {
-            context.getSource().sendFailure(Component.literal("Only players can create offers"));
+            context.getSource().sendFailure(Component.literal("Only players can create orders"));
             return 0;
         }
 
         ItemInput itemInput = ItemArgument.getItem(context, "item");
+        if (itemInput.getItem() == net.minecraft.world.item.Items.AIR) {
+            context.getSource().sendFailure(Component.literal("Cannot create order for Air"));
+            return 0;
+        }
         int quantity = IntegerArgumentType.getInteger(context, "quantity");
         BigDecimal pricePerUnit = BigDecimal.valueOf(DoubleArgumentType.getDouble(context, "price"));
         ServerLevel level = context.getSource().getLevel();
 
-        VaultBlockEntity vault = VaultManager.getVault(level, player.getUUID());
-        if (vault == null) {
-            context.getSource().sendFailure(Component.literal("You need a Vault block to sell items. Place one first."));
-            return 0;
-        }
-
-        if (vault.countItem(itemInput.getItem()) < quantity) {
+        if (VaultManager.countItemInVaults(level, player.getUUID(), itemInput.getItem()) < quantity) {
             context.getSource().sendFailure(Component.literal("Not enough " +
-                itemInput.getItem().getDescription().getString() + " in your vault. You have " +
-                vault.countItem(itemInput.getItem())));
+                itemInput.getItem().getDescription().getString() + " in your vault(s). You have " +
+                VaultManager.countItemInVaults(level, player.getUUID(), itemInput.getItem())));
             return 0;
         }
 
         NonNullList<ItemStack> reserved = NonNullList.create();
-        if (!vault.extractItem(itemInput.getItem(), quantity, reserved)) {
-            context.getSource().sendFailure(Component.literal("Failed to reserve items from vault"));
+        if (!VaultManager.extractItemFromVaults(level, player.getUUID(), itemInput.getItem(), quantity, reserved)) {
+            context.getSource().sendFailure(Component.literal("Failed to reserve items from vault(s)"));
             return 0;
         }
 
-        ResourceLocation id = new ResourceLocation("economy:" +
-            itemInput.getItem().toString().toLowerCase().replace(':', '_'));
+        ResourceLocation id = BuiltInRegistries.ITEM.getKey(itemInput.getItem());
+        if (id == null) id = new ResourceLocation("minecraft", itemInput.getItem().toString().toLowerCase().replace(':', '_'));
         ItemCommodity commodity = new ItemCommodity(id, itemInput.getItem(), BigDecimal.ZERO);
 
         OfferManager offerManager = Economy.getOfferManager();
-        Offer offer = offerManager.createSellOffer(player.getUUID(), commodity, quantity, pricePerUnit, reserved);
+        Offer offer = offerManager.createSellOffer(player.getUUID(), commodity, quantity, pricePerUnit, reserved, level);
 
         EconomyConfig config = EconomyConfig.getInstance();
-        String priceStr = offer.getTotalPrice().setScale(2, RoundingMode.HALF_UP).toPlainString();
+        String priceStr = offer != null ? offer.getTotalPrice().setScale(2, RoundingMode.HALF_UP).toPlainString() : pricePerUnit.multiply(BigDecimal.valueOf(quantity)).setScale(2, RoundingMode.HALF_UP).toPlainString();
         context.getSource().sendSuccess(() ->
-            Component.literal("Sell offer created: " + quantity + "x " +
+            Component.literal("Sell order created/matched: " + quantity + "x " +
                 commodity.getDisplayName().getString() + " @ " + config.getCurrencySymbol() +
                 pricePerUnit.setScale(2, RoundingMode.HALF_UP).toPlainString() + " each (total: " +
                 config.getCurrencySymbol() + priceStr + ")"),
@@ -284,39 +395,32 @@ public class EconomyCommands {
         return 1;
     }
 
-    private static void registerBuyCommand(CommandDispatcher<CommandSourceStack> dispatcher, CommandBuildContext buildContext) {
-        dispatcher.register(Commands.literal("buy")
-            .then(Commands.argument("item", ItemArgument.item(buildContext))
-                .then(Commands.argument("quantity", IntegerArgumentType.integer(1, 3456))
-                    .then(Commands.argument("price", DoubleArgumentType.doubleArg(0.01))
-                        .executes(context -> createBuyOffer(context))
-                    )
-                )
-            )
-        );
-    }
-
-    private static int createBuyOffer(CommandContext<CommandSourceStack> context) {
+    private static int createBuyOrder(CommandContext<CommandSourceStack> context) {
         if (!(context.getSource().getEntity() instanceof ServerPlayer player)) {
-            context.getSource().sendFailure(Component.literal("Only players can create offers"));
+            context.getSource().sendFailure(Component.literal("Only players can create orders"));
             return 0;
         }
 
         ItemInput itemInput = ItemArgument.getItem(context, "item");
+        if (itemInput.getItem() == net.minecraft.world.item.Items.AIR) {
+            context.getSource().sendFailure(Component.literal("Cannot create order for Air"));
+            return 0;
+        }
         int quantity = IntegerArgumentType.getInteger(context, "quantity");
         BigDecimal pricePerUnit = BigDecimal.valueOf(DoubleArgumentType.getDouble(context, "price"));
+        ServerLevel level = context.getSource().getLevel();
 
-        ResourceLocation id = new ResourceLocation("economy:" +
-            itemInput.getItem().toString().toLowerCase().replace(':', '_'));
+        ResourceLocation id = BuiltInRegistries.ITEM.getKey(itemInput.getItem());
+        if (id == null) id = new ResourceLocation("minecraft", itemInput.getItem().toString().toLowerCase().replace(':', '_'));
         ItemCommodity commodity = new ItemCommodity(id, itemInput.getItem(), BigDecimal.ZERO);
 
         OfferManager offerManager = Economy.getOfferManager();
-        Offer offer = offerManager.createBuyOffer(player.getUUID(), commodity, quantity, pricePerUnit);
+        Offer offer = offerManager.createBuyOffer(player.getUUID(), commodity, quantity, pricePerUnit, level);
 
         EconomyConfig config = EconomyConfig.getInstance();
-        String priceStr = offer.getTotalPrice().setScale(2, RoundingMode.HALF_UP).toPlainString();
+        String priceStr = offer != null ? offer.getTotalPrice().setScale(2, RoundingMode.HALF_UP).toPlainString() : pricePerUnit.multiply(BigDecimal.valueOf(quantity)).setScale(2, RoundingMode.HALF_UP).toPlainString();
         context.getSource().sendSuccess(() ->
-            Component.literal("Buy offer created: " + quantity + "x " +
+            Component.literal("Buy order created/matched: " + quantity + "x " +
                 commodity.getDisplayName().getString() + " @ " + config.getCurrencySymbol() +
                 pricePerUnit.setScale(2, RoundingMode.HALF_UP).toPlainString() + " each (total: " +
                 config.getCurrencySymbol() + priceStr + ")"),
@@ -325,19 +429,7 @@ public class EconomyCommands {
         return 1;
     }
 
-    private static void registerOffersCommand(CommandDispatcher<CommandSourceStack> dispatcher, CommandBuildContext buildContext) {
-        dispatcher.register(Commands.literal("offers")
-            .executes(context -> listOffers(context, null))
-            .then(Commands.argument("item", ItemArgument.item(buildContext))
-                .executes(context -> {
-                    ItemInput itemInput = ItemArgument.getItem(context, "item");
-                    return listOffers(context, itemInput.getItem());
-                })
-            )
-        );
-    }
-
-    private static int listOffers(CommandContext<CommandSourceStack> context, net.minecraft.world.item.Item filter) {
+    private static int listOrders(CommandContext<CommandSourceStack> context, Item filter, String rootName) {
         OfferManager offerManager = Economy.getOfferManager();
         List<Offer> allOffers = offerManager.getAllOffers();
         EconomyConfig config = EconomyConfig.getInstance();
@@ -351,19 +443,19 @@ public class EconomyCommands {
         }
 
         if (filtered.isEmpty()) {
-            context.getSource().sendSuccess(() -> Component.literal("No active offers."), false);
+            context.getSource().sendSuccess(() -> Component.literal("No active orders."), false);
             return 1;
         }
 
-        context.getSource().sendSuccess(() -> Component.literal("=== Active Offers ==="), false);
+        context.getSource().sendSuccess(() -> Component.literal("=== Active Orders ==="), false);
         for (int i = 0; i < filtered.size(); i++) {
             Offer offer = filtered.get(i);
             ICommodity commodity = offer.getCommodity();
             String typeStr = offer.getType() == IOffer.OfferType.SELL ? "[SELL]" : "[BUY]";
             String priceStr = offer.getPricePerUnit().setScale(2, RoundingMode.HALF_UP).toPlainString();
             String totalStr = offer.getTotalPrice().setScale(2, RoundingMode.HALF_UP).toPlainString();
-            String sellerName = "?";
-            if (context.getSource().getServer() != null) {
+            String sellerName = offer.isServerOrder() ? "SERVER" : "?";
+            if (!offer.isServerOrder() && context.getSource().getServer() != null) {
                 var profile = context.getSource().getServer().getProfileCache().get(offer.getOwner());
                 if (profile.isPresent()) sellerName = profile.get().getName();
             }
@@ -378,150 +470,105 @@ public class EconomyCommands {
             context.getSource().sendSuccess(() ->
                 Component.literal(msg)
                     .withStyle(Style.EMPTY
-                        .withClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, "/acceptoffer " + idx))
+                        .withClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, "/" + rootName + " acceptorder " + idx))
                         .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
-                            Component.literal("Click to accept this offer")))),
+                            Component.literal("Click to accept this order")))),
                 false
             );
         }
         return filtered.size();
     }
 
-    private static void registerMyOffersCommand(CommandDispatcher<CommandSourceStack> dispatcher) {
-        dispatcher.register(Commands.literal("myoffers")
-            .executes(context -> {
-                if (!(context.getSource().getEntity() instanceof ServerPlayer player)) {
-                    context.getSource().sendFailure(Component.literal("Only players can use this command"));
-                    return 0;
-                }
-                OfferManager offerManager = Economy.getOfferManager();
-                List<Offer> myOffers = offerManager.getPlayerOffers(player.getUUID());
-                EconomyConfig config = EconomyConfig.getInstance();
+    private static int listMyOrders(CommandContext<CommandSourceStack> context) {
+        if (!(context.getSource().getEntity() instanceof ServerPlayer player)) {
+            context.getSource().sendFailure(Component.literal("Only players can use this command"));
+            return 0;
+        }
+        OfferManager offerManager = Economy.getOfferManager();
+        List<Offer> myOffers = offerManager.getPlayerOffers(player.getUUID());
+        EconomyConfig config = EconomyConfig.getInstance();
 
-                if (myOffers.isEmpty()) {
-                    context.getSource().sendSuccess(() -> Component.literal("You have no active offers."), false);
-                    return 1;
-                }
+        if (myOffers.isEmpty()) {
+            context.getSource().sendSuccess(() -> Component.literal("You have no active orders."), false);
+            return 1;
+        }
 
-                context.getSource().sendSuccess(() -> Component.literal("=== Your Offers ==="), false);
-                for (int i = 0; i < myOffers.size(); i++) {
-                    Offer offer = myOffers.get(i);
-                    ICommodity commodity = offer.getCommodity();
-                    String typeStr = offer.getType() == IOffer.OfferType.SELL ? "[SELL]" : "[BUY]";
-                    String priceStr = offer.getPricePerUnit().setScale(2, RoundingMode.HALF_UP).toPlainString();
-                    final int idx = i + 1;
+        context.getSource().sendSuccess(() -> Component.literal("=== Your Orders ==="), false);
+        for (int i = 0; i < myOffers.size(); i++) {
+            Offer offer = myOffers.get(i);
+            ICommodity commodity = offer.getCommodity();
+            String typeStr = offer.getType() == IOffer.OfferType.SELL ? "[SELL]" : "[BUY]";
+            String priceStr = offer.getPricePerUnit().setScale(2, RoundingMode.HALF_UP).toPlainString();
+            final int idx = i + 1;
 
-                    context.getSource().sendSuccess(() ->
-                        Component.literal(String.format("  #%d %s %dx %s @ %s%s each",
-                            idx, typeStr, offer.getQuantity(),
-                            commodity.getDisplayName().getString(),
-                            config.getCurrencySymbol(), priceStr)),
-                        false
-                    );
-                }
-                return myOffers.size();
-            })
-        );
+            context.getSource().sendSuccess(() ->
+                Component.literal(String.format("  #%d %s %dx %s @ %s%s each",
+                    idx, typeStr, offer.getQuantity(),
+                    commodity.getDisplayName().getString(),
+                    config.getCurrencySymbol(), priceStr)),
+                false
+            );
+        }
+        return myOffers.size();
     }
 
-    private static void registerCancelOfferCommand(CommandDispatcher<CommandSourceStack> dispatcher) {
-        dispatcher.register(Commands.literal("canceloffer")
-            .then(Commands.argument("index", IntegerArgumentType.integer(1))
-                .executes(context -> {
-                    if (!(context.getSource().getEntity() instanceof ServerPlayer player)) {
-                        context.getSource().sendFailure(Component.literal("Only players can use this command"));
-                        return 0;
-                    }
-                    int index = IntegerArgumentType.getInteger(context, "index") - 1;
-                    OfferManager offerManager = Economy.getOfferManager();
-                    var optOffer = offerManager.getPlayerOfferByIndex(player.getUUID(), index);
+    private static int cancelOrder(CommandContext<CommandSourceStack> context) {
+        if (!(context.getSource().getEntity() instanceof ServerPlayer player)) {
+            context.getSource().sendFailure(Component.literal("Only players can use this command"));
+            return 0;
+        }
+        int index = IntegerArgumentType.getInteger(context, "index") - 1;
+        OfferManager offerManager = Economy.getOfferManager();
+        List<Offer> myOffers = offerManager.getPlayerOffers(player.getUUID());
 
-                    if (optOffer.isEmpty()) {
-                        context.getSource().sendFailure(Component.literal("Invalid offer index. Use /myoffers to see your offers."));
-                        return 0;
-                    }
+        if (index < 0 || index >= myOffers.size()) {
+            context.getSource().sendFailure(Component.literal("Invalid order index. Use /economy myorders to list your orders."));
+            return 0;
+        }
 
-                    Offer offer = optOffer.get();
-                    ICommodity commodity = offer.getCommodity();
-
-                    if (offer.cancel()) {
-                        if (offer.getType() == IOffer.OfferType.SELL && !offer.getReservedItems().isEmpty()) {
-                            ServerLevel level = context.getSource().getLevel();
-                            VaultBlockEntity vault = VaultManager.getVault(level, player.getUUID());
-                            if (vault != null) {
-                                vault.insertItemStacks(offer.getReservedItems());
-                            }
-                        }
-                        offerManager.cancelOffer(offer.getOfferId(), player.getUUID());
-
-                        context.getSource().sendSuccess(() ->
-                            Component.literal("Cancelled offer #" + (index + 1) + " (" +
-                                commodity.getDisplayName().getString() + ")"),
-                            false
-                        );
-                    } else {
-                        context.getSource().sendFailure(Component.literal("Could not cancel offer."));
-                    }
-                    return 1;
-                })
-            )
-        );
+        Offer offer = myOffers.get(index);
+        if (offerManager.cancelOffer(offer.getOfferId(), player.getUUID())) {
+            context.getSource().sendSuccess(() ->
+                Component.literal("Cancelled order #" + (index + 1) + " (" +
+                    offer.getCommodity().getDisplayName().getString() + ")"),
+                false
+            );
+            return 1;
+        } else {
+            context.getSource().sendFailure(Component.literal("Failed to cancel order."));
+            return 0;
+        }
     }
 
-    private static void registerAcceptOfferCommand(CommandDispatcher<CommandSourceStack> dispatcher, CommandBuildContext buildContext) {
-        dispatcher.register(Commands.literal("acceptoffer")
-            .then(Commands.argument("index", IntegerArgumentType.integer(1))
-                .executes(context -> {
-                    if (!(context.getSource().getEntity() instanceof ServerPlayer player)) {
-                        context.getSource().sendFailure(Component.literal("Only players can use this command"));
-                        return 0;
-                    }
-                    int index = IntegerArgumentType.getInteger(context, "index") - 1;
-                    OfferManager offerManager = Economy.getOfferManager();
-                    ServerLevel level = context.getSource().getLevel();
-                    EconomyConfig config = EconomyConfig.getInstance();
+    private static int acceptOrder(CommandContext<CommandSourceStack> context) {
+        if (!(context.getSource().getEntity() instanceof ServerPlayer player)) {
+            context.getSource().sendFailure(Component.literal("Only players can accept orders"));
+            return 0;
+        }
+        int index = IntegerArgumentType.getInteger(context, "index") - 1;
+        OfferManager offerManager = Economy.getOfferManager();
+        List<Offer> allOffers = offerManager.getAllOffers();
 
-                    var optOffer = offerManager.getGlobalOfferByIndex(index);
-                    if (optOffer.isEmpty()) {
-                        context.getSource().sendFailure(Component.literal("Invalid offer index. Use /offers to see available offers."));
-                        return 0;
-                    }
+        if (index < 0 || index >= allOffers.size()) {
+            context.getSource().sendFailure(Component.literal("Invalid order index. Use /economy orders to list active orders."));
+            return 0;
+        }
 
-                    Offer offer = optOffer.get();
-                    if (offer.getOwner().equals(player.getUUID())) {
-                        context.getSource().sendFailure(Component.literal("You cannot accept your own offer."));
-                        return 0;
-                    }
+        Offer offer = allOffers.get(index);
+        ServerLevel level = player.serverLevel();
+        IOffer.TransactionResult result = offer.execute(player.getUUID(), level);
 
-                    IOffer.OfferType type = offer.getType();
-                    ICommodity commodity = offer.getCommodity();
-
-                    IOffer.TransactionResult result = offer.execute(player.getUUID(), level);
-                    if (result.success) {
-                        offerManager.cleanupOffers();
-
-                        String typeStr = type == IOffer.OfferType.SELL ? "bought" : "sold";
-                        String priceStr = offer.getTotalPrice().setScale(2, RoundingMode.HALF_UP).toPlainString();
-                        context.getSource().sendSuccess(() ->
-                            Component.literal("Successfully " + typeStr + " " + offer.getQuantity() + "x " +
-                                commodity.getDisplayName().getString() + " for " +
-                                config.getCurrencySymbol() + priceStr),
-                            false
-                        );
-
-                        ServerPlayer ownerPlayer = level.getServer().getPlayerList().getPlayer(offer.getOwner());
-                        if (ownerPlayer != null) {
-                            String theirTypeStr = type == IOffer.OfferType.SELL ? "sold" : "bought";
-                            ownerPlayer.sendSystemMessage(Component.literal("Your offer was " + theirTypeStr + " by " +
-                                player.getName().getString() + ": " + offer.getQuantity() + "x " +
-                                commodity.getDisplayName().getString()));
-                        }
-                    } else {
-                        context.getSource().sendFailure(Component.literal("Trade failed: " + result.message));
-                    }
-                    return result.success ? 1 : 0;
-                })
-            )
-        );
+        if (result.success) {
+            EconomyConfig config = EconomyConfig.getInstance();
+            context.getSource().sendSuccess(() ->
+                Component.literal("Transaction complete! Transferred " +
+                    config.getCurrencySymbol() + result.amountTransferred.setScale(2, RoundingMode.HALF_UP).toPlainString()),
+                false
+            );
+            return 1;
+        } else {
+            context.getSource().sendFailure(Component.literal("Transaction failed: " + result.message));
+            return 0;
+        }
     }
 }

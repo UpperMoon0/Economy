@@ -1,7 +1,10 @@
 {
   "variants": {
-    "": {
-      "model": "economy:block/market"
-    }
+    "facing=down":  { "model": "economy:block/market", "x": 90 },
+    "facing=up":    { "model": "economy:block/market", "x": 270 },
+    "facing=north": { "model": "economy:block/market" },
+    "facing=south": { "model": "economy:block/market", "y": 180 },
+    "facing=west":  { "model": "economy:block/market", "y": 270 },
+    "facing=east":  { "model": "economy:block/market", "y": 90 }
   }
 }

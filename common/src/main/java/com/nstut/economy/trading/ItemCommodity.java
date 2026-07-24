@@ -2,6 +2,7 @@ package com.nstut.economy.trading;
 
 import com.nstut.economy.api.ICommodity;
 import net.minecraft.core.NonNullList;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.Container;
@@ -11,7 +12,6 @@ import net.minecraft.world.item.ItemStack;
 import java.math.BigDecimal;
 
 public class ItemCommodity implements ICommodity {
-
     private final ResourceLocation id;
     private final Item item;
     private final BigDecimal basePrice;
@@ -132,8 +132,22 @@ public class ItemCommodity implements ICommodity {
     }
 
     public static ItemCommodity fromItemStack(ItemStack stack, BigDecimal basePrice) {
-        ResourceLocation id = new ResourceLocation("economy:" +
-            stack.getItem().toString().toLowerCase().replace(':', '_'));
+        ResourceLocation id = BuiltInRegistries.ITEM.getKey(stack.getItem());
+        if (id == null) {
+            id = new ResourceLocation("minecraft", stack.getItem().toString().toLowerCase().replace(':', '_'));
+        }
         return new ItemCommodity(id, stack.getItem(), basePrice);
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (!(o instanceof ICommodity that)) return false;
+        return id != null && id.equals(that.getId());
+    }
+
+    @Override
+    public int hashCode() {
+        return id != null ? id.hashCode() : 0;
     }
 }

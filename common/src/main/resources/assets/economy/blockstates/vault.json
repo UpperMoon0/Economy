@@ -1,7 +1,10 @@
 {
   "variants": {
-    "": {
-      "model": "economy:block/vault"
-    }
+    "facing=down":  { "model": "economy:block/vault", "x": 90 },
+    "facing=up":    { "model": "economy:block/vault", "x": 270 },
+    "facing=north": { "model": "economy:block/vault" },
+    "facing=south": { "model": "economy:block/vault", "y": 180 },
+    "facing=west":  { "model": "economy:block/vault", "y": 270 },
+    "facing=east":  { "model": "economy:block/vault", "y": 90 }
   }
 }

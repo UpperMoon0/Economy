@@ -7,7 +7,11 @@ import com.nstut.economy.api.IOffer;
 import com.nstut.economy.blocks.VaultBlockEntity;
 import com.nstut.economy.blocks.VaultManager;
 import com.nstut.economy.core.TransactionContext;
+import com.nstut.economy.data.EconomyOfferData;
+import com.nstut.economy.data.TradeLedger;
 import net.minecraft.core.NonNullList;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -27,6 +31,7 @@ public class Offer implements IOffer {
     private final Instant createdAt;
     private final Instant expiresAt;
     private boolean cancelled;
+    private boolean serverOrder;
     private final NonNullList<ItemStack> reservedItems;
 
     public Offer(UUID owner, ICommodity commodity, int quantity,
@@ -47,6 +52,50 @@ public class Offer implements IOffer {
         this.expiresAt = expiresAt;
         this.cancelled = false;
         this.reservedItems = reservedItems;
+    }
+
+    public static Offer fromSnapshot(EconomyOfferData.OfferSnapshot snap) {
+        ResourceLocation rl = new ResourceLocation(snap.itemId);
+        Item item = BuiltInRegistries.ITEM.get(rl);
+        ItemCommodity commodity = new ItemCommodity(rl, item, BigDecimal.ZERO);
+        Instant expires = snap.hasExpiry ? Instant.ofEpochMilli(snap.expiresAt) : null;
+        Offer offer = new Offer(snap.owner, commodity, snap.quantity,
+            new BigDecimal(snap.pricePerUnit),
+            snap.type.equals("SELL") ? OfferType.SELL : OfferType.BUY,
+            expires, snap.reservedItems);
+        setField(offer, "offerId", snap.offerId);
+        setField(offer, "createdAt", Instant.ofEpochMilli(snap.createdAt));
+        if (snap.isServerOrder) {
+            offer.serverOrder = true;
+        }
+        return offer;
+    }
+
+    private static void setField(Object target, String fieldName, Object value) {
+        try {
+            java.lang.reflect.Field f = Offer.class.getDeclaredField(fieldName);
+            f.setAccessible(true);
+            f.set(target, value);
+        } catch (Exception ignored) {
+        }
+    }
+
+    public EconomyOfferData.OfferSnapshot toSnapshot() {
+        return new EconomyOfferData.OfferSnapshot(
+            offerId, owner, commodity.getId().toString(),
+            quantity, pricePerUnit.toPlainString(),
+            type.name(), createdAt.toEpochMilli(),
+            expiresAt != null ? expiresAt.toEpochMilli() : 0,
+            expiresAt != null, reservedItems, serverOrder
+        );
+    }
+
+    public boolean isServerOrder() {
+        return serverOrder;
+    }
+
+    public void setServerOrder(boolean serverOrder) {
+        this.serverOrder = serverOrder;
     }
 
     @Override
@@ -97,6 +146,9 @@ public class Offer implements IOffer {
         if (expiresAt != null && Instant.now().isAfter(expiresAt)) {
             return false;
         }
+        if (commodity instanceof ItemCommodity ic && ic.getItem() == net.minecraft.world.item.Items.AIR) {
+            return false;
+        }
         return true;
     }
 
@@ -115,6 +167,7 @@ public class Offer implements IOffer {
         if (type == OfferType.SELL) {
             return traderAccount.hasSufficientFunds(getTotalPrice());
         } else {
+            if (serverOrder) return true;
             IBankAccount ownerAccount = accounts.getOrCreatePlayerAccount(owner);
             return ownerAccount.hasSufficientFunds(getTotalPrice());
         }
@@ -155,13 +208,12 @@ public class Offer implements IOffer {
         }
 
         if (level != null && item != null && !reservedItems.isEmpty()) {
-            VaultBlockEntity buyerVault = VaultManager.getVault(level, buyer);
-            if (buyerVault == null) {
+            if (!VaultManager.hasVault(buyer)) {
                 sellerAccount.transferTo(buyerAccount, totalPrice,
                         TransactionContext.transfer("Refund - buyer has no vault", buyer));
                 return TransactionResult.failure("Buyer does not have a Vault block to receive items");
             }
-            if (!buyerVault.insertItemStacks(copyStacks(reservedItems))) {
+            if (!VaultManager.insertItemStacksToVaults(level, buyer, copyStacks(reservedItems))) {
                 sellerAccount.transferTo(buyerAccount, totalPrice,
                         TransactionContext.transfer("Refund - buyer vault full", buyer));
                 return TransactionResult.failure("Buyer's vault is full");
@@ -169,32 +221,33 @@ public class Offer implements IOffer {
         }
 
         this.quantity = 0;
+        TradeLedger.recordTrade(commodity.getId().toString(), pricePerUnit, quantity, buyer, owner);
         return TransactionResult.success("Purchase successful", totalPrice, quantity);
     }
 
     private TransactionResult executeBuy(UUID seller, IAccountManager accounts, Item item, ServerLevel level) {
-        IBankAccount buyerAccount = accounts.getOrCreatePlayerAccount(owner);
+        IBankAccount buyerAccount = accounts.getServerAccount();
         IBankAccount sellerAccount = accounts.getOrCreatePlayerAccount(seller);
         BigDecimal totalPrice = getTotalPrice();
 
         if (level != null && item != null) {
-            VaultBlockEntity sellerVault = VaultManager.getVault(level, seller);
-            if (sellerVault == null) {
+            if (!VaultManager.hasVault(seller)) {
                 return TransactionResult.failure("You do not have a Vault block with the required items");
             }
-            if (sellerVault.countItem(item) < quantity) {
-                return TransactionResult.failure("Not enough items in your vault");
+            if (VaultManager.countItemInVaults(level, seller, item) < quantity) {
+                return TransactionResult.failure("Not enough items in your vault(s)");
             }
 
             NonNullList<ItemStack> extracted = NonNullList.create();
-            if (!sellerVault.extractItem(item, quantity, extracted)) {
-                return TransactionResult.failure("Failed to extract items from vault");
+            if (!VaultManager.extractItemFromVaults(level, seller, item, quantity, extracted)) {
+                return TransactionResult.failure("Failed to extract items from vault(s)");
             }
 
-            VaultBlockEntity buyerVault = VaultManager.getVault(level, owner);
-            if (buyerVault == null || !buyerVault.insertItemStacks(copyStacks(extracted))) {
-                sellerVault.insertItemStacks(extracted);
-                return TransactionResult.failure("Buyer's vault is full or missing");
+            if (!serverOrder) {
+                if (!VaultManager.hasVault(owner) || !VaultManager.insertItemStacksToVaults(level, owner, copyStacks(extracted))) {
+                    VaultManager.insertItemStacksToVaults(level, seller, extracted);
+                    return TransactionResult.failure("Buyer's vault is full or missing");
+                }
             }
         }
 
@@ -204,7 +257,111 @@ public class Offer implements IOffer {
         }
 
         this.quantity = 0;
+        TradeLedger.recordTrade(commodity.getId().toString(), pricePerUnit, quantity, owner, seller);
         return TransactionResult.success("Sale successful", totalPrice, quantity);
+    }
+
+    public TransactionResult executePartial(UUID trader, int amountToTrade, ServerLevel level) {
+        if (!isValid() || owner.equals(trader) || amountToTrade <= 0) {
+            return TransactionResult.failure("Invalid partial execution request");
+        }
+        int tradeQty = Math.min(this.quantity, amountToTrade);
+        if (tradeQty <= 0) return TransactionResult.failure("Nothing to trade");
+
+        IAccountManager accounts = IAccountManager.getInstance();
+        Item item = (commodity instanceof ItemCommodity ic) ? ic.getItem() : null;
+
+        if (type == OfferType.SELL) {
+            boolean isServerBuyer = OfferManager.SERVER_ID.equals(trader);
+            IBankAccount sellerAccount = accounts.getOrCreatePlayerAccount(owner);
+            IBankAccount buyerAccount = isServerBuyer ? accounts.getServerAccount() : accounts.getOrCreatePlayerAccount(trader);
+            BigDecimal totalPrice = pricePerUnit.multiply(BigDecimal.valueOf(tradeQty));
+
+            if (!isServerBuyer && !buyerAccount.hasSufficientFunds(totalPrice)) {
+                return TransactionResult.failure("Buyer has insufficient funds");
+            }
+            if (!buyerAccount.transferTo(sellerAccount, totalPrice,
+                    TransactionContext.transfer("Purchase of " + commodity.getDisplayName().getString(), trader))) {
+                return TransactionResult.failure("Payment failed");
+            }
+
+            if (!isServerBuyer && level != null && item != null && !reservedItems.isEmpty()) {
+                if (!VaultManager.hasVault(trader)) {
+                    sellerAccount.transferTo(buyerAccount, totalPrice,
+                            TransactionContext.transfer("Refund - buyer has no vault", trader));
+                    return TransactionResult.failure("Buyer has no Vault block");
+                }
+                NonNullList<ItemStack> itemsToDeliver = NonNullList.create();
+                int itemsNeeded = tradeQty;
+                var it = reservedItems.iterator();
+                while (it.hasNext() && itemsNeeded > 0) {
+                    ItemStack stack = it.next();
+                    if (stack.isEmpty()) continue;
+                    int take = Math.min(itemsNeeded, stack.getCount());
+                    ItemStack split = stack.split(take);
+                    itemsToDeliver.add(split);
+                    itemsNeeded -= take;
+                    if (stack.isEmpty()) it.remove();
+                }
+                if (!VaultManager.insertItemStacksToVaults(level, trader, itemsToDeliver)) {
+                    sellerAccount.transferTo(buyerAccount, totalPrice,
+                            TransactionContext.transfer("Refund - buyer vault full", trader));
+                    for (ItemStack s : itemsToDeliver) reservedItems.add(s);
+                    return TransactionResult.failure("Buyer's vault is full");
+                }
+            } else if (isServerBuyer && !reservedItems.isEmpty()) {
+                int itemsNeeded = tradeQty;
+                var it = reservedItems.iterator();
+                while (it.hasNext() && itemsNeeded > 0) {
+                    ItemStack stack = it.next();
+                    if (stack.isEmpty()) continue;
+                    int take = Math.min(itemsNeeded, stack.getCount());
+                    stack.shrink(take);
+                    itemsNeeded -= take;
+                    if (stack.isEmpty()) it.remove();
+                }
+            }
+
+            this.quantity -= tradeQty;
+            TradeLedger.recordTrade(commodity.getId().toString(), pricePerUnit, tradeQty, trader, owner);
+            return TransactionResult.success("Purchase successful", totalPrice, tradeQty);
+        } else {
+            IBankAccount buyerAccount = serverOrder ? accounts.getServerAccount() : accounts.getOrCreatePlayerAccount(owner);
+            IBankAccount sellerAccount = accounts.getOrCreatePlayerAccount(trader);
+            BigDecimal totalPrice = pricePerUnit.multiply(BigDecimal.valueOf(tradeQty));
+
+            if (!serverOrder && !buyerAccount.hasSufficientFunds(totalPrice)) {
+                return TransactionResult.failure("Buyer has insufficient funds");
+            }
+
+            if (level != null && item != null) {
+                if (!VaultManager.hasVault(trader)) {
+                    return TransactionResult.failure("Seller has no Vault block");
+                }
+                if (VaultManager.countItemInVaults(level, trader, item) < tradeQty) {
+                    return TransactionResult.failure("Not enough items in seller vault(s)");
+                }
+                NonNullList<ItemStack> extracted = NonNullList.create();
+                if (!VaultManager.extractItemFromVaults(level, trader, item, tradeQty, extracted)) {
+                    return TransactionResult.failure("Failed to extract items from seller vault(s)");
+                }
+                if (!serverOrder) {
+                    if (!VaultManager.hasVault(owner) || !VaultManager.insertItemStacksToVaults(level, owner, copyStacks(extracted))) {
+                        VaultManager.insertItemStacksToVaults(level, trader, extracted);
+                        return TransactionResult.failure("Buyer's vault is full or missing");
+                    }
+                }
+            }
+
+            if (!buyerAccount.transferTo(sellerAccount, totalPrice,
+                    TransactionContext.transfer("Sale of " + commodity.getDisplayName().getString(), owner))) {
+                return TransactionResult.failure("Payment failed");
+            }
+
+            this.quantity -= tradeQty;
+            TradeLedger.recordTrade(commodity.getId().toString(), pricePerUnit, tradeQty, owner, trader);
+            return TransactionResult.success("Sale successful", totalPrice, tradeQty);
+        }
     }
 
     private static NonNullList<ItemStack> copyStacks(NonNullList<ItemStack> original) {
