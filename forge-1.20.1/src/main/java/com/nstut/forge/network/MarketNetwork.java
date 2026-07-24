@@ -343,10 +343,12 @@ public class MarketNetwork {
         java.util.Map<String, BigDecimal> bestAsks = new java.util.LinkedHashMap<>();
         java.util.Map<String, Integer> counts = new java.util.LinkedHashMap<>();
 
+        UUID playerId = player.getUUID();
         for (Offer offer : offerManager.getAllOffers()) {
             if (!(offer.getCommodity() instanceof ItemCommodity ic)) continue;
             String itemId = ic.getItem().builtInRegistryHolder().key().location().toString();
             displayNames.putIfAbsent(itemId, ic.getDisplayName().getString());
+            counts.merge(itemId, 1, Integer::sum);
 
             BigDecimal price = offer.getPricePerUnit();
             if (offer.getType() == IOffer.OfferType.SELL) {
@@ -356,7 +358,6 @@ public class MarketNetwork {
                 BigDecimal cur = bestBids.get(itemId);
                 if (cur == null || price.compareTo(cur) > 0) bestBids.put(itemId, price);
             }
-            counts.merge(itemId, 1, Integer::sum);
         }
 
         List<ItemCardData> cards = new ArrayList<>();

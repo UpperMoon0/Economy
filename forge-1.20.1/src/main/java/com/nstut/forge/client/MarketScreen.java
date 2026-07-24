@@ -400,22 +400,14 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
     }
 
     private void openCreateOrderWithPrefill(boolean isSell, String rawPrice, int qty) {
-        com.nstut.Economy.LOGGER.info("[MarketScreen] openCreateOrderWithPrefill isSell={}, rawPrice='{}', qty={}", isSell, rawPrice, qty);
-        com.nstut.Economy.LOGGER.info("[MarketScreen] openCreateOrderWithPrefill selectedItemId='{}', cachedDetail={}", selectedItemId, cachedDetail != null ? cachedDetail.itemId : "null");
-        com.nstut.Economy.LOGGER.info("[MarketScreen] openCreateOrderWithPrefill itemIdField={}, priceField={}, qtyField={}", itemIdField, priceField, qtyField);
         createOrderSourceMode = 1;
         createSellMode = isSell;
         String targetItemId = selectedItemId;
         if ((targetItemId == null || targetItemId.isEmpty()) && cachedDetail != null) {
             targetItemId = cachedDetail.itemId;
         }
-        com.nstut.Economy.LOGGER.info("[MarketScreen] openCreateOrderWithPrefill targetItemId='{}'", targetItemId);
-        if (itemIdField != null) {
-            itemIdField.setValue(targetItemId != null ? targetItemId : "");
-            com.nstut.Economy.LOGGER.info("[MarketScreen] openCreateOrderWithPrefill after setValue itemIdField.getValue()='{}'", itemIdField.getValue());
-        } else {
-            com.nstut.Economy.LOGGER.warn("[MarketScreen] openCreateOrderWithPrefill itemIdField is NULL!");
-        }
+        if (itemIdField != null) itemIdField.setValue(targetItemId != null ? targetItemId : "");
+
         String cleanPrice = rawPrice != null ? rawPrice.replaceAll("[^0-9.]", "").trim() : "";
         try {
             if (!cleanPrice.isEmpty()) {
@@ -423,21 +415,17 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
                 cleanPrice = String.format(java.util.Locale.ROOT, "%.2f", p);
             }
         } catch (Exception ignored) {}
-        com.nstut.Economy.LOGGER.info("[MarketScreen] openCreateOrderWithPrefill cleanPrice='{}'", cleanPrice);
-        if (priceField != null) {
-            priceField.setValue(cleanPrice);
-            com.nstut.Economy.LOGGER.info("[MarketScreen] openCreateOrderWithPrefill after setValue priceField.getValue()='{}'", priceField.getValue());
-        } else {
-            com.nstut.Economy.LOGGER.warn("[MarketScreen] openCreateOrderWithPrefill priceField is NULL!");
+        if (priceField != null) priceField.setValue(cleanPrice);
+
+        // For sell orders: prefill min(orderQty, vaultCount) so player can't over-commit
+        int prefillQty = qty;
+        if (isSell && cachedDetail != null && cachedDetail.vaultCount >= 0) {
+            prefillQty = Math.min(qty, cachedDetail.vaultCount);
         }
-        if (qtyField != null) {
-            qtyField.setValue(qty > 0 ? String.valueOf(qty) : "");
-            com.nstut.Economy.LOGGER.info("[MarketScreen] openCreateOrderWithPrefill after setValue qtyField.getValue()='{}'", qtyField.getValue());
-        } else {
-            com.nstut.Economy.LOGGER.warn("[MarketScreen] openCreateOrderWithPrefill qtyField is NULL!");
-        }
+        if (qtyField != null) qtyField.setValue(prefillQty > 0 ? String.valueOf(prefillQty) : "");
         switchView(2);
     }
+
 
     private String pendingTooltip = null;
 
@@ -512,6 +500,7 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
 
     private TextWidget createOfferTitleLabel;
     private ButtonWidget switchModeBtn;
+    private TextWidget createOfferErrorLabel;
 
     private UIComponent buildCreateOffer(Font font) {
         VStack v = new VStack().gap(6);
@@ -539,6 +528,9 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
             updateCreateOfferLabels();
         });
         v.addChild(switchModeBtn);
+        createOfferErrorLabel = TextWidget.label("", RED);
+        createOfferErrorLabel.setVisible(false);
+        v.addChild(createOfferErrorLabel);
         return v;
     }
 
@@ -552,22 +544,42 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
     }
 
     private void submitOffer() {
+        if (createOfferErrorLabel != null) createOfferErrorLabel.setVisible(false);
         String itemId = itemIdField != null && !itemIdField.getValue().trim().isEmpty() ? itemIdField.getValue().trim() : selectedItemId;
         if ((itemId == null || itemId.isEmpty()) && cachedDetail != null) {
             itemId = cachedDetail.itemId;
         }
-        if (itemId == null || itemId.isEmpty()) return;
+        if (itemId == null || itemId.isEmpty()) {
+            showCreateError("Item ID is required.");
+            return;
+        }
         try {
             int qty = Integer.parseInt(qtyField.getValue().trim());
             String price = priceField.getValue().trim();
-            if (qty > 0 && !price.isEmpty()) {
-                MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.CreateOfferPacket(itemId, qty, price, createSellMode));
-                selectedItemId = itemId;
-                cachedDetail = null;
-                switchView(1);
-                MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestItemDetailPacket(itemId));
+            if (qty <= 0) { showCreateError("Quantity must be greater than 0."); return; }
+            if (price.isEmpty()) { showCreateError("Price is required."); return; }
+            // Vault check for sell orders
+            if (createSellMode && cachedDetail != null && cachedDetail.vaultCount >= 0) {
+                if (qty > cachedDetail.vaultCount) {
+                    showCreateError("Not enough in vault. You have " + cachedDetail.vaultCount + ".");
+                    return;
+                }
             }
-        } catch (NumberFormatException ignored) {}
+            MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.CreateOfferPacket(itemId, qty, price, createSellMode));
+            selectedItemId = itemId;
+            cachedDetail = null;
+            switchView(1);
+            MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestItemDetailPacket(itemId));
+        } catch (NumberFormatException ignored) {
+            showCreateError("Quantity must be a valid number.");
+        }
+    }
+
+    private void showCreateError(String msg) {
+        if (createOfferErrorLabel != null) {
+            createOfferErrorLabel.setText(msg);
+            createOfferErrorLabel.setVisible(true);
+        }
     }
 
     private void switchView(int mode) {
