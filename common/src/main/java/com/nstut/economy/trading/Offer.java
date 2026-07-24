@@ -207,22 +207,26 @@ public class Offer implements IOffer {
             return TransactionResult.failure("Payment failed");
         }
 
-        if (level != null && item != null && !reservedItems.isEmpty()) {
-            if (!VaultManager.hasVault(buyer)) {
-                sellerAccount.transferTo(buyerAccount, totalPrice,
-                        TransactionContext.transfer("Refund - buyer has no vault", buyer));
-                return TransactionResult.failure("Buyer does not have a Vault block to receive items");
-            }
-            if (!VaultManager.insertItemStacksToVaults(level, buyer, copyStacks(reservedItems))) {
-                sellerAccount.transferTo(buyerAccount, totalPrice,
-                        TransactionContext.transfer("Refund - buyer vault full", buyer));
-                return TransactionResult.failure("Buyer's vault is full");
+        if (level != null && item != null) {
+            NonNullList<ItemStack> deliverItems = getItemsToDeliver(item, quantity);
+            if (!deliverItems.isEmpty()) {
+                if (!VaultManager.hasVault(buyer)) {
+                    sellerAccount.transferTo(buyerAccount, totalPrice,
+                            TransactionContext.transfer("Refund - buyer has no vault", buyer));
+                    return TransactionResult.failure("Buyer does not have a Vault block to receive items");
+                }
+                if (!VaultManager.insertItemStacksToVaults(level, buyer, deliverItems)) {
+                    sellerAccount.transferTo(buyerAccount, totalPrice,
+                            TransactionContext.transfer("Refund - buyer vault full", buyer));
+                    return TransactionResult.failure("Buyer's vault is full");
+                }
             }
         }
 
+        int tradedQty = this.quantity;
         this.quantity = 0;
-        TradeLedger.recordTrade(commodity.getId().toString(), pricePerUnit, quantity, buyer, owner);
-        return TransactionResult.success("Purchase successful", totalPrice, quantity);
+        TradeLedger.recordTrade(commodity.getId().toString(), pricePerUnit, tradedQty, buyer, owner);
+        return TransactionResult.success("Purchase successful", totalPrice, tradedQty);
     }
 
     private TransactionResult executeBuy(UUID seller, IAccountManager accounts, Item item, ServerLevel level) {
@@ -256,9 +260,10 @@ public class Offer implements IOffer {
             return TransactionResult.failure("Payment failed");
         }
 
+        int tradedQty = this.quantity;
         this.quantity = 0;
-        TradeLedger.recordTrade(commodity.getId().toString(), pricePerUnit, quantity, owner, seller);
-        return TransactionResult.success("Sale successful", totalPrice, quantity);
+        TradeLedger.recordTrade(commodity.getId().toString(), pricePerUnit, tradedQty, owner, seller);
+        return TransactionResult.success("Sale successful", totalPrice, tradedQty);
     }
 
     public TransactionResult executePartial(UUID trader, int amountToTrade, ServerLevel level) {
@@ -285,29 +290,40 @@ public class Offer implements IOffer {
                 return TransactionResult.failure("Payment failed");
             }
 
-            if (!isServerBuyer && level != null && item != null && !reservedItems.isEmpty()) {
-                if (!VaultManager.hasVault(trader)) {
-                    sellerAccount.transferTo(buyerAccount, totalPrice,
-                            TransactionContext.transfer("Refund - buyer has no vault", trader));
-                    return TransactionResult.failure("Buyer has no Vault block");
-                }
+            if (!isServerBuyer && level != null && item != null) {
                 NonNullList<ItemStack> itemsToDeliver = NonNullList.create();
-                int itemsNeeded = tradeQty;
-                var it = reservedItems.iterator();
-                while (it.hasNext() && itemsNeeded > 0) {
-                    ItemStack stack = it.next();
-                    if (stack.isEmpty()) continue;
-                    int take = Math.min(itemsNeeded, stack.getCount());
-                    ItemStack split = stack.split(take);
-                    itemsToDeliver.add(split);
-                    itemsNeeded -= take;
-                    if (stack.isEmpty()) it.remove();
+                if (!reservedItems.isEmpty()) {
+                    int itemsNeeded = tradeQty;
+                    var it = reservedItems.iterator();
+                    while (it.hasNext() && itemsNeeded > 0) {
+                        ItemStack stack = it.next();
+                        if (stack.isEmpty()) continue;
+                        int take = Math.min(itemsNeeded, stack.getCount());
+                        ItemStack split = stack.split(take);
+                        itemsToDeliver.add(split);
+                        itemsNeeded -= take;
+                        if (stack.isEmpty()) it.remove();
+                    }
+                } else if (serverOrder) {
+                    itemsToDeliver = generateItemStacks(item, tradeQty);
                 }
-                if (!VaultManager.insertItemStacksToVaults(level, trader, itemsToDeliver)) {
-                    sellerAccount.transferTo(buyerAccount, totalPrice,
-                            TransactionContext.transfer("Refund - buyer vault full", trader));
-                    for (ItemStack s : itemsToDeliver) reservedItems.add(s);
-                    return TransactionResult.failure("Buyer's vault is full");
+                if (!itemsToDeliver.isEmpty()) {
+                    if (!VaultManager.hasVault(trader)) {
+                        sellerAccount.transferTo(buyerAccount, totalPrice,
+                                TransactionContext.transfer("Refund - buyer has no vault", trader));
+                        if (!reservedItems.isEmpty() && !itemsToDeliver.isEmpty()) {
+                            for (ItemStack s : itemsToDeliver) reservedItems.add(s);
+                        }
+                        return TransactionResult.failure("Buyer has no Vault block");
+                    }
+                    if (!VaultManager.insertItemStacksToVaults(level, trader, itemsToDeliver)) {
+                        sellerAccount.transferTo(buyerAccount, totalPrice,
+                                TransactionContext.transfer("Refund - buyer vault full", trader));
+                        if (!reservedItems.isEmpty()) {
+                            for (ItemStack s : itemsToDeliver) reservedItems.add(s);
+                        }
+                        return TransactionResult.failure("Buyer's vault is full");
+                    }
                 }
             } else if (isServerBuyer && !reservedItems.isEmpty()) {
                 int itemsNeeded = tradeQty;
@@ -370,6 +386,28 @@ public class Offer implements IOffer {
             copy.add(stack.copy());
         }
         return copy;
+    }
+
+    private NonNullList<ItemStack> getItemsToDeliver(Item item, int count) {
+        if (!reservedItems.isEmpty()) {
+            return copyStacks(reservedItems);
+        }
+        if (serverOrder) {
+            return generateItemStacks(item, count);
+        }
+        return NonNullList.create();
+    }
+
+    private static NonNullList<ItemStack> generateItemStacks(Item item, int count) {
+        NonNullList<ItemStack> stacks = NonNullList.create();
+        int maxStack = item.getMaxStackSize();
+        int remaining = count;
+        while (remaining > 0) {
+            int stackSize = Math.min(remaining, maxStack);
+            stacks.add(new ItemStack(item, stackSize));
+            remaining -= stackSize;
+        }
+        return stacks;
     }
 
     public NonNullList<ItemStack> getReservedItems() {

@@ -41,7 +41,7 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
 
     private static List<MarketNetwork.ItemCardData> cachedCards = new ArrayList<>();
     private static String cachedBalance = "0.00";
-    private static boolean cachedHasVault;
+    private static int cachedVaultCount;
     private static MarketNetwork.SyncItemDetailPacket cachedDetail;
     private static final Map<String, ItemStack> itemIconCache = new HashMap<>();
     private static final ItemStack COIN_ICON = new ItemStack(BuiltInRegistries.ITEM.get(new ResourceLocation("minecraft", "gold_nugget")));
@@ -71,7 +71,7 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
     public static void handleSyncItemList(MarketNetwork.SyncItemListPacket pkt) {
         cachedCards = pkt.cards;
         cachedBalance = pkt.balance;
-        cachedHasVault = pkt.hasVault;
+        cachedVaultCount = pkt.vaultCount;
     }
 
     public static void handleSyncItemDetail(MarketNetwork.SyncItemDetailPacket pkt) {
@@ -137,7 +137,7 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
             }
         };
         sidebar.addChild(balanceWidget);
-        vaultWidget = TextWidget.centered(cachedHasVault ? "Vault OK" : "No Vault!", cachedHasVault ? GREEN : RED);
+        vaultWidget = TextWidget.centered(cachedVaultCount > 0 ? cachedVaultCount + " Vault" + (cachedVaultCount > 1 ? "s" : "") : "No Vault!", cachedVaultCount > 0 ? GREEN : RED);
         sidebar.addChild(vaultWidget);
         sidebar.addChild(new Divider(PANEL_BORDER));
 
@@ -306,9 +306,24 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
                     if (maxP == minP) { maxP += 5; minP = Math.max(0, minP - 5); }
                     float range = maxP - minP;
 
-                    // Draw min/max price text labels
+                    // Draw min/max price text labels on the left
                     g.drawString(fnt, String.valueOf(maxP), x + 3, y + 2, TEXT_MUTED);
                     g.drawString(fnt, String.valueOf(minP), x + 3, y + height - 10, TEXT_MUTED);
+
+                    // Draw current price label on the right
+                    int currentPrice = pts.get(pts.size() - 1).price;
+                    int currentPriceY = y + height - 5 - (int)((currentPrice - minP) / range * (height - 10)) - 4;
+                    String currentPriceStr = String.valueOf(currentPrice);
+                    int currentPriceW = fnt.width(currentPriceStr);
+                    g.drawString(fnt, currentPriceStr, x + width - currentPriceW - 3, currentPriceY, ACCENT);
+
+                    // Draw dotted horizontal line at current price level
+                    int lineY = y + height - 5 - (int)((currentPrice - minP) / range * (height - 10));
+                    int lineStart = x + 30 + (int)((pts.size() - 1) * (width - 36) / Math.max(1, pts.size() - 1));
+                    int dotStep = 4;
+                    for (int lx = x + 30; lx <= lineStart; lx += dotStep) {
+                        g.fill(lx, lineY, Math.min(lx + 2, lineStart + 1), lineY + 1, ACCENT_DIM);
+                    }
 
                     for (int i = 1; i < pts.size(); i++) {
                         int x0 = x + 30 + (i - 1) * (width - 36) / Math.max(1, pts.size() - 1);
@@ -608,7 +623,7 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         if (itemIdField != null) {
             com.nstut.Economy.LOGGER.info("[MarketScreen] switchView itemIdField.getValue()='{}' BEFORE setVisible({})", itemIdField.getValue(), mode == 2);
             itemIdField.setVisible(mode == 2);
-            itemIdField.getEditBox().setFocused(mode == 2);
+            if (mode != 2) itemIdField.getEditBox().setFocused(false);
             com.nstut.Economy.LOGGER.info("[MarketScreen] switchView itemIdField.getValue()='{}' AFTER setVisible", itemIdField.getValue());
         } else {
             com.nstut.Economy.LOGGER.warn("[MarketScreen] switchView itemIdField is NULL!");
@@ -706,8 +721,24 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
             return true;
         }
         boolean superResult = super.mouseClicked(mx, my, btn);
+        if (viewMode == 2) {
+            enforceCreateFormFocus();
+        }
         com.nstut.Economy.LOGGER.info("[MarketScreen] super.mouseClicked returned {}", superResult);
         return superResult;
+    }
+
+    private void enforceCreateFormFocus() {
+        if (itemIdField != null && itemIdField.getEditBox().isFocused()) {
+            if (qtyField != null) qtyField.getEditBox().setFocused(false);
+            if (priceField != null) priceField.getEditBox().setFocused(false);
+        } else if (qtyField != null && qtyField.getEditBox().isFocused()) {
+            if (itemIdField != null) itemIdField.getEditBox().setFocused(false);
+            if (priceField != null) priceField.getEditBox().setFocused(false);
+        } else if (priceField != null && priceField.getEditBox().isFocused()) {
+            if (itemIdField != null) itemIdField.getEditBox().setFocused(false);
+            if (qtyField != null) qtyField.getEditBox().setFocused(false);
+        }
     }
 
     @Override

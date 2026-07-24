@@ -118,27 +118,27 @@ public class MarketNetwork {
 
     public static class SyncItemListPacket {
         public final String balance;
-        public final boolean hasVault;
+        public final int vaultCount;
         public final List<ItemCardData> cards;
 
-        public SyncItemListPacket(String balance, boolean hasVault, List<ItemCardData> cards) {
-            this.balance = balance; this.hasVault = hasVault; this.cards = cards;
+        public SyncItemListPacket(String balance, int vaultCount, List<ItemCardData> cards) {
+            this.balance = balance; this.vaultCount = vaultCount; this.cards = cards;
         }
 
         public static void encode(SyncItemListPacket pkt, FriendlyByteBuf buf) {
             buf.writeUtf(pkt.balance);
-            buf.writeBoolean(pkt.hasVault);
+            buf.writeInt(pkt.vaultCount);
             buf.writeInt(pkt.cards.size());
             for (ItemCardData c : pkt.cards) c.write(buf);
         }
 
         public static SyncItemListPacket decode(FriendlyByteBuf buf) {
             String balance = buf.readUtf();
-            boolean hasVault = buf.readBoolean();
+            int vaultCount = buf.readInt();
             int count = buf.readInt();
             List<ItemCardData> cards = new ArrayList<>();
             for (int i = 0; i < count; i++) cards.add(ItemCardData.read(buf));
-            return new SyncItemListPacket(balance, hasVault, cards);
+            return new SyncItemListPacket(balance, vaultCount, cards);
         }
 
         public static void handle(SyncItemListPacket pkt, Supplier<NetworkEvent.Context> ctx) {
@@ -336,7 +336,7 @@ public class MarketNetwork {
         var account = IAccountManager.getInstance().getOrCreatePlayerAccount(player.getUUID());
         EconomyConfig config = EconomyConfig.getInstance();
         String balance = account.getBalance().setScale(2, RoundingMode.HALF_UP).toPlainString();
-        boolean hasVault = VaultManager.hasVault(player.getUUID());
+        int vaultCount = VaultManager.getVaultRecords(player.getUUID()).size();
 
         java.util.Map<String, String> displayNames = new java.util.LinkedHashMap<>();
         java.util.Map<String, BigDecimal> bestBids = new java.util.LinkedHashMap<>();
@@ -377,7 +377,7 @@ public class MarketNetwork {
             cards.add(new ItemCardData(itemId, displayNames.get(itemId), priceStr, counts.getOrDefault(itemId, 0)));
         }
 
-        CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), new SyncItemListPacket(balance, hasVault, cards));
+        CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), new SyncItemListPacket(balance, vaultCount, cards));
     }
 
     private static void sendItemDetail(ServerPlayer player, String itemId) {
