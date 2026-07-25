@@ -1,33 +1,35 @@
 # Global Economy & Market
 
-Global Economy & Market brings a full-scale financial system and stock-exchange style order book market to Minecraft.
+Transform your Minecraft server into a thriving financial empire! **Global Economy & Market** introduces a stock-exchange style trading terminal, automated order-book matching, and physical Vault logistics.
 
 ---
 
-### Features Overview
+## Key Features
 
-- **Order Book Market UI**: A sleek, dark-themed GUI featuring live order matching, price history charts, and instant order placement.
-- **Guided Auto-Complete Search**: Search for any item by display name or Minecraft registry ID with visual icons and guided suggestions.
-- **54-Slot Vault Blocks**: Place Vault blocks to store commodity items. Sell orders automatically reserve items from your Vaults, and purchased items deliver straight to your Vault.
-- **Transaction History**: Track your complete trade history with filtering (`All`, `Sales`, `Purchases`), sorting (`Newest`, `Oldest`, `Highest Total`), and instant commodity/player search.
-- **Sound Effects**: Satisfying "Ka-Ching" sound effects (`money.mp3`) play on trade executions and money transfers.
-- **Player Payments**: Send money directly to friends with `/economy pay <player> <amount>`.
-
----
-
-### How to Play
-
-1. **Craft or Place a Vault Block**: Your Vault holds 54 slots of physical item storage for buying and selling goods on the market.
-2. **Open the Market UI**: Access the market terminal block or use `/economy balance`.
-3. **Browse & Filter**: Filter commodities by active listings, sort by price or activity, and inspect live price charts.
-4. **Trade**: Submit Buy or Sell orders. Matching orders automatically settle, transferring funds and delivering items directly into Vaults.
+- **Live Market Terminal**: Browse commodities, inspect price history trends, and place custom Buy or Sell orders in real time.
+- **Physical Vault Logistics**: Craft and place Vault blocks to store your trading inventory. Purchased items are automatically delivered to your Vaults, and sell orders pull stock directly from your storage.
+- **Vault Overview Dashboard**: Track all your registered Vault locations, slot capacity usage, and total stored items at a glance from the Market terminal.
+- **Instant Search**: Effortlessly find any item by typing its name with live icons and autocomplete.
+- **Trade History & Filtering**: Review your entire transaction log with quick filtering by Sales, Purchases, Date, and Commodity name.
+- **Player Payments**: Send coins directly to other players anywhere on the server with custom audio feedback.
+- **Server Shops**: Admins can set up infinite buy/sell orders to create server-wide baseline economies.
 
 ---
 
-### Commands & Administration
+## Getting Started
 
-- `/economy balance` - Check your account balance
-- `/economy pay <player> <amount>` - Pay another player
-- `/economy vault` - Locate your Vault block
-- `/economy serverorder buy/sell` - *(Admin)* Create infinite server market listings
-- `/economy give / take / set` - *(Admin)* Manage player account balances
+1. **Craft a Vault**: Craft a Vault block (**4 Diamonds**, **4 Iron Ingots**, **1 Chest**) and place it in the world to activate your secure storage.
+2. **Access the Market**: Open the Market terminal block to view live listings, item price graphs, and your current balance.
+3. **Trade Goods**: Submit Buy or Sell orders at your desired price. Orders match automatically in the background with immediate fund and item transfer!
+
+---
+
+## Commands
+
+| Command | Permission | Description |
+| :--- | :--- | :--- |
+| `/economy balance` | Everyone | View your current wallet balance |
+| `/economy pay <player> <amount>` | Everyone | Transfer money to another online player |
+| `/economy vault` | Everyone | Show coordinates for all your registered Vaults |
+| `/economy give / take / set` | Admin | Manage player account balances |
+| `/economy serverorder` | Admin | Create infinite server buy/sell listings |
