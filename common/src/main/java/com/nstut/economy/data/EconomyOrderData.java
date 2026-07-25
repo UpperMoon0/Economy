@@ -20,6 +20,7 @@ public class EconomyOrderData extends SavedData {
         public final UUID owner;
         public final String itemId;
         public final int quantity;
+        public final int initialQuantity;
         public final String pricePerUnit;
         public final String type;
         public final long createdAt;
@@ -28,7 +29,7 @@ public class EconomyOrderData extends SavedData {
         public final NonNullList<ItemStack> reservedItems;
         public final boolean isServerOrder;
 
-        public OrderSnapshot(UUID orderId, UUID owner, String itemId, int quantity,
+        public OrderSnapshot(UUID orderId, UUID owner, String itemId, int quantity, int initialQuantity,
                              String pricePerUnit, String type, long createdAt,
                              long expiresAt, boolean hasExpiry,
                              NonNullList<ItemStack> reservedItems, boolean isServerOrder) {
@@ -36,6 +37,7 @@ public class EconomyOrderData extends SavedData {
             this.owner = owner;
             this.itemId = itemId;
             this.quantity = quantity;
+            this.initialQuantity = initialQuantity > 0 ? initialQuantity : quantity;
             this.pricePerUnit = pricePerUnit;
             this.type = type;
             this.createdAt = createdAt;
@@ -43,6 +45,13 @@ public class EconomyOrderData extends SavedData {
             this.hasExpiry = hasExpiry;
             this.reservedItems = reservedItems != null ? reservedItems : NonNullList.create();
             this.isServerOrder = isServerOrder;
+        }
+
+        public OrderSnapshot(UUID orderId, UUID owner, String itemId, int quantity,
+                             String pricePerUnit, String type, long createdAt,
+                             long expiresAt, boolean hasExpiry,
+                             NonNullList<ItemStack> reservedItems, boolean isServerOrder) {
+            this(orderId, owner, itemId, quantity, quantity, pricePerUnit, type, createdAt, expiresAt, hasExpiry, reservedItems, isServerOrder);
         }
     }
 
@@ -89,11 +98,14 @@ public class EconomyOrderData extends SavedData {
                 boolean serverOrd = t.getBoolean("ServerOrder");
                 UUID id = t.getUUID("OrderId");
                 UUID owner = t.hasUUID("Owner") ? t.getUUID("Owner") : null;
+                int qty = t.getInt("Quantity");
+                int initQty = t.contains("InitialQuantity", Tag.TAG_INT) ? t.getInt("InitialQuantity") : qty;
                 data.orders.put(id, new OrderSnapshot(
                     id,
                     owner,
                     t.getString("ItemId"),
-                    t.getInt("Quantity"),
+                    qty,
+                    initQty,
                     t.getString("PricePerUnit"),
                     t.getString("Type"),
                     t.getLong("CreatedAt"),
@@ -117,6 +129,7 @@ public class EconomyOrderData extends SavedData {
             if (s.owner != null) sTag.putUUID("Owner", s.owner);
             sTag.putString("ItemId", s.itemId);
             sTag.putInt("Quantity", s.quantity);
+            sTag.putInt("InitialQuantity", s.initialQuantity);
             sTag.putString("PricePerUnit", s.pricePerUnit);
             sTag.putString("Type", s.type);
             sTag.putLong("CreatedAt", s.createdAt);

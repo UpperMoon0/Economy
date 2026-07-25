@@ -25,6 +25,7 @@ public class Order implements IOrder {
     private final UUID owner;
     private final ICommodity commodity;
     private int quantity;
+    private final int initialQuantity;
     private final BigDecimal pricePerUnit;
     private final OrderType type;
     private final Instant createdAt;
@@ -35,16 +36,23 @@ public class Order implements IOrder {
 
     public Order(UUID owner, ICommodity commodity, int quantity,
                  BigDecimal pricePerUnit, OrderType type, Instant expiresAt) {
-        this(owner, commodity, quantity, pricePerUnit, type, expiresAt, NonNullList.create());
+        this(owner, commodity, quantity, quantity, pricePerUnit, type, expiresAt, NonNullList.create());
     }
 
     public Order(UUID owner, ICommodity commodity, int quantity,
+                 BigDecimal pricePerUnit, OrderType type, Instant expiresAt,
+                 NonNullList<ItemStack> reservedItems) {
+        this(owner, commodity, quantity, quantity, pricePerUnit, type, expiresAt, reservedItems);
+    }
+
+    public Order(UUID owner, ICommodity commodity, int quantity, int initialQuantity,
                  BigDecimal pricePerUnit, OrderType type, Instant expiresAt,
                  NonNullList<ItemStack> reservedItems) {
         this.orderId = UUID.randomUUID();
         this.owner = owner;
         this.commodity = commodity;
         this.quantity = quantity;
+        this.initialQuantity = initialQuantity > 0 ? initialQuantity : quantity;
         this.pricePerUnit = pricePerUnit;
         this.type = type;
         this.createdAt = Instant.now();
@@ -58,7 +66,7 @@ public class Order implements IOrder {
         Item item = BuiltInRegistries.ITEM.get(rl);
         ItemCommodity commodity = new ItemCommodity(rl, item, BigDecimal.ZERO);
         Instant expires = snap.hasExpiry ? Instant.ofEpochMilli(snap.expiresAt) : null;
-        Order order = new Order(snap.owner, commodity, snap.quantity,
+        Order order = new Order(snap.owner, commodity, snap.quantity, snap.initialQuantity,
             new BigDecimal(snap.pricePerUnit),
             snap.type.equals("SELL") ? OrderType.SELL : OrderType.BUY,
             expires, snap.reservedItems);
@@ -82,7 +90,7 @@ public class Order implements IOrder {
     public EconomyOrderData.OrderSnapshot toSnapshot() {
         return new EconomyOrderData.OrderSnapshot(
             orderId, owner, commodity.getId().toString(),
-            quantity, pricePerUnit.toPlainString(),
+            quantity, initialQuantity, pricePerUnit.toPlainString(),
             type.name(), createdAt.toEpochMilli(),
             expiresAt != null ? expiresAt.toEpochMilli() : 0,
             expiresAt != null, reservedItems, serverOrder
@@ -115,6 +123,10 @@ public class Order implements IOrder {
     @Override
     public int getQuantity() {
         return quantity;
+    }
+
+    public int getInitialQuantity() {
+        return initialQuantity;
     }
 
     @Override

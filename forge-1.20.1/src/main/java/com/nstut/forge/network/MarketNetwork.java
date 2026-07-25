@@ -48,6 +48,8 @@ public class MarketNetwork {
         CHANNEL.registerMessage(packetId++, RequestRefreshPacket.class, RequestRefreshPacket::encode, RequestRefreshPacket::decode, RequestRefreshPacket::handle);
         CHANNEL.registerMessage(packetId++, RequestOrderHistoryPacket.class, RequestOrderHistoryPacket::encode, RequestOrderHistoryPacket::decode, RequestOrderHistoryPacket::handle);
         CHANNEL.registerMessage(packetId++, SyncOrderHistoryPacket.class, SyncOrderHistoryPacket::encode, SyncOrderHistoryPacket::decode, SyncOrderHistoryPacket::handle);
+        CHANNEL.registerMessage(packetId++, RequestVaultInfoPacket.class, RequestVaultInfoPacket::encode, RequestVaultInfoPacket::decode, RequestVaultInfoPacket::handle);
+        CHANNEL.registerMessage(packetId++, SyncVaultInfoPacket.class, SyncVaultInfoPacket::encode, SyncVaultInfoPacket::decode, SyncVaultInfoPacket::handle);
     }
 
     public static class ItemCardData {
@@ -78,11 +80,14 @@ public class MarketNetwork {
         public final String sellerName;
         public final String price;
         public final int quantity;
+        public final int initialQuantity;
         public final boolean isPlayerOwned;
         public final boolean isServerOrder;
 
-        public OrderEntry(UUID orderId, UUID ownerId, String sellerName, String price, int quantity, boolean isPlayerOwned, boolean isServerOrder) {
-            this.orderId = orderId; this.ownerId = ownerId; this.sellerName = sellerName; this.price = price; this.quantity = quantity; this.isPlayerOwned = isPlayerOwned; this.isServerOrder = isServerOrder;
+        public OrderEntry(UUID orderId, UUID ownerId, String sellerName, String price, int quantity, int initialQuantity, boolean isPlayerOwned, boolean isServerOrder) {
+            this.orderId = orderId; this.ownerId = ownerId; this.sellerName = sellerName; this.price = price;
+            this.quantity = quantity; this.initialQuantity = initialQuantity > 0 ? initialQuantity : quantity;
+            this.isPlayerOwned = isPlayerOwned; this.isServerOrder = isServerOrder;
         }
 
         public void write(FriendlyByteBuf buf) {
@@ -91,12 +96,13 @@ public class MarketNetwork {
             buf.writeUtf(sellerName);
             buf.writeUtf(price);
             buf.writeInt(quantity);
+            buf.writeInt(initialQuantity);
             buf.writeBoolean(isPlayerOwned);
             buf.writeBoolean(isServerOrder);
         }
 
         public static OrderEntry read(FriendlyByteBuf buf) {
-            return new OrderEntry(buf.readUUID(), buf.readUUID(), buf.readUtf(), buf.readUtf(), buf.readInt(), buf.readBoolean(), buf.readBoolean());
+            return new OrderEntry(buf.readUUID(), buf.readUUID(), buf.readUtf(), buf.readUtf(), buf.readInt(), buf.readInt(), buf.readBoolean(), buf.readBoolean());
         }
     }
 
@@ -411,7 +417,7 @@ public class MarketNetwork {
             OrderEntry entry = new OrderEntry(
                 order.getOrderId(), order.getOwner(), sellerName,
                 order.getPricePerUnit().setScale(2, RoundingMode.HALF_UP).toPlainString(),
-                order.getQuantity(), order.getOwner().equals(playerId), order.isServerOrder());
+                order.getQuantity(), order.getInitialQuantity(), order.getOwner().equals(playerId), order.isServerOrder());
 
             if (order.getType() == IOrder.OrderType.SELL) {
                 asks.add(entry);
@@ -548,5 +554,94 @@ public class MarketNetwork {
         }
 
         CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), new SyncOrderHistoryPacket(entries));
+    }
+
+    // ── Vault Details ──────────────────────────────────────────────────────────
+
+    public static class VaultDetailEntry {
+        public final int x, y, z;
+        public final String dimension;
+        public final int usedSlots;
+        public final int totalSlots;
+        public final int totalItems;
+
+        public VaultDetailEntry(int x, int y, int z, String dimension, int usedSlots, int totalSlots, int totalItems) {
+            this.x = x; this.y = y; this.z = z; this.dimension = dimension;
+            this.usedSlots = usedSlots; this.totalSlots = totalSlots; this.totalItems = totalItems;
+        }
+
+        public void write(FriendlyByteBuf buf) {
+            buf.writeInt(x); buf.writeInt(y); buf.writeInt(z);
+            buf.writeUtf(dimension);
+            buf.writeInt(usedSlots); buf.writeInt(totalSlots); buf.writeInt(totalItems);
+        }
+
+        public static VaultDetailEntry read(FriendlyByteBuf buf) {
+            return new VaultDetailEntry(buf.readInt(), buf.readInt(), buf.readInt(),
+                buf.readUtf(), buf.readInt(), buf.readInt(), buf.readInt());
+        }
+    }
+
+    public static class RequestVaultInfoPacket {
+        public RequestVaultInfoPacket() {}
+        public static void encode(RequestVaultInfoPacket pkt, FriendlyByteBuf buf) {}
+        public static RequestVaultInfoPacket decode(FriendlyByteBuf buf) { return new RequestVaultInfoPacket(); }
+
+        public static void handle(RequestVaultInfoPacket pkt, Supplier<NetworkEvent.Context> ctx) {
+            ctx.get().enqueueWork(() -> {
+                ServerPlayer player = ctx.get().getSender();
+                if (player != null) sendVaultInfo(player);
+            });
+            ctx.get().setPacketHandled(true);
+        }
+    }
+
+    public static class SyncVaultInfoPacket {
+        public final List<VaultDetailEntry> entries;
+
+        public SyncVaultInfoPacket(List<VaultDetailEntry> entries) { this.entries = entries; }
+
+        public static void encode(SyncVaultInfoPacket pkt, FriendlyByteBuf buf) {
+            buf.writeInt(pkt.entries.size());
+            for (VaultDetailEntry e : pkt.entries) e.write(buf);
+        }
+
+        public static SyncVaultInfoPacket decode(FriendlyByteBuf buf) {
+            int count = buf.readInt();
+            List<VaultDetailEntry> entries = new ArrayList<>();
+            for (int i = 0; i < count; i++) entries.add(VaultDetailEntry.read(buf));
+            return new SyncVaultInfoPacket(entries);
+        }
+
+        public static void handle(SyncVaultInfoPacket pkt, Supplier<NetworkEvent.Context> ctx) {
+            ctx.get().enqueueWork(() -> com.nstut.forge.client.MarketScreen.handleSyncVaultInfo(pkt));
+            ctx.get().setPacketHandled(true);
+        }
+    }
+
+    public static void sendVaultInfo(ServerPlayer player) {
+        UUID playerId = player.getUUID();
+        List<com.nstut.economy.data.EconomyAccountData.VaultRecord> records =
+            com.nstut.economy.blocks.VaultManager.getVaultRecords(playerId);
+
+        List<VaultDetailEntry> entries = new ArrayList<>();
+        for (com.nstut.economy.data.EconomyAccountData.VaultRecord r : records) {
+            int used = 0;
+            int total = 54;
+            int items = 0;
+            net.minecraft.world.level.block.entity.BlockEntity be = player.serverLevel().getBlockEntity(r.pos);
+            if (be instanceof com.nstut.economy.blocks.VaultBlockEntity vault) {
+                total = vault.getContainerSize();
+                for (int slot = 0; slot < total; slot++) {
+                    net.minecraft.world.item.ItemStack stack = vault.getItem(slot);
+                    if (!stack.isEmpty()) {
+                        used++;
+                        items += stack.getCount();
+                    }
+                }
+            }
+            entries.add(new VaultDetailEntry(r.pos.getX(), r.pos.getY(), r.pos.getZ(), r.dimension, used, total, items));
+        }
+        CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), new SyncVaultInfoPacket(entries));
     }
 }

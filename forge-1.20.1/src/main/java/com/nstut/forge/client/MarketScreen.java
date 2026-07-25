@@ -119,7 +119,7 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
     private UIComponent root;
     private TextWidget vaultWidget;
     private UIComponent balanceWidget;
-    private ButtonWidget browseBtn, newOrderBtn, orderHistoryBtn;
+    private ButtonWidget browseBtn, vaultsBtn, newOrderBtn, orderHistoryBtn;
     private EditBoxWrapper searchField;
     private ScrollList cardGrid;
     private ScrollList askList, bidList;
@@ -133,6 +133,13 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
     private String selectedItemId;
     private boolean createSellMode = true;
     private UIComponent historyView;
+    private UIComponent vaultsView;
+
+    private static List<MarketNetwork.VaultDetailEntry> cachedVaultEntries = new ArrayList<>();
+
+    public static void handleSyncVaultInfo(MarketNetwork.SyncVaultInfoPacket pkt) {
+        cachedVaultEntries = pkt.entries;
+    }
 
     private EditBoxWrapper historySearchField;
 
@@ -176,6 +183,24 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
     private String itemSearchAutoFilled = null;
     /** Per-frame data for the late-rendered item search dropdown. */
     private ItemDropdownData pendingDropdown = null;
+
+    /** Lightweight struct used only for the late-render dropdown pass. */
+    private static class PendingOrderExecution {
+        final String itemId;
+        final int quantity;
+        final String priceStr;
+        final boolean isSell;
+        final String action;
+        final String itemName;
+        final String totalPrice;
+
+        PendingOrderExecution(String itemId, int quantity, String priceStr, boolean isSell, String action, String itemName, String totalPrice) {
+            this.itemId = itemId; this.quantity = quantity; this.priceStr = priceStr;
+            this.isSell = isSell; this.action = action; this.itemName = itemName;
+            this.totalPrice = totalPrice;
+        }
+    }
+    private PendingOrderExecution pendingConfirmation = null;
 
     /** Lightweight struct used only for the late-render dropdown pass. */
     private static class ItemDropdownData {
@@ -284,8 +309,6 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
             }
         };
         sidebar.addChild(balanceWidget);
-        vaultWidget = TextWidget.centered(cachedVaultCount > 0 ? cachedVaultCount + " Vault" + (cachedVaultCount > 1 ? "s" : "") : "No Vault!", cachedVaultCount > 0 ? GREEN : RED);
-        sidebar.addChild(vaultWidget);
         sidebar.addChild(new SizedBox(0, 2));
         sidebar.addChild(new Divider(PANEL_BORDER));
         sidebar.addChild(new SizedBox(0, 2));
@@ -295,6 +318,13 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
             switchView(0);
         });
         sidebar.addChild(new PaddingBox(0, 4, 0, 4, browseBtn));
+
+        vaultsBtn = btn("Vaults", PANEL, CARD_HOVER).onPress(() -> {
+            cachedVaultEntries = new ArrayList<>();
+            switchView(4);
+            MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestVaultInfoPacket());
+        });
+        sidebar.addChild(new PaddingBox(0, 4, 0, 4, vaultsBtn));
 
         newOrderBtn = btn("New Order", PANEL, CARD_HOVER).onPress(() -> {
             createOrderSourceMode = 0;
@@ -340,9 +370,14 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         UIComponent history = buildHistory(font);
         history.flex();
         history.setVisible(false);
-        // store reference so switchView can toggle visibility
         this.historyView = history;
         contentArea.addChild(history);
+
+        UIComponent vaults = buildVaults(font);
+        vaults.flex();
+        vaults.setVisible(false);
+        this.vaultsView = vaults;
+        contentArea.addChild(vaults);
 
         PaddingBox contentPadding = new PaddingBox(8, 8, 8, 8, contentArea);
         contentPadding.flex();
@@ -510,14 +545,25 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
                         g.fill(lx, lineY, Math.min(lx + 2, chartRight), lineY + 1, ACCENT_DIM);
                     }
 
-                    // Line graph plot
+                    // Line graph plot & interactive nodes
                     int ptsCount = pts.size();
-                    for (int i = 1; i < ptsCount; i++) {
-                        int x0 = chartLeft + (i - 1) * (chartRight - chartLeft) / Math.max(1, ptsCount - 1);
-                        int x1 = chartLeft + i * (chartRight - chartLeft) / Math.max(1, ptsCount - 1);
-                        int y0 = y + height - 6 - (int)((pts.get(i - 1).price - minP) / range * (height - 12));
-                        int y1 = y + height - 6 - (int)((pts.get(i).price - minP) / range * (height - 12));
-                        drawLine(g, x0, y0, x1, y1, CHART_LINE);
+                    for (int i = 0; i < ptsCount; i++) {
+                        int x0 = chartLeft + i * (chartRight - chartLeft) / Math.max(1, ptsCount - 1);
+                        int y0 = y + height - 6 - (int)((pts.get(i).price - minP) / range * (height - 12));
+
+                        if (i > 0) {
+                            int xPrev = chartLeft + (i - 1) * (chartRight - chartLeft) / Math.max(1, ptsCount - 1);
+                            int yPrev = y + height - 6 - (int)((pts.get(i - 1).price - minP) / range * (height - 12));
+                            drawLine(g, xPrev, yPrev, x0, y0, CHART_LINE);
+                        }
+
+                        // Data node dot + tooltip hover detection
+                        boolean nodeHover = (mx >= x0 - 3 && mx <= x0 + 3 && my >= y0 - 3 && my <= y0 + 3);
+                        int dotClr = nodeHover ? 0xFFFFFFFF : ACCENT;
+                        g.fill(x0 - 1, y0 - 1, x0 + 2, y0 + 2, dotClr);
+                        if (nodeHover) {
+                            pendingTooltip = "Price: $" + pts.get(i).price + " | Volume: " + pts.get(i).quantity;
+                        }
                     }
 
                     // Draw right current price badge pill container on top of chart background
@@ -586,10 +632,17 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
                 g.fill(badgeX + badgeW - 1, badgeY, badgeX + badgeW, badgeY + badgeH, borderClr);
                 g.drawString(fnt, typeText, badgeX + 3, badgeY + 2, textClr);
 
-                // 2. Coin Icon & Price x Quantity
+                // 2. Coin Icon & Price x Quantity (with fulfillment progress if partially filled)
                 int px = badgeX + badgeW + 5;
                 renderSmallCoin(g, px, ry + 4);
-                String line = e.price + " x" + e.quantity;
+                String line;
+                if (e.initialQuantity > e.quantity) {
+                    int fulfilled = e.initialQuantity - e.quantity;
+                    int pct = (fulfilled * 100) / e.initialQuantity;
+                    line = e.price + " x" + e.quantity + " (" + fulfilled + "/" + e.initialQuantity + " - " + pct + "% filled)";
+                } else {
+                    line = e.price + " x" + e.quantity;
+                }
                 int clr = isSell ? RED : GREEN;
                 g.drawString(fnt, line, px + 10, ry + 3, clr);
 
@@ -606,10 +659,10 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
 
                 g.fill(btnX, btnY, btnX + btnW, btnY + btnH, btnBg);
                 g.fill(btnX, btnY, btnX + btnW, btnY + 1, btnBorder);
-                g.fill(btnX, btnY + badgeH - 1, btnX + btnW, btnY + btnH, btnBorder);
+                g.fill(btnX, btnY + btnH - 1, btnX + btnW, btnY + btnH, btnBorder);
                 g.fill(btnX, btnY, btnX + 1, btnY + btnH, btnBorder);
-                g.fill(btnX + btnW - 1, btnX + btnW, btnY, btnY + btnH, btnBorder);
-                g.drawString(fnt, cancelText, btnX + 4, btnY + 2, 0xFFFFFFFF);
+                g.fill(btnX + btnW - 1, btnY, btnX + btnW, btnY + btnH, btnBorder);
+                g.drawString(fnt, cancelText, btnX + 4, badgeY + 2, 0xFFFFFFFF);
             },
             (idx, button, mx, my) -> {
                 List<MarketNetwork.OrderEntry> myOrders = getMyOrders();
@@ -913,11 +966,19 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
                 return;
             }
         }
-        MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.CreateOrderPacket(itemId, qty, price.toPlainString(), createSellMode));
-        selectedItemId = itemId;
-        cachedDetail = null;
-        switchView(1);
-        MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestItemDetailPacket(itemId));
+        String actionStr = createSellMode ? "Sell" : "Buy";
+        BigDecimal tot = price.multiply(BigDecimal.valueOf(qty));
+        String totStr = tot.setScale(2, java.math.RoundingMode.HALF_UP).toPlainString();
+        String dispName = itemId;
+        if (cachedDetail != null && cachedDetail.itemId.equalsIgnoreCase(itemId)) {
+            dispName = cachedDetail.displayName;
+        } else {
+            net.minecraft.world.item.Item it = BuiltInRegistries.ITEM.get(new ResourceLocation(itemId));
+            if (it != net.minecraft.world.item.Items.AIR) {
+                dispName = new ItemStack(it).getHoverName().getString();
+            }
+        }
+        pendingConfirmation = new PendingOrderExecution(itemId, qty, price.toPlainString(), createSellMode, actionStr, dispName, totStr);
     }
 
     private void showCreateError(String msg) {
@@ -933,10 +994,11 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         com.nstut.Economy.LOGGER.info("[MarketScreen] switchView itemIdField={}, qtyField={}, priceField={}", itemIdField, qtyField, priceField);
         viewMode = mode;
         if (mode == 0) selectedItemId = null;
-        browser.setVisible(mode == 0);
-        detail.setVisible(mode == 1);
-        createOffer.setVisible(mode == 2);
+        if (browser != null) browser.setVisible(mode == 0);
+        if (detail != null) detail.setVisible(mode == 1);
+        if (createOffer != null) createOffer.setVisible(mode == 2);
         if (historyView != null) historyView.setVisible(mode == 3);
+        if (vaultsView != null) vaultsView.setVisible(mode == 4);
         if (mode == 2) {
             updateCreateOfferLabels();
             // Reset dropdown guard whenever we (re-)enter the form
@@ -947,6 +1009,10 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         if (browseBtn != null) {
             browseBtn.setVisible(true);
             browseBtn.setActive(mode == 0);
+        }
+        if (vaultsBtn != null) {
+            vaultsBtn.setVisible(true);
+            vaultsBtn.setActive(mode == 4);
         }
         if (newOrderBtn != null) {
             newOrderBtn.setVisible(true);
@@ -1172,6 +1238,125 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         return v;
     }
 
+    private UIComponent buildVaults(Font font) {
+        VStack v = new VStack().gap(4);
+        v.addChild(TextWidget.centered("VAULT OVERVIEW", ACCENT));
+        v.addChild(new Divider(PANEL_BORDER));
+
+        // Summary Stats Row
+        HStack statsRow = new HStack().gap(4);
+        statsRow.addChild(new UIComponent() {
+            @Override public int preferredWidth(Font f) { return 0; }
+            @Override public int preferredHeight(Font f) { return 24; }
+            @Override
+            public void render(GuiGraphics g, Font fnt, int mx, int my, float pt) {
+                int totalV = cachedVaultEntries.size();
+                int totalSlots = 0;
+                int usedSlots = 0;
+                int totalItems = 0;
+                for (MarketNetwork.VaultDetailEntry e : cachedVaultEntries) {
+                    totalSlots += e.totalSlots;
+                    usedSlots += e.usedSlots;
+                    totalItems += e.totalItems;
+                }
+
+                // Stat Box 1: Vault Count
+                int boxW = (width - 8) / 3;
+                g.fill(x, y, x + boxW, y + height, CARD_BG);
+                g.fill(x, y, x + boxW, y + 1, PANEL_BORDER);
+                g.fill(x, y + height - 1, x + boxW, y + height, PANEL_BORDER);
+                g.fill(x, y, x + 1, y + height, PANEL_BORDER);
+                g.fill(x + boxW - 1, y, x + boxW, y + height, PANEL_BORDER);
+                g.drawString(fnt, "VAULTS", x + (boxW - fnt.width("VAULTS")) / 2, y + 3, TEXT_MUTED);
+                String vVal = String.valueOf(totalV);
+                g.drawString(fnt, vVal, x + (boxW - fnt.width(vVal)) / 2, y + 13, ACCENT);
+
+                // Stat Box 2: Storage Slots
+                int b2X = x + boxW + 4;
+                g.fill(b2X, y, b2X + boxW, y + height, CARD_BG);
+                g.fill(b2X, y, b2X + boxW, y + 1, PANEL_BORDER);
+                g.fill(b2X, y + height - 1, b2X + boxW, y + height, PANEL_BORDER);
+                g.fill(b2X, y, b2X + 1, y + height, PANEL_BORDER);
+                g.fill(b2X + boxW - 1, y, b2X + boxW, y + height, PANEL_BORDER);
+                g.drawString(fnt, "SLOTS USED", b2X + (boxW - fnt.width("SLOTS USED")) / 2, y + 3, TEXT_MUTED);
+                String sVal = usedSlots + "/" + totalSlots;
+                g.drawString(fnt, sVal, b2X + (boxW - fnt.width(sVal)) / 2, y + 13, GREEN);
+
+                // Stat Box 3: Total Items
+                int b3X = b2X + boxW + 4;
+                g.fill(b3X, y, b3X + boxW, y + height, CARD_BG);
+                g.fill(b3X, y, b3X + boxW, y + 1, PANEL_BORDER);
+                g.fill(b3X, y + height - 1, b3X + boxW, y + height, PANEL_BORDER);
+                g.fill(b3X, y, b3X + 1, y + height, PANEL_BORDER);
+                g.fill(b3X + boxW - 1, y, b3X + boxW, y + height, PANEL_BORDER);
+                g.drawString(fnt, "TOTAL ITEMS", b3X + (boxW - fnt.width("TOTAL ITEMS")) / 2, y + 3, TEXT_MUTED);
+                String iVal = String.valueOf(totalItems);
+                g.drawString(fnt, iVal, b3X + (boxW - fnt.width(iVal)) / 2, y + 13, ACCENT);
+            }
+        });
+        v.addChild(statsRow);
+        v.addChild(new Divider(PANEL_BORDER));
+
+        ScrollList list = new ScrollList(
+            () -> Math.max(1, cachedVaultEntries.size()),
+            34,
+            (g, fnt, idx, rx, ry, rw, mx, my, hover) -> {
+                if (cachedVaultEntries.isEmpty()) {
+                    String msg = "No Vault blocks registered yet";
+                    g.drawString(fnt, msg, rx + (rw - fnt.width(msg)) / 2, ry + 12, TEXT_MUTED);
+                    return;
+                }
+                if (idx >= cachedVaultEntries.size()) return;
+                MarketNetwork.VaultDetailEntry e = cachedVaultEntries.get(idx);
+
+                if (hover) g.fill(rx, ry, rx + rw, ry + 33, CARD_HOVER);
+                g.fill(rx, ry + 33, rx + rw, ry + 34, PANEL_BORDER);
+
+                // Vault Index Title
+                String vTitle = "Vault #" + (idx + 1);
+                g.drawString(fnt, vTitle, rx + 4, ry + 3, ACCENT);
+
+                // Status Badge (ACTIVE or FULL)
+                boolean isFull = e.usedSlots >= e.totalSlots;
+                String badge = isFull ? "FULL" : "ACTIVE";
+                int badgeW = fnt.width(badge) + 6;
+                int badgeX = rx + rw - badgeW - 4;
+                int badgeBg = isFull ? 0x40801818 : 0x40105028;
+                int badgeBorder = isFull ? 0xFFFF4444 : 0xFF20A050;
+                int badgeText = isFull ? 0xFFFF6666 : 0xFF66FF66;
+
+                g.fill(badgeX, ry + 3, badgeX + badgeW, ry + 14, badgeBg);
+                g.fill(badgeX, ry + 3, badgeX + badgeW, ry + 4, badgeBorder);
+                g.fill(badgeX, ry + 13, badgeX + badgeW, ry + 14, badgeBorder);
+                g.fill(badgeX, ry + 3, badgeX + 1, ry + 14, badgeBorder);
+                g.fill(badgeX + badgeW - 1, ry + 3, badgeX + badgeW, ry + 14, badgeBorder);
+                g.drawString(fnt, badge, badgeX + 3, ry + 4, badgeText);
+
+                // Location String
+                String dimClean = e.dimension.replace("minecraft:", "");
+                String locStr = dimClean + " (" + e.x + ", " + e.y + ", " + e.z + ")";
+                g.drawString(fnt, locStr, rx + 4, ry + 14, TEXT_MUTED);
+
+                // Storage Progress Bar
+                int barX = rx + 4;
+                int barY = ry + 24;
+                int barW = rw - 80;
+                int barH = 5;
+                g.fill(barX, barY, barX + barW, barY + barH, 0xFF1A1A2E);
+                int pct = e.totalSlots > 0 ? (e.usedSlots * barW) / e.totalSlots : 0;
+                int fillClr = isFull ? RED : GREEN;
+                g.fill(barX, barY, barX + pct, barY + barH, fillClr);
+
+                String usageStr = e.usedSlots + "/" + e.totalSlots + " Slots (" + e.totalItems + " items)";
+                g.drawString(fnt, usageStr, barX + barW + 6, ry + 22, TEXT_PRIMARY);
+            },
+            (idx, btn) -> { /* read only */ },
+            PANEL, ACCENT_DIM);
+
+        v.addChild(list);
+        return v;
+    }
+
     private void drawLine(GuiGraphics g, int x0, int y0, int x1, int y1, int color) {
         int dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0);
         int sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
@@ -1218,6 +1403,10 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         if (pendingDropdown != null && viewMode == 2) {
             renderItemDropdown(g, mx, my, pendingDropdown);
         }
+        // ── Late-pass: Confirmation modal overlay ──
+        if (pendingConfirmation != null) {
+            renderConfirmationModal(g, mx, my);
+        }
         if (pendingTooltip != null) {
             g.renderTooltip(this.font, Component.literal(pendingTooltip), mx, my);
         }
@@ -1263,9 +1452,99 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         }
     }
 
+    private void renderConfirmationModal(GuiGraphics g, int mx, int my) {
+        if (pendingConfirmation == null) return;
+        int modalW = 200;
+        int modalH = 95;
+        int modalX = left() + (SCREEN_W - modalW) / 2;
+        int modalY = top() + (SCREEN_H - modalH) / 2;
+
+        // Dark dim backdrop over whole screen
+        g.fill(left(), top(), left() + SCREEN_W, top() + SCREEN_H, 0xAA000000);
+
+        // Modal container background & border
+        g.fill(modalX, modalY, modalX + modalW, modalY + modalH, 0xFF0F1524);
+        g.fill(modalX, modalY, modalX + modalW, modalY + 1, ACCENT);
+        g.fill(modalX, modalY + modalH - 1, modalX + modalW, modalY + modalH, ACCENT);
+        g.fill(modalX, modalY, modalX + 1, modalY + modalH, ACCENT);
+        g.fill(modalX + modalW - 1, modalX + modalW, modalY, modalY + modalH, ACCENT);
+
+        // Title
+        String title = "CONFIRM TRANSACTION";
+        int titleW = font.width(title);
+        g.drawString(font, title, modalX + (modalW - titleW) / 2, modalY + 8, ACCENT);
+        g.fill(modalX + 10, modalY + 20, modalX + modalW - 10, modalY + 21, PANEL_BORDER);
+
+        // Body message
+        String msg1 = pendingConfirmation.action + " " + pendingConfirmation.quantity + "x " + pendingConfirmation.itemName;
+        int msg1W = font.width(msg1);
+        g.drawString(font, msg1, modalX + (modalW - msg1W) / 2, modalY + 28, TEXT_PRIMARY);
+
+        renderSmallCoin(g, modalX + 35, modalY + 44);
+        String msg2 = "Total: " + pendingConfirmation.totalPrice;
+        g.drawString(font, msg2, modalX + 47, modalY + 44, ACCENT);
+
+        // Confirm Button
+        int btnW = 75;
+        int btnH = 16;
+        int confirmX = modalX + 18;
+        int confirmY = modalY + 66;
+        boolean confirmHover = mx >= confirmX && mx <= confirmX + btnW && my >= confirmY && my <= confirmY + btnH;
+        int confirmBg = confirmHover ? 0xFF004030 : 0xFF003024;
+        g.fill(confirmX, confirmY, confirmX + btnW, confirmY + btnH, confirmBg);
+        g.fill(confirmX, confirmY, confirmX + btnW, confirmY + 1, ACCENT);
+        g.fill(confirmX, confirmY + btnH - 1, confirmX + btnW, confirmY + btnH, ACCENT);
+        g.fill(confirmX, confirmY, confirmX + 1, confirmY + btnH, ACCENT);
+        g.fill(confirmX + btnW - 1, confirmX + btnW, confirmY, confirmY + btnH, ACCENT);
+        g.drawString(font, "Confirm", confirmX + (btnW - font.width("Confirm")) / 2, confirmY + 4, ACCENT);
+
+        // Cancel Button
+        int cancelX = modalX + modalW - btnW - 18;
+        int cancelY = modalY + 66;
+        boolean cancelHover = mx >= cancelX && mx <= cancelX + btnW && my >= cancelY && my <= cancelY + btnH;
+        int cancelBg = cancelHover ? 0xFFC02020 : 0x80901818;
+        g.fill(cancelX, cancelY, cancelX + btnW, cancelY + btnH, cancelBg);
+        g.fill(cancelX, cancelY, cancelX + btnW, cancelY + 1, RED);
+        g.fill(cancelX, cancelY + btnH - 1, cancelX + btnW, cancelY + btnH, RED);
+        g.fill(cancelX, cancelY, cancelX + 1, cancelY + btnH, RED);
+        g.fill(cancelX + btnW - 1, cancelX + btnW, cancelY, cancelY + btnH, RED);
+        g.drawString(font, "Cancel", cancelX + (btnW - font.width("Cancel")) / 2, cancelY + 4, 0xFFFFFFFF);
+    }
+
     @Override
     public boolean mouseClicked(double mx, double my, int btn) {
         com.nstut.Economy.LOGGER.info("[MarketScreen] mouseClicked mx={}, my={}, btn={}, viewMode={}", mx, my, btn, viewMode);
+        if (pendingConfirmation != null) {
+            int modalW = 200;
+            int modalH = 95;
+            int modalX = left() + (SCREEN_W - modalW) / 2;
+            int modalY = top() + (SCREEN_H - modalH) / 2;
+            int btnW = 75;
+            int btnH = 16;
+
+            int confirmX = modalX + 18;
+            int confirmY = modalY + 66;
+            if (mx >= confirmX && mx <= confirmX + btnW && my >= confirmY && my <= confirmY + btnH) {
+                MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.CreateOrderPacket(
+                    pendingConfirmation.itemId, pendingConfirmation.quantity, pendingConfirmation.priceStr, pendingConfirmation.isSell));
+                selectedItemId = pendingConfirmation.itemId;
+                cachedDetail = null;
+                pendingConfirmation = null;
+                switchView(1);
+                MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestItemDetailPacket(selectedItemId));
+                return true;
+            }
+
+            int cancelX = modalX + modalW - btnW - 18;
+            int cancelY = modalY + 66;
+            if (mx >= cancelX && mx <= cancelX + btnW && my >= cancelY && my <= cancelY + btnH) {
+                pendingConfirmation = null;
+                return true;
+            }
+
+            pendingConfirmation = null;
+            return true;
+        }
         // ── Item search dropdown click interception ──
         if (viewMode == 2 && pendingDropdown != null) {
             ItemDropdownData d = pendingDropdown;
