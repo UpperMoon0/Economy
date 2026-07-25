@@ -60,10 +60,11 @@ jobs:
       - name: Determine Release Tag
         id: tag
         run: |
+          MOD_VER=$(grep 'mod_version' gradle.properties | cut -d'=' -f2 | tr -d ' \r')
           if [[ "${{ github.ref }}" == refs/tags/* ]]; then
             TAG_NAME="${{ github.ref_name }}"
           else
-            TAG_NAME="v1.0.0"
+            TAG_NAME="v${MOD_VER}"
           fi
           echo "tag_name=${TAG_NAME}" >> $GITHUB_OUTPUT
 
