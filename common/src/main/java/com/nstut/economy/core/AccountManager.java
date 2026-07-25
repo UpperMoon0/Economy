@@ -67,9 +67,11 @@ public class AccountManager implements IAccountManager {
     public IBankAccount getOrCreatePlayerAccount(UUID player) {
         return accounts.computeIfAbsent(player, uuid -> {
             EconomyConfig config = EconomyConfig.getInstance();
-            BankAccount account = new BankAccount(uuid, config.getStartingBalance());
-
-            account.credit(config.getStartingBalance(), TransactionContext.startingBalance());
+            BigDecimal startingBalance = config.getStartingBalance();
+            BankAccount account = new BankAccount(uuid, BigDecimal.ZERO);
+            if (startingBalance.compareTo(BigDecimal.ZERO) > 0) {
+                account.credit(startingBalance, TransactionContext.startingBalance());
+            }
             markDirty(uuid);
             return account;
         });

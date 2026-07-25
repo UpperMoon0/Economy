@@ -27,8 +27,38 @@ public class EconomyAccountData extends SavedData {
         }
     }
 
+    public static final class PortfolioPoint {
+        public final long timestamp;
+        public final BigDecimal netWorth;
+        public final BigDecimal balance;
+        public final BigDecimal assets;
+
+        public PortfolioPoint(long timestamp, BigDecimal netWorth, BigDecimal balance, BigDecimal assets) {
+            this.timestamp = timestamp;
+            this.netWorth = netWorth;
+            this.balance = balance;
+            this.assets = assets;
+        }
+    }
+
     private final Map<UUID, BigDecimal> balances = new HashMap<>();
     private final Map<UUID, List<VaultRecord>> vaults = new HashMap<>();
+    private final Map<UUID, List<PortfolioPoint>> portfolioHistory = new HashMap<>();
+
+    public List<PortfolioPoint> getPortfolioHistory(UUID player) {
+        return portfolioHistory.getOrDefault(player, java.util.Collections.emptyList());
+    }
+
+    public void addPortfolioPoint(UUID player, BigDecimal balance, BigDecimal assets) {
+        List<PortfolioPoint> list = portfolioHistory.computeIfAbsent(player, k -> new ArrayList<>());
+        long now = System.currentTimeMillis();
+        BigDecimal netWorth = balance.add(assets);
+        list.add(new PortfolioPoint(now, netWorth, balance, assets));
+        while (list.size() > 40) {
+            list.remove(0);
+        }
+        setDirty();
+    }
 
     public Map<UUID, BigDecimal> getBalances() { return balances; }
     public void setBalance(UUID player, BigDecimal balance) { balances.put(player, balance); setDirty(); }
@@ -93,7 +123,61 @@ public class EconomyAccountData extends SavedData {
                 data.vaults.put(uuid, list);
             } catch (Exception e) {}
         }
+
+        CompoundTag historyTag = tag.getCompound("PortfolioHistory");
+        for (String key : historyTag.getAllKeys()) {
+            try {
+                UUID uuid = UUID.fromString(key);
+                ListTag listTag = historyTag.getList(key, Tag.TAG_COMPOUND);
+                List<PortfolioPoint> list = new ArrayList<>();
+                for (int i = 0; i < listTag.size(); i++) {
+                    CompoundTag ptTag = listTag.getCompound(i);
+                    long ts = ptTag.getLong("TS");
+                    BigDecimal nw = new BigDecimal(ptTag.getString("NW"));
+                    BigDecimal bal = new BigDecimal(ptTag.getString("BAL"));
+                    BigDecimal ass = new BigDecimal(ptTag.getString("ASS"));
+                    list.add(new PortfolioPoint(ts, nw, bal, ass));
+                }
+                data.portfolioHistory.put(uuid, list);
+            } catch (Exception e) {}
+        }
         return data;
+    }
+
+    public static void recordSnapshot(UUID player, net.minecraft.server.level.ServerLevel level) {
+        if (player == null || level == null) return;
+        EconomyAccountData accountData = get(level);
+        BigDecimal balance = accountData.getBalance(player);
+
+        BigDecimal assetValue = BigDecimal.ZERO;
+        List<com.nstut.economy.blocks.VaultBlockEntity> vaults = com.nstut.economy.blocks.VaultManager.getVaults(level, player);
+        Map<String, Integer> itemCounts = new HashMap<>();
+        for (com.nstut.economy.blocks.VaultBlockEntity vault : vaults) {
+            for (int slot = 0; slot < vault.getContainerSize(); slot++) {
+                net.minecraft.world.item.ItemStack stack = vault.getItem(slot);
+                if (!stack.isEmpty()) {
+                    String itemId = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
+                    itemCounts.put(itemId, itemCounts.getOrDefault(itemId, 0) + stack.getCount());
+                }
+            }
+        }
+
+        com.nstut.economy.data.EconomyTradeData historyData = com.nstut.economy.data.EconomyTradeData.get(level);
+        for (Map.Entry<String, Integer> entry : itemCounts.entrySet()) {
+            String id = entry.getKey();
+            int qty = entry.getValue();
+            BigDecimal unitPrice = BigDecimal.ZERO;
+            List<com.nstut.economy.data.EconomyTradeData.TradeSnapshot> trades = historyData.getTrades();
+            for (int i = trades.size() - 1; i >= 0; i--) {
+                if (trades.get(i).itemId.equalsIgnoreCase(id)) {
+                    unitPrice = new BigDecimal(trades.get(i).price);
+                    break;
+                }
+            }
+            assetValue = assetValue.add(unitPrice.multiply(BigDecimal.valueOf(qty)));
+        }
+
+        accountData.addPortfolioPoint(player, balance, assetValue);
     }
 
     @Override
@@ -117,6 +201,21 @@ public class EconomyAccountData extends SavedData {
             vaultsTag.put(e.getKey().toString(), listTag);
         }
         tag.put("Vaults", vaultsTag);
+
+        CompoundTag historyTag = new CompoundTag();
+        for (Map.Entry<UUID, List<PortfolioPoint>> e : portfolioHistory.entrySet()) {
+            ListTag listTag = new ListTag();
+            for (PortfolioPoint pt : e.getValue()) {
+                CompoundTag ptTag = new CompoundTag();
+                ptTag.putLong("TS", pt.timestamp);
+                ptTag.putString("NW", pt.netWorth.toPlainString());
+                ptTag.putString("BAL", pt.balance.toPlainString());
+                ptTag.putString("ASS", pt.assets.toPlainString());
+                listTag.add(ptTag);
+            }
+            historyTag.put(e.getKey().toString(), listTag);
+        }
+        tag.put("PortfolioHistory", historyTag);
         return tag;
     }
 }

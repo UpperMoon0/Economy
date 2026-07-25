@@ -6,8 +6,8 @@ import net.minecraft.client.gui.GuiGraphics;
 public class ButtonWidget extends UIComponent {
 
     private String label;
-    private final int normalColor;
-    private final int hoverColor;
+    private int normalColor;
+    private int hoverColor;
     private final int textColor;
     private boolean active;
     private Runnable onClick;
@@ -22,6 +22,10 @@ public class ButtonWidget extends UIComponent {
     public ButtonWidget onPress(Runnable r) { this.onClick = r; return this; }
     public void setActive(boolean a) { this.active = a; }
     public void setLabel(String label) { this.label = label; }
+    public void setColors(int normalColor, int hoverColor) {
+        this.normalColor = normalColor;
+        this.hoverColor = hoverColor;
+    }
 
     @Override
     public int preferredWidth(Font font) { return font != null ? font.width(label) + 8 : 40; }

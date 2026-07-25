@@ -3,6 +3,7 @@ package com.nstut.forge.network;
 import com.nstut.Economy;
 import com.nstut.economy.api.IAccountManager;
 import com.nstut.economy.api.IOrder;
+import com.nstut.economy.blocks.VaultBlockEntity;
 import com.nstut.economy.blocks.VaultManager;
 import com.nstut.economy.config.EconomyConfig;
 import com.nstut.economy.data.EconomyTradeData;
@@ -28,7 +29,9 @@ import net.minecraftforge.network.simple.SimpleChannel;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.function.Supplier;
 
@@ -54,6 +57,9 @@ public class MarketNetwork {
         CHANNEL.registerMessage(packetId++, SyncOrderHistoryPacket.class, SyncOrderHistoryPacket::encode, SyncOrderHistoryPacket::decode, SyncOrderHistoryPacket::handle);
         CHANNEL.registerMessage(packetId++, RequestVaultInfoPacket.class, RequestVaultInfoPacket::encode, RequestVaultInfoPacket::decode, RequestVaultInfoPacket::handle);
         CHANNEL.registerMessage(packetId++, SyncVaultInfoPacket.class, SyncVaultInfoPacket::encode, SyncVaultInfoPacket::decode, SyncVaultInfoPacket::handle);
+        CHANNEL.registerMessage(packetId++, ToggleVaultModePacket.class, ToggleVaultModePacket::encode, ToggleVaultModePacket::decode, ToggleVaultModePacket::handle);
+        CHANNEL.registerMessage(packetId++, RequestPortfolioPacket.class, RequestPortfolioPacket::encode, RequestPortfolioPacket::decode, RequestPortfolioPacket::handle);
+        CHANNEL.registerMessage(packetId++, SyncPortfolioPacket.class, SyncPortfolioPacket::encode, SyncPortfolioPacket::decode, SyncPortfolioPacket::handle);
     }
 
     public static class ItemCardData {
@@ -61,9 +67,11 @@ public class MarketNetwork {
         public final String displayName;
         public final String globalPrice;
         public final int offerCount;
+        public final double priceChangePercent;
 
-        public ItemCardData(String itemId, String displayName, String globalPrice, int offerCount) {
+        public ItemCardData(String itemId, String displayName, String globalPrice, int offerCount, double priceChangePercent) {
             this.itemId = itemId; this.displayName = displayName; this.globalPrice = globalPrice; this.offerCount = offerCount;
+            this.priceChangePercent = priceChangePercent;
         }
 
         public void write(FriendlyByteBuf buf) {
@@ -71,10 +79,11 @@ public class MarketNetwork {
             buf.writeUtf(displayName);
             buf.writeUtf(globalPrice);
             buf.writeInt(offerCount);
+            buf.writeDouble(priceChangePercent);
         }
 
         public static ItemCardData read(FriendlyByteBuf buf) {
-            return new ItemCardData(buf.readUtf(), buf.readUtf(), buf.readUtf(), buf.readInt());
+            return new ItemCardData(buf.readUtf(), buf.readUtf(), buf.readUtf(), buf.readInt(), buf.readDouble());
         }
     }
 
@@ -343,50 +352,126 @@ public class MarketNetwork {
         }
     }
 
-    private static void sendItemList(ServerPlayer player) {
-        OrderManager orderManager = Economy.getOrderManager();
-        var account = IAccountManager.getInstance().getOrCreatePlayerAccount(player.getUUID());
-        EconomyConfig config = EconomyConfig.getInstance();
-        String balance = account.getBalance().setScale(2, RoundingMode.HALF_UP).toPlainString();
-        int vaultCount = VaultManager.getVaultRecords(player.getUUID()).size();
+    public static BigDecimal getGlobalPrice(OrderManager orderManager, String itemId) {
+        BigDecimal cheapestAsk = null;
+        BigDecimal highestBid = null;
 
-        java.util.Map<String, String> displayNames = new java.util.LinkedHashMap<>();
-        java.util.Map<String, BigDecimal> bestBids = new java.util.LinkedHashMap<>();
-        java.util.Map<String, BigDecimal> bestAsks = new java.util.LinkedHashMap<>();
-        java.util.Map<String, Integer> counts = new java.util.LinkedHashMap<>();
-
-        UUID playerId = player.getUUID();
         for (Order order : orderManager.getAllOrders()) {
             if (!(order.getCommodity() instanceof ItemCommodity ic)) continue;
-            String itemId = ic.getItem().builtInRegistryHolder().key().location().toString();
-            displayNames.putIfAbsent(itemId, ic.getDisplayName().getString());
-            counts.merge(itemId, 1, Integer::sum);
+            String id = ic.getItem().builtInRegistryHolder().key().location().toString();
+            if (!id.equals(itemId)) continue;
 
             BigDecimal price = order.getPricePerUnit();
             if (order.getType() == IOrder.OrderType.SELL) {
-                BigDecimal cur = bestAsks.get(itemId);
-                if (cur == null || price.compareTo(cur) < 0) bestAsks.put(itemId, price);
+                if (cheapestAsk == null || price.compareTo(cheapestAsk) < 0) {
+                    cheapestAsk = price;
+                }
             } else {
-                BigDecimal cur = bestBids.get(itemId);
-                if (cur == null || price.compareTo(cur) > 0) bestBids.put(itemId, price);
+                if (highestBid == null || price.compareTo(highestBid) > 0) {
+                    highestBid = price;
+                }
             }
         }
 
-        List<ItemCardData> cards = new ArrayList<>();
-        for (String itemId : displayNames.keySet()) {
-            BigDecimal ask = bestAsks.get(itemId);
-            BigDecimal bid = bestBids.get(itemId);
-            BigDecimal effectivePrice = ask != null ? ask : bid;
-            if (effectivePrice == null) {
-                var trades = TradeLedger.getRecentTrades(itemId, 1);
-                if (!trades.isEmpty()) {
-                    try {
-                        effectivePrice = new BigDecimal(trades.get(0).price);
-                    } catch (Exception ignored) {}
+        if (cheapestAsk != null) {
+            return cheapestAsk;
+        }
+        if (highestBid != null) {
+            return highestBid;
+        }
+
+        var trades = TradeLedger.getRecentTrades(itemId, 1);
+        if (!trades.isEmpty()) {
+            try {
+                return new BigDecimal(trades.get(0).price);
+            } catch (Exception ignored) {}
+        }
+
+        return null;
+    }
+
+    private static void sendItemList(ServerPlayer player) {
+        OrderManager orderManager = Economy.getOrderManager();
+        var account = IAccountManager.getInstance().getOrCreatePlayerAccount(player.getUUID());
+        String balance = account.getBalance().setScale(0, RoundingMode.HALF_UP).toPlainString();
+        int vaultCount = VaultManager.getVaultRecords(player.getUUID()).size();
+
+        java.util.Set<String> itemIds = new java.util.LinkedHashSet<>();
+        java.util.Map<String, Integer> counts = new java.util.HashMap<>();
+
+        // 1. Items with active orders
+        for (Order order : orderManager.getAllOrders()) {
+            if (!(order.getCommodity() instanceof ItemCommodity ic)) continue;
+            String itemId = ic.getItem().builtInRegistryHolder().key().location().toString();
+            itemIds.add(itemId);
+            counts.merge(itemId, 1, Integer::sum);
+        }
+
+        // 2. Items in trade ledger history
+        for (var trade : TradeLedger.getAllTrades()) {
+            if (trade.itemId != null && !trade.itemId.isEmpty()) {
+                itemIds.add(trade.itemId);
+            }
+        }
+
+        // 3. Items inside player's Vaults
+        for (var vault : VaultManager.getVaults(player.serverLevel(), player.getUUID())) {
+            for (int s = 0; s < vault.getContainerSize(); s++) {
+                net.minecraft.world.item.ItemStack stack = vault.getItem(s);
+                if (!stack.isEmpty()) {
+                    String id = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
+                    itemIds.add(id);
                 }
             }
-            String priceStr = effectivePrice != null ? effectivePrice.setScale(2, RoundingMode.HALF_UP).toPlainString() : "--";
-            cards.add(new ItemCardData(itemId, displayNames.get(itemId), priceStr, counts.getOrDefault(itemId, 0)));
+        }
+
+        // 4. Default commodity catalog items
+        itemIds.add("minecraft:diamond");
+        itemIds.add("minecraft:iron_ingot");
+        itemIds.add("minecraft:gold_ingot");
+        itemIds.add("minecraft:emerald");
+        itemIds.add("minecraft:netherite_ingot");
+        itemIds.add("minecraft:copper_ingot");
+        itemIds.add("minecraft:coal");
+        itemIds.add("minecraft:redstone");
+        itemIds.add("minecraft:lapis_lazuli");
+        itemIds.add("minecraft:quartz");
+        itemIds.add("minecraft:amethyst_shard");
+
+        List<ItemCardData> cards = new ArrayList<>();
+        for (String itemId : itemIds) {
+            ResourceLocation rl = new ResourceLocation(itemId);
+            Item item = BuiltInRegistries.ITEM.get(rl);
+            if (item == net.minecraft.world.item.Items.AIR) continue;
+
+            String displayName = new net.minecraft.world.item.ItemStack(item).getHoverName().getString();
+
+            BigDecimal effectivePrice = getGlobalPrice(orderManager, itemId);
+            if (effectivePrice == null) continue;
+
+            double priceChange = Double.NaN;
+            var trades = TradeLedger.getRecentTrades(itemId, 50);
+            if (!trades.isEmpty()) {
+                try {
+                    double curP = effectivePrice.doubleValue();
+                    double prevP = curP;
+                    boolean foundDiff = false;
+                    for (int t = 0; t < trades.size(); t++) {
+                        double p = Double.parseDouble(trades.get(t).price);
+                        if (p != curP) {
+                            prevP = p;
+                            foundDiff = true;
+                            break;
+                        }
+                    }
+                    if (foundDiff && prevP > 0) {
+                        priceChange = ((curP - prevP) / prevP) * 100.0;
+                    }
+                } catch (Exception ignored) {}
+            }
+
+            String priceStr = effectivePrice.setScale(0, RoundingMode.HALF_UP).toPlainString();
+            cards.add(new ItemCardData(itemId, displayName, priceStr, counts.getOrDefault(itemId, 0), priceChange));
         }
 
         CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), new SyncItemListPacket(balance, vaultCount, cards));
@@ -420,7 +505,7 @@ public class MarketNetwork {
 
             OrderEntry entry = new OrderEntry(
                 order.getOrderId(), order.getOwner(), sellerName,
-                order.getPricePerUnit().setScale(2, RoundingMode.HALF_UP).toPlainString(),
+                order.getPricePerUnit().setScale(0, RoundingMode.HALF_UP).toPlainString(),
                 order.getQuantity(), order.getInitialQuantity(), order.getOwner().equals(playerId), order.isServerOrder());
 
             if (order.getType() == IOrder.OrderType.SELL) {
@@ -448,44 +533,15 @@ public class MarketNetwork {
             chart.add(new ChartPoint(new BigDecimal(t.price).intValue(), t.quantity));
         }
 
+        BigDecimal globalPrice = getGlobalPrice(orderManager, itemId);
+        if (globalPrice != null) {
+            chart.add(new ChartPoint(globalPrice.intValue(), 1));
+        }
+
         CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), new SyncItemDetailPacket(itemId, displayName, vaultCount, asks, bids, chart));
     }
 
     // ── Order History ────────────────────────────────────────────────────────
-
-    public static class HistoryEntry {
-        public final String itemId;
-        public final String displayName;
-        public final String price;
-        public final int quantity;
-        /** true = player was the seller, false = buyer */
-        public final boolean wasSell;
-        /** epoch-millis */
-        public final long timestamp;
-        public final String counterparty;
-
-        public HistoryEntry(String itemId, String displayName, String price, int quantity,
-                            boolean wasSell, long timestamp, String counterparty) {
-            this.itemId = itemId; this.displayName = displayName; this.price = price;
-            this.quantity = quantity; this.wasSell = wasSell;
-            this.timestamp = timestamp; this.counterparty = counterparty;
-        }
-
-        public void write(FriendlyByteBuf buf) {
-            buf.writeUtf(itemId);
-            buf.writeUtf(displayName);
-            buf.writeUtf(price);
-            buf.writeInt(quantity);
-            buf.writeBoolean(wasSell);
-            buf.writeLong(timestamp);
-            buf.writeUtf(counterparty);
-        }
-
-        public static HistoryEntry read(FriendlyByteBuf buf) {
-            return new HistoryEntry(buf.readUtf(), buf.readUtf(), buf.readUtf(),
-                    buf.readInt(), buf.readBoolean(), buf.readLong(), buf.readUtf());
-        }
-    }
 
     public static class RequestOrderHistoryPacket {
         public RequestOrderHistoryPacket() {}
@@ -553,7 +609,7 @@ public class MarketNetwork {
             }
 
             entries.add(new HistoryEntry(t.itemId, displayName,
-                    new java.math.BigDecimal(t.price).setScale(2, java.math.RoundingMode.HALF_UP).toPlainString(),
+                    new java.math.BigDecimal(t.price).setScale(0, java.math.RoundingMode.HALF_UP).toPlainString(),
                     t.quantity, isSeller, t.timestamp, counterName));
         }
 
@@ -568,21 +624,24 @@ public class MarketNetwork {
         public final int usedSlots;
         public final int totalSlots;
         public final int totalItems;
+        public final int mode;
 
-        public VaultDetailEntry(int x, int y, int z, String dimension, int usedSlots, int totalSlots, int totalItems) {
+        public VaultDetailEntry(int x, int y, int z, String dimension, int usedSlots, int totalSlots, int totalItems, int mode) {
             this.x = x; this.y = y; this.z = z; this.dimension = dimension;
             this.usedSlots = usedSlots; this.totalSlots = totalSlots; this.totalItems = totalItems;
+            this.mode = mode;
         }
 
         public void write(FriendlyByteBuf buf) {
             buf.writeInt(x); buf.writeInt(y); buf.writeInt(z);
             buf.writeUtf(dimension);
             buf.writeInt(usedSlots); buf.writeInt(totalSlots); buf.writeInt(totalItems);
+            buf.writeInt(mode);
         }
 
         public static VaultDetailEntry read(FriendlyByteBuf buf) {
             return new VaultDetailEntry(buf.readInt(), buf.readInt(), buf.readInt(),
-                buf.readUtf(), buf.readInt(), buf.readInt(), buf.readInt());
+                buf.readUtf(), buf.readInt(), buf.readInt(), buf.readInt(), buf.readInt());
         }
     }
 
@@ -633,9 +692,11 @@ public class MarketNetwork {
             int used = 0;
             int total = 54;
             int items = 0;
+            int mode = 0;
             net.minecraft.world.level.block.entity.BlockEntity be = player.serverLevel().getBlockEntity(r.pos);
             if (be instanceof com.nstut.economy.blocks.VaultBlockEntity vault) {
                 total = vault.getContainerSize();
+                mode = vault.getMode().id;
                 for (int slot = 0; slot < total; slot++) {
                     net.minecraft.world.item.ItemStack stack = vault.getItem(slot);
                     if (!stack.isEmpty()) {
@@ -644,8 +705,173 @@ public class MarketNetwork {
                     }
                 }
             }
-            entries.add(new VaultDetailEntry(r.pos.getX(), r.pos.getY(), r.pos.getZ(), r.dimension, used, total, items));
+            entries.add(new VaultDetailEntry(r.pos.getX(), r.pos.getY(), r.pos.getZ(), r.dimension, used, total, items, mode));
         }
         CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), new SyncVaultInfoPacket(entries));
+    }
+
+    public static class ToggleVaultModePacket {
+        public final net.minecraft.core.BlockPos pos;
+
+        public ToggleVaultModePacket(net.minecraft.core.BlockPos pos) { this.pos = pos; }
+
+        public static void encode(ToggleVaultModePacket pkt, FriendlyByteBuf buf) { buf.writeBlockPos(pkt.pos); }
+        public static ToggleVaultModePacket decode(FriendlyByteBuf buf) { return new ToggleVaultModePacket(buf.readBlockPos()); }
+
+        public static void handle(ToggleVaultModePacket pkt, Supplier<NetworkEvent.Context> ctx) {
+            ctx.get().enqueueWork(() -> {
+                ServerPlayer player = ctx.get().getSender();
+                if (player != null && player.level().getBlockEntity(pkt.pos) instanceof com.nstut.economy.blocks.VaultBlockEntity vault) {
+                    if (vault.getOwner() != null && vault.getOwner().equals(player.getUUID())) {
+                        vault.cycleMode();
+                        if (player.containerMenu instanceof com.nstut.economy.blocks.VaultMenu vm) {
+                            vm.setData(0, vault.getMode().id);
+                        }
+                    }
+                }
+            });
+            ctx.get().setPacketHandled(true);
+        }
+    }
+
+    // ── Portfolio Details ──────────────────────────────────────────────────────
+
+    public static class PortfolioPointData {
+        public final long timestamp;
+        public final String netWorth;
+        public final String balance;
+        public final String assets;
+
+        public PortfolioPointData(long timestamp, String netWorth, String balance, String assets) {
+            this.timestamp = timestamp; this.netWorth = netWorth; this.balance = balance; this.assets = assets;
+        }
+
+        public void write(FriendlyByteBuf buf) {
+            buf.writeLong(timestamp);
+            buf.writeUtf(netWorth);
+            buf.writeUtf(balance);
+            buf.writeUtf(assets);
+        }
+
+        public static PortfolioPointData read(FriendlyByteBuf buf) {
+            return new PortfolioPointData(buf.readLong(), buf.readUtf(), buf.readUtf(), buf.readUtf());
+        }
+    }
+
+    public static class AssetHoldingData {
+        public final String itemId;
+        public final String displayName;
+        public final int quantity;
+        public final String totalValue;
+
+        public AssetHoldingData(String itemId, String displayName, int quantity, String totalValue) {
+            this.itemId = itemId; this.displayName = displayName; this.quantity = quantity; this.totalValue = totalValue;
+        }
+
+        public void write(FriendlyByteBuf buf) {
+            buf.writeUtf(itemId);
+            buf.writeUtf(displayName);
+            buf.writeInt(quantity);
+            buf.writeUtf(totalValue);
+        }
+
+        public static AssetHoldingData read(FriendlyByteBuf buf) {
+            return new AssetHoldingData(buf.readUtf(), buf.readUtf(), buf.readInt(), buf.readUtf());
+        }
+    }
+
+    public static class RequestPortfolioPacket {
+        public RequestPortfolioPacket() {}
+        public static void encode(RequestPortfolioPacket pkt, FriendlyByteBuf buf) {}
+        public static RequestPortfolioPacket decode(FriendlyByteBuf buf) { return new RequestPortfolioPacket(); }
+
+        public static void handle(RequestPortfolioPacket pkt, Supplier<NetworkEvent.Context> ctx) {
+            ctx.get().enqueueWork(() -> {
+                ServerPlayer player = ctx.get().getSender();
+                if (player != null) sendPortfolioInfo(player);
+            });
+            ctx.get().setPacketHandled(true);
+        }
+    }
+
+    public static class SyncPortfolioPacket {
+        public final List<PortfolioPointData> points;
+        public final List<AssetHoldingData> holdings;
+
+        public SyncPortfolioPacket(List<PortfolioPointData> points, List<AssetHoldingData> holdings) {
+            this.points = points; this.holdings = holdings;
+        }
+
+        public static void encode(SyncPortfolioPacket pkt, FriendlyByteBuf buf) {
+            buf.writeInt(pkt.points.size());
+            for (PortfolioPointData p : pkt.points) p.write(buf);
+            buf.writeInt(pkt.holdings.size());
+            for (AssetHoldingData h : pkt.holdings) h.write(buf);
+        }
+
+        public static SyncPortfolioPacket decode(FriendlyByteBuf buf) {
+            int pCount = buf.readInt();
+            List<PortfolioPointData> points = new ArrayList<>();
+            for (int i = 0; i < pCount; i++) points.add(PortfolioPointData.read(buf));
+            int hCount = buf.readInt();
+            List<AssetHoldingData> holdings = new ArrayList<>();
+            for (int i = 0; i < hCount; i++) holdings.add(AssetHoldingData.read(buf));
+            return new SyncPortfolioPacket(points, holdings);
+        }
+
+        public static void handle(SyncPortfolioPacket pkt, Supplier<NetworkEvent.Context> ctx) {
+            ctx.get().enqueueWork(() -> DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () -> com.nstut.forge.client.MarketScreen.handleSyncPortfolio(pkt)));
+            ctx.get().setPacketHandled(true);
+        }
+    }
+
+    @SuppressWarnings("removal")
+    public static void sendPortfolioInfo(ServerPlayer player) {
+        com.nstut.economy.data.EconomyAccountData.recordSnapshot(player.getUUID(), player.serverLevel());
+
+        com.nstut.economy.data.EconomyAccountData accountData = com.nstut.economy.data.EconomyAccountData.get(player.serverLevel());
+        List<com.nstut.economy.data.EconomyAccountData.PortfolioPoint> rawPoints = accountData.getPortfolioHistory(player.getUUID());
+
+        List<PortfolioPointData> points = new ArrayList<>();
+        for (var pt : rawPoints) {
+            points.add(new PortfolioPointData(pt.timestamp,
+                pt.netWorth.setScale(0, java.math.RoundingMode.HALF_UP).toPlainString(),
+                pt.balance.setScale(0, java.math.RoundingMode.HALF_UP).toPlainString(),
+                pt.assets.setScale(0, java.math.RoundingMode.HALF_UP).toPlainString()));
+        }
+
+        List<com.nstut.economy.blocks.VaultBlockEntity> vaults = com.nstut.economy.blocks.VaultManager.getVaults(player.serverLevel(), player.getUUID());
+        Map<String, Integer> itemCounts = new HashMap<>();
+        for (var v : vaults) {
+            for (int s = 0; s < v.getContainerSize(); s++) {
+                ItemStack stack = v.getItem(s);
+                if (!stack.isEmpty()) {
+                    String id = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
+                    itemCounts.put(id, itemCounts.getOrDefault(id, 0) + stack.getCount());
+                }
+            }
+        }
+
+        com.nstut.economy.data.EconomyTradeData historyData = com.nstut.economy.data.EconomyTradeData.get(player.serverLevel());
+        List<AssetHoldingData> holdings = new ArrayList<>();
+        for (var entry : itemCounts.entrySet()) {
+            String id = entry.getKey();
+            int qty = entry.getValue();
+            BigDecimal unitPrice = BigDecimal.ZERO;
+            List<com.nstut.economy.data.EconomyTradeData.TradeSnapshot> trades = historyData.getTrades();
+            for (int i = trades.size() - 1; i >= 0; i--) {
+                if (trades.get(i).itemId.equalsIgnoreCase(id)) {
+                    unitPrice = new BigDecimal(trades.get(i).price);
+                    break;
+                }
+            }
+            BigDecimal totalVal = unitPrice.multiply(BigDecimal.valueOf(qty));
+            net.minecraft.world.item.Item it = net.minecraft.core.registries.BuiltInRegistries.ITEM.get(new ResourceLocation(id));
+            String name = new ItemStack(it).getHoverName().getString();
+            holdings.add(new AssetHoldingData(id, name, qty, totalVal.setScale(0, java.math.RoundingMode.HALF_UP).toPlainString()));
+        }
+
+        holdings.sort((a, b) -> new BigDecimal(b.totalValue).compareTo(new BigDecimal(a.totalValue)));
+        CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), new SyncPortfolioPacket(points, holdings));
     }
 }

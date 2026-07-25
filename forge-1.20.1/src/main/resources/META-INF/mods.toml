@@ -6,7 +6,7 @@ issueTrackerURL = "https://github.com/nstut/economy/issues"
 [[mods]]
 modId = "economy"
 version = "${version}"
-displayName = "Global Economy & Market"
+displayName = "NsTut Economy"
 authors = "NsTut"
 description = '''
 A modern, feature-rich Minecraft Economy mod featuring a full Order Book Market Terminal UI, Vault physical storage integration, player-to-player transfers, automated order matching, and sound-effect enabled financial transactions.

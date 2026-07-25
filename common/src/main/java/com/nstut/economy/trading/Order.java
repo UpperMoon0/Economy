@@ -237,8 +237,8 @@ public class Order implements IOrder {
         int tradedQty = this.quantity;
         this.quantity = 0;
         TradeLedger.recordTrade(commodity.getId().toString(), pricePerUnit, tradedQty, buyer, owner);
-        playMoneySound(level, buyer);
-        playMoneySound(level, owner);
+        notifyPlayerTrade(level, buyer, true, commodity.getDisplayName().getString(), tradedQty, totalPrice);
+        notifyPlayerTrade(level, owner, false, commodity.getDisplayName().getString(), tradedQty, totalPrice);
         return TransactionResult.success("Purchase successful", totalPrice, tradedQty);
     }
 
@@ -276,8 +276,8 @@ public class Order implements IOrder {
         int tradedQty = this.quantity;
         this.quantity = 0;
         TradeLedger.recordTrade(commodity.getId().toString(), pricePerUnit, tradedQty, owner, seller);
-        playMoneySound(level, owner);
-        playMoneySound(level, seller);
+        notifyPlayerTrade(level, owner, true, commodity.getDisplayName().getString(), tradedQty, totalPrice);
+        notifyPlayerTrade(level, seller, false, commodity.getDisplayName().getString(), tradedQty, totalPrice);
         return TransactionResult.success("Sale successful", totalPrice, tradedQty);
     }
 
@@ -360,8 +360,12 @@ public class Order implements IOrder {
 
             this.quantity -= tradeQty;
             TradeLedger.recordTrade(commodity.getId().toString(), pricePerUnit, tradeQty, trader, owner);
-            playMoneySound(level, trader);
-            playMoneySound(level, owner);
+            notifyPlayerTrade(level, trader, true, commodity.getDisplayName().getString(), tradeQty, totalPrice);
+            notifyPlayerTrade(level, owner, false, commodity.getDisplayName().getString(), tradeQty, totalPrice);
+            if (level != null) {
+                com.nstut.economy.data.EconomyAccountData.recordSnapshot(trader, level);
+                com.nstut.economy.data.EconomyAccountData.recordSnapshot(owner, level);
+            }
             return TransactionResult.success("Purchase successful", totalPrice, tradeQty);
         } else {
             IBankAccount buyerAccount = serverOrder ? accounts.getServerAccount() : accounts.getOrCreatePlayerAccount(owner);
@@ -402,19 +406,30 @@ public class Order implements IOrder {
 
             this.quantity -= tradeQty;
             TradeLedger.recordTrade(commodity.getId().toString(), pricePerUnit, tradeQty, owner, trader);
-            playMoneySound(level, owner);
-            playMoneySound(level, trader);
+            notifyPlayerTrade(level, owner, true, commodity.getDisplayName().getString(), tradeQty, totalPrice);
+            notifyPlayerTrade(level, trader, false, commodity.getDisplayName().getString(), tradeQty, totalPrice);
+            if (level != null) {
+                com.nstut.economy.data.EconomyAccountData.recordSnapshot(owner, level);
+                com.nstut.economy.data.EconomyAccountData.recordSnapshot(trader, level);
+            }
             return TransactionResult.success("Sale successful", totalPrice, tradeQty);
         }
     }
 
-    private static void playMoneySound(ServerLevel level, UUID playerUUID) {
+    private static void notifyPlayerTrade(ServerLevel level, UUID playerUUID, boolean isBuy, String itemName, int qty, BigDecimal totalPrice) {
         if (level == null || playerUUID == null) return;
         net.minecraft.server.level.ServerPlayer p = level.getServer().getPlayerList().getPlayer(playerUUID);
         if (p != null) {
             level.playSound(null, p.getX(), p.getY(), p.getZ(),
                 com.nstut.economy.sound.SoundRegistries.MONEY.get(),
                 net.minecraft.sounds.SoundSource.PLAYERS, 0.8F, 1.0F);
+
+            String action = isBuy ? "Bought" : "Sold";
+            String formattedPrice = com.nstut.economy.util.EconomyFormatUtil.formatCompact(totalPrice);
+            net.minecraft.network.chat.Component msg = net.minecraft.network.chat.Component.literal(
+                "§2[Market] §aOrder Matched! §f" + action + " §e" + qty + "x " + itemName + " §ffor §e" + formattedPrice + " §fcoins."
+            );
+            p.sendSystemMessage(msg);
         }
     }
 

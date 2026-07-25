@@ -13,7 +13,7 @@ public class EconomyConfig {
     // Currency settings
     private String currencyName = "Coin";
     private String currencySymbol = "¤";
-    private BigDecimal startingBalance = new BigDecimal("100.00");
+    private BigDecimal startingBalance = BigDecimal.ZERO;
     
     // Trading settings
     private double taxRate = 0.05; // 5%

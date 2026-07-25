@@ -15,13 +15,47 @@ import java.util.UUID;
 
 public class VaultBlockEntity extends BlockEntity implements Container {
 
+    public enum VaultMode {
+        BOTH(0, "Both (Input & Output)"),
+        INPUT(1, "Input Only (Sell Orders)"),
+        OUTPUT(2, "Output Only (Bought Items)");
+
+        public final int id;
+        public final String displayName;
+
+        VaultMode(int id, String displayName) {
+            this.id = id;
+            this.displayName = displayName;
+        }
+
+        public static VaultMode byId(int id) {
+            for (VaultMode m : values()) if (m.id == id) return m;
+            return BOTH;
+        }
+    }
+
     private static final int SIZE = 54;
     private NonNullList<ItemStack> items;
     private UUID owner;
+    private VaultMode mode = VaultMode.BOTH;
 
     public VaultBlockEntity(BlockPos pos, BlockState state) {
         super(BlockRegistries.VAULT_BE.get(), pos, state);
         this.items = NonNullList.withSize(SIZE, ItemStack.EMPTY);
+    }
+
+    public VaultMode getMode() { return mode != null ? mode : VaultMode.BOTH; }
+
+    public void setMode(VaultMode mode) {
+        this.mode = mode != null ? mode : VaultMode.BOTH;
+        setChanged();
+        if (level != null && !level.isClientSide) {
+            level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 3);
+        }
+    }
+
+    public void cycleMode() {
+        setMode(VaultMode.byId((getMode().id + 1) % VaultMode.values().length));
     }
 
     public void setOwner(UUID owner) {
@@ -174,6 +208,9 @@ public class VaultBlockEntity extends BlockEntity implements Container {
         if (tag.hasUUID("Owner")) {
             owner = tag.getUUID("Owner");
         }
+        if (tag.contains("Mode")) {
+            mode = VaultMode.byId(tag.getInt("Mode"));
+        }
     }
 
     @Override
@@ -183,12 +220,17 @@ public class VaultBlockEntity extends BlockEntity implements Container {
         if (owner != null) {
             tag.putUUID("Owner", owner);
         }
+        tag.putInt("Mode", getMode().id);
     }
 
     @Override
     public @NotNull CompoundTag getUpdateTag() {
         CompoundTag tag = super.getUpdateTag();
         ContainerHelper.saveAllItems(tag, items);
+        if (owner != null) {
+            tag.putUUID("Owner", owner);
+        }
+        tag.putInt("Mode", getMode().id);
         return tag;
     }
 }

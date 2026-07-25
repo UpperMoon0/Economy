@@ -2,6 +2,7 @@ package com.nstut.forge.client;
 
 import com.nstut.economy.blocks.MarketMenu;
 import com.nstut.economy.ui.framework.*;
+import com.nstut.forge.network.HistoryEntry;
 import com.nstut.forge.network.MarketNetwork;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
@@ -108,18 +109,25 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         g.pose().popPose();
     }
 
+    public static String formatCompact(double val) { return com.nstut.economy.util.EconomyFormatUtil.formatCompact(val); }
+    public static String formatCompact(BigDecimal val) { return com.nstut.economy.util.EconomyFormatUtil.formatCompact(val); }
+    public static String formatCompact(long val) { return com.nstut.economy.util.EconomyFormatUtil.formatCompact(val); }
+    public static String formatCompact(String str) { return com.nstut.economy.util.EconomyFormatUtil.formatCompact(str); }
+    public static String formatPriceChange(double percent) { return com.nstut.economy.util.EconomyFormatUtil.formatPriceChange(percent); }
+    public static int getPriceChangeColor(double percent) { return com.nstut.economy.util.EconomyFormatUtil.getPriceChangeColor(percent); }
+
     private static List<MarketNetwork.ItemCardData> cachedCards = new ArrayList<>();
-    private static String cachedBalance = "0.00";
+    private static String cachedBalance = "0";
     private static int cachedVaultCount;
     private static MarketNetwork.SyncItemDetailPacket cachedDetail;
-    private static List<MarketNetwork.HistoryEntry> cachedHistory = new ArrayList<>();
+    private static List<HistoryEntry> cachedHistory = new ArrayList<>();
     private static final Map<String, ItemStack> itemIconCache = new HashMap<>();
     private static final ItemStack COIN_ICON = new ItemStack(BuiltInRegistries.ITEM.get(new ResourceLocation(com.nstut.Economy.MOD_ID, "coin")));
 
     private UIComponent root;
     private TextWidget vaultWidget;
     private UIComponent balanceWidget;
-    private ButtonWidget browseBtn, vaultsBtn, newOrderBtn, orderHistoryBtn;
+    private ButtonWidget browseBtn, vaultsBtn, portfolioBtn, newOrderBtn, orderHistoryBtn;
     private EditBoxWrapper searchField;
     private ScrollList cardGrid;
     private ScrollList askList, bidList;
@@ -134,11 +142,19 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
     private boolean createSellMode = true;
     private UIComponent historyView;
     private UIComponent vaultsView;
+    private UIComponent portfolioView;
 
     private static List<MarketNetwork.VaultDetailEntry> cachedVaultEntries = new ArrayList<>();
+    private static List<MarketNetwork.PortfolioPointData> cachedPortfolioPoints = new ArrayList<>();
+    private static List<MarketNetwork.AssetHoldingData> cachedAssetHoldings = new ArrayList<>();
 
     public static void handleSyncVaultInfo(MarketNetwork.SyncVaultInfoPacket pkt) {
         cachedVaultEntries = pkt.entries;
+    }
+
+    public static void handleSyncPortfolio(MarketNetwork.SyncPortfolioPacket pkt) {
+        cachedPortfolioPoints = pkt.points;
+        cachedAssetHoldings = pkt.holdings;
     }
 
     private EditBoxWrapper historySearchField;
@@ -301,11 +317,12 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
             @Override public int preferredHeight(Font f) { return 16; }
             @Override
             public void render(GuiGraphics g, Font fnt, int mx, int my, float pt) {
-                int textW = fnt.width(cachedBalance);
+                String balDisp = formatCompact(new BigDecimal(cachedBalance));
+                int textW = fnt.width(balDisp);
                 int totalW = 8 + 3 + textW;
                 int startX = x + (width - totalW) / 2;
                 renderSmallCoin(g, startX, y + 4);
-                g.drawString(fnt, cachedBalance, startX + 11, y + 3, TEXT_PRIMARY);
+                g.drawString(fnt, balDisp, startX + 11, y + 3, TEXT_PRIMARY);
             }
         };
         sidebar.addChild(balanceWidget);
@@ -325,6 +342,14 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
             MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestVaultInfoPacket());
         });
         sidebar.addChild(new PaddingBox(0, 4, 0, 4, vaultsBtn));
+
+        portfolioBtn = btn("Portfolio", PANEL, CARD_HOVER).onPress(() -> {
+            cachedPortfolioPoints = new ArrayList<>();
+            cachedAssetHoldings = new ArrayList<>();
+            switchView(5);
+            MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestPortfolioPacket());
+        });
+        sidebar.addChild(new PaddingBox(0, 4, 0, 4, portfolioBtn));
 
         newOrderBtn = btn("New Order", PANEL, CARD_HOVER).onPress(() -> {
             createOrderSourceMode = 0;
@@ -378,6 +403,12 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         vaults.setVisible(false);
         this.vaultsView = vaults;
         contentArea.addChild(vaults);
+
+        UIComponent portfolio = buildPortfolio(font);
+        portfolio.flex();
+        portfolio.setVisible(false);
+        this.portfolioView = portfolio;
+        contentArea.addChild(portfolio);
 
         PaddingBox contentPadding = new PaddingBox(8, 8, 8, 8, contentArea);
         contentPadding.flex();
@@ -444,7 +475,13 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
                 if (card.globalPrice != null && !card.globalPrice.isEmpty()) {
                     if (!card.globalPrice.equals("--")) {
                         renderSmallCoin(g, cx + 26, cy + 22);
-                        g.drawString(fnt, card.globalPrice, cx + 37, cy + 22, ACCENT);
+                        String compactPrice = formatCompact(parsePrice(card.globalPrice));
+                        g.drawString(fnt, compactPrice, cx + 37, cy + 22, ACCENT);
+
+                        int priceW = fnt.width(compactPrice);
+                        String changeText = formatPriceChange(card.priceChangePercent);
+                        int changeColor = getPriceChangeColor(card.priceChangePercent);
+                        g.drawString(fnt, changeText, cx + 37 + priceW + 6, cy + 22, changeColor);
                     } else {
                         g.drawString(fnt, card.globalPrice, cx + 28, cy + 22, TEXT_MUTED);
                     }
@@ -483,12 +520,31 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
             @Override
             public void render(GuiGraphics g, Font fnt, int mx, int my, float pt) {
                 if (cachedDetail != null) {
-                    ItemStack icon = itemIconCache.computeIfAbsent(cachedDetail.itemId, id -> {
-                        Item it = BuiltInRegistries.ITEM.get(new ResourceLocation(id));
-                        return new ItemStack(it);
-                    });
-                    g.renderItem(icon, x, y);
-                    g.drawString(fnt, cachedDetail.displayName, x + 20, y + 4, TEXT_PRIMARY);
+                    String titleText = cachedDetail.displayName;
+                    g.drawString(fnt, titleText, x, y + 4, TEXT_PRIMARY);
+
+                    double detailChange = Double.NaN;
+                    if (cachedDetail.chart != null && !cachedDetail.chart.isEmpty()) {
+                        List<MarketNetwork.ChartPoint> pts = cachedDetail.chart;
+                        int curP = pts.get(pts.size() - 1).price;
+                        int prevP = curP;
+                        boolean foundDiff = false;
+                        for (int i = pts.size() - 2; i >= 0; i--) {
+                            if (pts.get(i).price != curP) {
+                                prevP = pts.get(i).price;
+                                foundDiff = true;
+                                break;
+                            }
+                        }
+                        if (foundDiff && prevP > 0) {
+                            detailChange = ((double)(curP - prevP) / prevP) * 100.0;
+                        }
+                    }
+
+                    int titleW = fnt.width(titleText);
+                    String changeText = formatPriceChange(detailChange);
+                    int changeColor = getPriceChangeColor(detailChange);
+                    g.drawString(fnt, changeText, x + titleW + 8, y + 4, changeColor);
 
                     String stockText = "In Vault: " + cachedDetail.vaultCount;
                     int stockW = fnt.width(stockText);
@@ -523,12 +579,12 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
                     float range = maxP - minP;
 
                     // Draw min/max price text labels on the left
-                    g.drawString(fnt, String.valueOf(maxP), x + 3, y + 3, TEXT_MUTED);
-                    g.drawString(fnt, String.valueOf(minP), x + 3, y + height - 11, TEXT_MUTED);
+                    g.drawString(fnt, formatCompact((double)maxP), x + 3, y + 3, TEXT_MUTED);
+                    g.drawString(fnt, formatCompact((double)minP), x + 3, y + height - 11, TEXT_MUTED);
 
                     // Right current price badge dimensions
                     int currentPrice = pts.get(pts.size() - 1).price;
-                    String currentPriceStr = String.valueOf(currentPrice);
+                    String currentPriceStr = formatCompact((double)currentPrice);
                     int currentPriceW = fnt.width(currentPriceStr);
                     int badgeW = currentPriceW + 8;
                     int badgeH = 12;
@@ -635,16 +691,6 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
                 // 2. Coin Icon & Price x Quantity (with fulfillment progress if partially filled)
                 int px = badgeX + badgeW + 5;
                 renderSmallCoin(g, px, ry + 4);
-                String line;
-                if (e.initialQuantity > e.quantity) {
-                    int fulfilled = e.initialQuantity - e.quantity;
-                    int pct = (fulfilled * 100) / e.initialQuantity;
-                    line = e.price + " x" + e.quantity + " (" + fulfilled + "/" + e.initialQuantity + " - " + pct + "% filled)";
-                } else {
-                    line = e.price + " x" + e.quantity;
-                }
-                int clr = isSell ? RED : GREEN;
-                g.drawString(fnt, line, px + 10, ry + 3, clr);
 
                 // 3. Cancel Button Widget
                 String cancelText = "Cancel";
@@ -652,6 +698,26 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
                 int btnH = 12;
                 int btnX = rx + rw - btnW - 3;
                 int btnY = ry + 2;
+
+                String line;
+                if (e.initialQuantity > e.quantity) {
+                    int fulfilled = e.initialQuantity - e.quantity;
+                    int pct = (fulfilled * 100) / e.initialQuantity;
+                    line = formatCompact(parsePrice(e.price)) + " x" + formatCompact(e.quantity) + " (" + pct + "% filled)";
+                } else {
+                    line = formatCompact(parsePrice(e.price)) + " x" + formatCompact(e.quantity);
+                }
+
+                int maxTextW = btnX - (px + 11) - 4;
+                String truncatedLine = fnt.plainSubstrByWidth(line, maxTextW);
+                int clr = isSell ? RED : GREEN;
+                g.drawString(fnt, truncatedLine, px + 10, ry + 3, clr);
+
+                if (hover && mx >= px + 10 && mx < btnX) {
+                    pendingTooltip = e.initialQuantity > e.quantity ? 
+                        "Order Progress: " + (e.initialQuantity - e.quantity) + "/" + e.initialQuantity + " items filled (" + ((e.initialQuantity - e.quantity) * 100 / e.initialQuantity) + "%)" :
+                        "Order Quantity: " + e.quantity;
+                }
 
                 boolean isCancelHover = (mx >= btnX && mx <= btnX + btnW && my >= btnY && my <= btnY + btnH);
                 int btnBg = isCancelHover ? 0xFFC02020 : 0x60901818;
@@ -838,19 +904,52 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         return v;
     }
 
+    private ButtonWidget sellModeBtn, buyModeBtn;
+    private ButtonWidget createBtn;
+    private ButtonWidget maxQtyBtn;
     private TextWidget createOfferTitleLabel;
-    private ButtonWidget switchModeBtn;
+    private UIComponent vaultStockBadge;
     private TextWidget createOfferErrorLabel;
 
+    private int getVaultStockForItem(String itemId) {
+        if (itemId == null || itemId.isEmpty()) return 0;
+        if (cachedDetail != null && cachedDetail.itemId.equalsIgnoreCase(itemId)) {
+            return cachedDetail.vaultCount;
+        }
+        for (var h : cachedAssetHoldings) {
+            if (h.itemId.equalsIgnoreCase(itemId)) {
+                return h.quantity;
+            }
+        }
+        return 0;
+    }
+
     private UIComponent buildCreateOffer(Font font) {
-        VStack v = new VStack().gap(6);
+        VStack v = new VStack().gap(4);
 
         HStack header = new HStack().gap(6);
         ButtonWidget backBtn = btn("< Back", PANEL, CARD_HOVER).onPress(() -> switchView(createOrderSourceMode));
         header.addChild(backBtn);
-        createOfferTitleLabel = TextWidget.label(createSellMode ? "Create Sell Order" : "Create Buy Order", TEXT_PRIMARY);
+        createOfferTitleLabel = TextWidget.label("CREATE ORDER", TEXT_PRIMARY);
         header.addChild(createOfferTitleLabel);
         v.addChild(header);
+
+        HStack modeSelector = new HStack().gap(4);
+        sellModeBtn = btn("SELL ORDER", createSellMode ? 0xFF991B1B : PANEL, 0xFFDC2626).onPress(() -> {
+            createSellMode = true;
+            updateCreateOfferLabels();
+        });
+        sellModeBtn.flex();
+        buyModeBtn = btn("BUY ORDER", !createSellMode ? 0xFF065F46 : PANEL, 0xFF059669).onPress(() -> {
+            createSellMode = false;
+            updateCreateOfferLabels();
+        });
+        buyModeBtn.flex();
+        modeSelector.addChild(sellModeBtn);
+        modeSelector.addChild(buyModeBtn);
+        v.addChild(modeSelector);
+
+        v.addChild(new SizedBox(0, 2));
 
         itemIdField = new EditBoxWrapper(128, TEXT_PRIMARY, PANEL, font).setPlaceholder("Search item name or ID...");
         if (selectedItemId != null) {
@@ -859,15 +958,13 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         }
         v.addChild(itemIdField);
 
-        // ── Search hint label ──
         v.addChild(new UIComponent() {
             @Override public int preferredWidth(Font f) { return 0; }
             @Override public int preferredHeight(Font f) { return 0; }
             @Override public void render(GuiGraphics g, Font fnt, int mx, int my, float pt) {
                 if (!visible) return;
                 String query = itemIdField != null ? itemIdField.getValue().trim() : "";
-                boolean showDropdown = !query.isEmpty()
-                        && !query.equals(itemSearchAutoFilled);
+                boolean showDropdown = !query.isEmpty() && !query.equals(itemSearchAutoFilled);
                 if (showDropdown) {
                     List<ItemSearchResult> results = getItemSearchResults(query);
                     if (!results.isEmpty()) {
@@ -884,34 +981,69 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
             }
         });
 
-        qtyField = new EditBoxWrapper(10, TEXT_PRIMARY, PANEL, font).setPlaceholder("Quantity (e.g. 10)");
-        v.addChild(qtyField);
+        vaultStockBadge = new UIComponent() {
+            @Override public int preferredWidth(Font f) { return 0; }
+            @Override public int preferredHeight(Font f) { return createSellMode ? 14 : 0; }
+            @Override public void render(GuiGraphics g, Font fnt, int mx, int my, float pt) {
+                if (!createSellMode) return;
+                String id = itemIdField != null && !itemIdField.getValue().trim().isEmpty() ? itemIdField.getValue().trim() : selectedItemId;
+                if ((id == null || id.isEmpty()) && cachedDetail != null) id = cachedDetail.itemId;
+                int stock = getVaultStockForItem(id);
+                String stockMsg = "Vault Stock Available: " + stock + " items";
+                int color = stock > 0 ? GREEN : RED;
+                g.drawString(fnt, stockMsg, x + 2, y + 3, color);
+            }
+        };
+        v.addChild(vaultStockBadge);
 
-        priceField = new EditBoxWrapper(20, TEXT_PRIMARY, PANEL, font).setPlaceholder("Price per unit (e.g. 150.00)");
+        HStack qtyRow = new HStack().gap(4);
+        qtyField = new EditBoxWrapper(10, TEXT_PRIMARY, PANEL, font).setPlaceholder("Quantity (e.g. 10)");
+        qtyField.flex();
+        qtyRow.addChild(qtyField);
+
+        maxQtyBtn = btn("MAX", PANEL, CARD_HOVER).onPress(() -> {
+            String id = itemIdField != null && !itemIdField.getValue().trim().isEmpty() ? itemIdField.getValue().trim() : selectedItemId;
+            if ((id == null || id.isEmpty()) && cachedDetail != null) id = cachedDetail.itemId;
+            int stock = getVaultStockForItem(id);
+            if (stock > 0 && qtyField != null) {
+                qtyField.setValue(String.valueOf(stock));
+            }
+        });
+        qtyRow.addChild(maxQtyBtn);
+        v.addChild(qtyRow);
+
+        priceField = new EditBoxWrapper(20, TEXT_PRIMARY, PANEL, font).setPlaceholder("Price per unit (e.g. 150)");
         v.addChild(priceField);
 
-        v.addChild(new SizedBox(0, 4)); // Spacing before buttons
-        ButtonWidget createBtn = btn("Submit Order", ACCENT_DIM, ACCENT).onPress(this::submitOffer);
-        v.addChild(createBtn);
+        v.addChild(new SizedBox(0, 4));
 
-        switchModeBtn = btn(createSellMode ? "Switch to Buy Mode" : "Switch to Sell Mode", PANEL, CARD_HOVER).onPress(() -> {
-            createSellMode = !createSellMode;
-            updateCreateOfferLabels();
-        });
-        v.addChild(switchModeBtn);
+        createBtn = btn(createSellMode ? "SUBMIT SELL ORDER" : "SUBMIT BUY ORDER",
+                createSellMode ? 0xFFB91C1C : 0xFF047857,
+                createSellMode ? 0xFFDC2626 : 0xFF059669).onPress(this::submitOffer);
+        v.addChild(createBtn);
 
         createOfferErrorLabel = TextWidget.label("", RED);
         createOfferErrorLabel.setVisible(false);
         v.addChild(createOfferErrorLabel);
+
+        updateCreateOfferLabels();
         return v;
     }
 
     private void updateCreateOfferLabels() {
-        if (createOfferTitleLabel != null) {
-            createOfferTitleLabel.setText(createSellMode ? "Create Sell Order" : "Create Buy Order");
+        if (sellModeBtn != null) {
+            sellModeBtn.setActive(createSellMode);
         }
-        if (switchModeBtn != null) {
-            switchModeBtn.setLabel(createSellMode ? "Switch to Buy Mode" : "Switch to Sell Mode");
+        if (buyModeBtn != null) {
+            buyModeBtn.setActive(!createSellMode);
+        }
+        if (createBtn != null) {
+            createBtn.setLabel(createSellMode ? "SUBMIT SELL ORDER" : "SUBMIT BUY ORDER");
+            createBtn.setColors(createSellMode ? 0xFFB91C1C : 0xFF047857,
+                                createSellMode ? 0xFFDC2626 : 0xFF059669);
+        }
+        if (maxQtyBtn != null) {
+            maxQtyBtn.setVisible(createSellMode);
         }
     }
 
@@ -947,11 +1079,10 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
             return;
         }
         if (createSellMode) {
-            if (cachedDetail != null && cachedDetail.itemId.equalsIgnoreCase(itemId)) {
-                if (qty > cachedDetail.vaultCount) {
-                    showCreateError("Not enough in vault. You have " + cachedDetail.vaultCount + ".");
-                    return;
-                }
+            int stock = getVaultStockForItem(itemId);
+            if (stock > 0 && qty > stock) {
+                showCreateError("Not enough in vault. You have " + stock + ".");
+                return;
             }
         } else {
             BigDecimal totalCost = price.multiply(BigDecimal.valueOf(qty));
@@ -968,7 +1099,7 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         }
         String actionStr = createSellMode ? "Sell" : "Buy";
         BigDecimal tot = price.multiply(BigDecimal.valueOf(qty));
-        String totStr = tot.setScale(2, java.math.RoundingMode.HALF_UP).toPlainString();
+        String totStr = tot.setScale(0, java.math.RoundingMode.HALF_UP).toPlainString();
         String dispName = itemId;
         if (cachedDetail != null && cachedDetail.itemId.equalsIgnoreCase(itemId)) {
             dispName = cachedDetail.displayName;
@@ -1000,6 +1131,7 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         if (createOffer != null) createOffer.setVisible(mode == 2);
         if (historyView != null) historyView.setVisible(mode == 3);
         if (vaultsView != null) vaultsView.setVisible(mode == 4);
+        if (portfolioView != null) portfolioView.setVisible(mode == 5);
         if (mode == 2) {
             updateCreateOfferLabels();
             // Reset dropdown guard whenever we (re-)enter the form
@@ -1014,6 +1146,10 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         if (vaultsBtn != null) {
             vaultsBtn.setVisible(true);
             vaultsBtn.setActive(mode == 4);
+        }
+        if (portfolioBtn != null) {
+            portfolioBtn.setVisible(true);
+            portfolioBtn.setActive(mode == 5);
         }
         if (newOrderBtn != null) {
             newOrderBtn.setVisible(true);
@@ -1090,10 +1226,12 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         return f;
     }
 
-    private List<MarketNetwork.HistoryEntry> filterHistory() {
-        List<MarketNetwork.HistoryEntry> f = new ArrayList<>();
+    private List<HistoryEntry> filterHistory() {
+        List<HistoryEntry> f = new ArrayList<>();
+        if (cachedHistory == null) return f;
         String q = historySearchQuery.toLowerCase().trim();
-        for (MarketNetwork.HistoryEntry e : cachedHistory) {
+        for (HistoryEntry e : cachedHistory) {
+            if (e == null) continue;
             if (historyFilterMode == 1 && !e.wasSell) continue; // Sales Only
             if (historyFilterMode == 2 && e.wasSell) continue;  // Purchases Only
             if (!q.isEmpty()) {
@@ -1179,14 +1317,14 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
             () -> Math.max(1, filterHistory().size()),
             28,
             (g, fnt, idx, rx, ry, rw, mx, my, hover) -> {
-                List<MarketNetwork.HistoryEntry> entries = filterHistory();
-                if (entries.isEmpty()) {
-                    String msg = "No trades matching filter";
+                List<HistoryEntry> entries = filterHistory();
+                if (entries == null || entries.isEmpty()) {
+                    String msg = "No trade history recorded yet";
                     g.drawString(fnt, msg, rx + (rw - fnt.width(msg)) / 2, ry + 8, TEXT_MUTED);
                     return;
                 }
                 if (idx >= entries.size()) return;
-                MarketNetwork.HistoryEntry e = entries.get(idx);
+                HistoryEntry e = entries.get(idx);
 
                 if (hover) g.fill(rx, ry, rx + rw, ry + 27, CARD_HOVER);
                 g.fill(rx, ry + 27, rx + rw, ry + 28, PANEL_BORDER);
@@ -1282,6 +1420,17 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
                 g.drawString(fnt, "TOTAL ITEMS", b3X + (boxW - fnt.width("TOTAL ITEMS")) / 2, y + 3, TEXT_MUTED);
                 String iVal = String.valueOf(totalItems);
                 g.drawString(fnt, iVal, b3X + (boxW - fnt.width(iVal)) / 2, y + 13, ACCENT);
+
+                // Hover tooltips for Vault Overview Stat Boxes
+                if (my >= y && my < y + height) {
+                    if (mx >= b1X && mx < b1X + boxW) {
+                        pendingTooltip = "Vaults: Total number of physical Vault blocks placed in world";
+                    } else if (mx >= b2X && mx < b2X + boxW) {
+                        pendingTooltip = "Slots Used: Occupied storage slots out of total capacity across all Vaults";
+                    } else if (mx >= b3X && mx < b3X + boxW) {
+                        pendingTooltip = "Total Items: Count of individual items stored inside your Vault network";
+                    }
+                }
             }
         };
         v.addChild(statsRow);
@@ -1322,6 +1471,34 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
                 g.fill(badgeX + badgeW - 1, ry + 2, badgeX + badgeW, ry + 13, badgeBorder);
                 g.drawString(fnt, badge, badgeX + 3, ry + 3, badgeText);
 
+                // Mode Badge (BOTH, INPUT ONLY, OUTPUT ONLY)
+                String modeBadge = switch (e.mode) {
+                    case 1 -> "INPUT ONLY";
+                    case 2 -> "OUTPUT ONLY";
+                    default -> "BOTH";
+                };
+                int modeW = fnt.width(modeBadge) + 6;
+                int modeX = badgeX - modeW - 4;
+                int modeBg = e.mode == 1 ? 0x40801818 : (e.mode == 2 ? 0x40105028 : 0x40004050);
+                int modeBorder = e.mode == 1 ? 0xFFFF4444 : (e.mode == 2 ? 0xFF20A050 : 0xFF00D4AA);
+                int modeText = e.mode == 1 ? 0xFFFF6666 : (e.mode == 2 ? 0xFF66FF66 : 0xFF00D4AA);
+
+                g.fill(modeX, ry + 2, modeX + modeW, ry + 13, modeBg);
+                g.fill(modeX, ry + 2, modeX + modeW, ry + 3, modeBorder);
+                g.fill(modeX, ry + 12, modeX + modeW, ry + 13, modeBorder);
+                g.fill(modeX, ry + 2, modeX + 1, ry + 13, modeBorder);
+                g.fill(modeX + modeW - 1, ry + 2, modeX + modeW, ry + 13, modeBorder);
+                g.drawString(fnt, modeBadge, modeX + 3, ry + 3, modeText);
+
+                // Hover tooltip for Mode Badge
+                if (mx >= modeX && mx < modeX + modeW && my >= ry + 2 && my < ry + 13) {
+                    pendingTooltip = switch (e.mode) {
+                        case 1 -> "Input Only Mode: Used ONLY for creating Sell Orders. Bought items avoid this Vault.";
+                        case 2 -> "Output Only Mode: Used ONLY for receiving bought items. Sell Orders ignore items here.";
+                        default -> "Both Mode (Default): Used for Sell Orders (Input) AND receiving bought items (Output).";
+                    };
+                }
+
                 // Location String (Left, Line 2 - ry + 17)
                 String dimClean = e.dimension.replace("minecraft:", "");
                 String locStr = dimClean + " (" + e.x + ", " + e.y + ", " + e.z + ")";
@@ -1352,6 +1529,208 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
 
         list.flex();
         v.addChild(list);
+        return v;
+    }
+
+    private UIComponent buildPortfolio(Font font) {
+        VStack v = new VStack().gap(4);
+        v.addChild(TextWidget.centered("PORTFOLIO PERFORMANCE", ACCENT));
+        v.addChild(new Divider(PANEL_BORDER));
+
+        // Summary Stats Row (fixed 24px height)
+        UIComponent statsRow = new UIComponent() {
+            @Override public int preferredWidth(Font f) { return 0; }
+            @Override public int preferredHeight(Font f) { return 24; }
+            @Override
+            public void render(GuiGraphics g, Font fnt, int mx, int my, float pt) {
+                BigDecimal latestNW = BigDecimal.ZERO;
+                BigDecimal latestBal = BigDecimal.ZERO;
+                BigDecimal latestAss = BigDecimal.ZERO;
+                if (!cachedPortfolioPoints.isEmpty()) {
+                    var last = cachedPortfolioPoints.get(cachedPortfolioPoints.size() - 1);
+                    latestNW = new BigDecimal(last.netWorth);
+                    latestBal = new BigDecimal(last.balance);
+                    latestAss = new BigDecimal(last.assets);
+                }
+
+                int boxW = (width - 8) / 3;
+
+                // Box 1: NET WORTH
+                int b1X = x;
+                g.fill(b1X, y, b1X + boxW, y + height, CARD_BG);
+                g.fill(b1X, y, b1X + boxW, y + 1, PANEL_BORDER);
+                g.fill(b1X, y + height - 1, b1X + boxW, y + height, PANEL_BORDER);
+                g.fill(b1X, y, b1X + 1, y + height, PANEL_BORDER);
+                g.fill(b1X + boxW - 1, y, b1X + boxW, y + height, PANEL_BORDER);
+                g.drawString(fnt, "NET WORTH", b1X + (boxW - fnt.width("NET WORTH")) / 2, y + 3, TEXT_MUTED);
+                String nwStr = formatCompact(latestNW);
+                int nwW = 10 + fnt.width(nwStr);
+                int nwX = b1X + (boxW - nwW) / 2;
+                renderSmallCoin(g, nwX - 1, y + 13);
+                g.drawString(fnt, nwStr, nwX + 10, y + 13, ACCENT);
+
+                // Box 2: CASH
+                int b2X = b1X + boxW + 4;
+                g.fill(b2X, y, b2X + boxW, y + height, CARD_BG);
+                g.fill(b2X, y, b2X + boxW, y + 1, PANEL_BORDER);
+                g.fill(b2X, y + height - 1, b2X + boxW, y + height, PANEL_BORDER);
+                g.fill(b2X, y, b2X + 1, y + height, PANEL_BORDER);
+                g.fill(b2X + boxW - 1, y, b2X + boxW, y + height, PANEL_BORDER);
+                g.drawString(fnt, "LIQUID CASH", b2X + (boxW - fnt.width("LIQUID CASH")) / 2, y + 3, TEXT_MUTED);
+                String balStr = formatCompact(latestBal);
+                int balW = 10 + fnt.width(balStr);
+                int balX = b2X + (boxW - balW) / 2;
+                renderSmallCoin(g, balX - 1, y + 13);
+                g.drawString(fnt, balStr, balX + 10, y + 13, GREEN);
+
+                // Box 3: ASSETS
+                int b3X = b2X + boxW + 4;
+                g.fill(b3X, y, b3X + boxW, y + height, CARD_BG);
+                g.fill(b3X, y, b3X + boxW, y + 1, PANEL_BORDER);
+                g.fill(b3X, y + height - 1, b3X + boxW, y + height, PANEL_BORDER);
+                g.fill(b3X, y, b3X + 1, y + height, PANEL_BORDER);
+                g.fill(b3X + boxW - 1, y, b3X + boxW, y + height, PANEL_BORDER);
+                g.drawString(fnt, "VAULT ASSETS", b3X + (boxW - fnt.width("VAULT ASSETS")) / 2, y + 3, TEXT_MUTED);
+                String assStr = formatCompact(latestAss);
+                int assW = 10 + fnt.width(assStr);
+                int assX = b3X + (boxW - assW) / 2;
+                renderSmallCoin(g, assX - 1, y + 13);
+                g.drawString(fnt, assStr, assX + 10, y + 13, ACCENT);
+
+                // Hover tooltips for Stat Boxes
+                if (my >= y && my < y + height) {
+                    if (mx >= b1X && mx < b1X + boxW) {
+                        pendingTooltip = "Net Worth: Total financial value (Liquid Cash + Vault Assets)";
+                    } else if (mx >= b2X && mx < b2X + boxW) {
+                        pendingTooltip = "Liquid Cash: Available unspent wallet balance for trading & payments";
+                    } else if (mx >= b3X && mx < b3X + boxW) {
+                        pendingTooltip = "Vault Assets: Total estimated market valuation of all commodities in Vaults";
+                    }
+                }
+            }
+        };
+        v.addChild(statsRow);
+        v.addChild(new Divider(PANEL_BORDER));
+
+        // Net Worth Trend Chart Component
+        UIComponent chart = new UIComponent() {
+            @Override public int preferredWidth(Font f) { return 0; }
+            @Override public int preferredHeight(Font f) { return 48; }
+            @Override
+            public void render(GuiGraphics g, Font fnt, int mx, int my, float pt) {
+                g.fill(x, y, x + width, y + height, CARD_BG);
+                g.fill(x, y, x + width, y + 1, PANEL_BORDER);
+                g.fill(x, y + height - 1, x + width, y + height, PANEL_BORDER);
+                g.fill(x, y, x + 1, y + height, PANEL_BORDER);
+                g.fill(x + width - 1, y, x + width, y + height, PANEL_BORDER);
+
+                List<MarketNetwork.PortfolioPointData> pts = cachedPortfolioPoints;
+                if (pts.size() >= 2) {
+                    double maxP = Double.MIN_VALUE, minP = Double.MAX_VALUE;
+                    for (var cp : pts) {
+                        double nw = Double.parseDouble(cp.netWorth);
+                        if (nw > maxP) maxP = nw;
+                        if (nw < minP) minP = nw;
+                    }
+                    if (maxP == minP) { maxP += 10; minP = Math.max(0, minP - 10); }
+                    double range = maxP - minP;
+
+                    g.drawString(fnt, formatCompact(maxP), x + 3, y + 3, TEXT_MUTED);
+                    g.drawString(fnt, formatCompact(minP), x + 3, y + height - 11, TEXT_MUTED);
+
+                    double currentNW = Double.parseDouble(pts.get(pts.size() - 1).netWorth);
+                    String currentPriceStr = formatCompact(currentNW);
+                    int currentPriceW = fnt.width(currentPriceStr);
+                    int badgeW = currentPriceW + 8;
+                    int badgeH = 12;
+                    int badgeX = x + width - badgeW - 4;
+                    int rawY = y + height - 6 - (int)((currentNW - minP) / range * (height - 12));
+                    int badgeY = Math.max(y + 2, Math.min(y + height - badgeH - 2, rawY - 5));
+
+                    int lineY = rawY;
+                    int chartLeft = x + 26;
+                    int chartRight = badgeX - 4;
+                    int dotStep = 4;
+                    for (int lx = chartLeft; lx <= chartRight; lx += dotStep) {
+                        g.fill(lx, lineY, Math.min(lx + 2, chartRight), lineY + 1, ACCENT_DIM);
+                    }
+
+                    // Render right side current Net Worth badge
+                    g.fill(badgeX, badgeY, badgeX + badgeW, badgeY + badgeH, 0xFF003024);
+                    g.fill(badgeX, badgeY, badgeX + badgeW, badgeY + 1, ACCENT);
+                    g.fill(badgeX, badgeY + badgeH - 1, badgeX + badgeW, badgeY + badgeH, ACCENT);
+                    g.fill(badgeX, badgeY, badgeX + 1, badgeY + badgeH, ACCENT);
+                    g.fill(badgeX + badgeW - 1, badgeY, badgeX + badgeW, badgeY + badgeH, ACCENT);
+                    g.drawString(fnt, currentPriceStr, badgeX + 4, badgeY + 2, ACCENT);
+
+                    int ptsCount = pts.size();
+                    for (int i = 0; i < ptsCount; i++) {
+                        double nw = Double.parseDouble(pts.get(i).netWorth);
+                        int x0 = chartLeft + i * (chartRight - chartLeft) / Math.max(1, ptsCount - 1);
+                        int y0 = y + height - 6 - (int)((nw - minP) / range * (height - 12));
+
+                        if (i > 0) {
+                            double prevNW = Double.parseDouble(pts.get(i - 1).netWorth);
+                            int xPrev = chartLeft + (i - 1) * (chartRight - chartLeft) / Math.max(1, ptsCount - 1);
+                            int yPrev = y + height - 6 - (int)((prevNW - minP) / range * (height - 12));
+                            drawLine(g, xPrev, yPrev, x0, y0, CHART_LINE);
+                        }
+
+                        boolean nodeHover = (mx >= x0 - 3 && mx <= x0 + 3 && my >= y0 - 3 && my <= y0 + 3);
+                        int dotClr = nodeHover ? 0xFFFFFFFF : ACCENT;
+                        g.fill(x0 - 1, y0 - 1, x0 + 2, y0 + 2, dotClr);
+                        if (nodeHover) {
+                            var p = pts.get(i);
+                            pendingTooltip = "Net Worth: " + formatCompact(Double.parseDouble(p.netWorth)) + " (Cash: " + formatCompact(Double.parseDouble(p.balance)) + " | Assets: " + formatCompact(Double.parseDouble(p.assets)) + ")";
+                        }
+                    }
+                } else {
+                    String msg = "Not enough portfolio data points yet";
+                    g.drawString(fnt, msg, x + (width - fnt.width(msg)) / 2, y + 18, TEXT_MUTED);
+                }
+            }
+        };
+        v.addChild(chart);
+        v.addChild(new Divider(PANEL_BORDER));
+
+        // Asset Allocation Holdings Breakdown List
+        ScrollList holdingsList = new ScrollList(
+            () -> Math.max(1, cachedAssetHoldings.size()),
+            26,
+            (g, fnt, idx, rx, ry, rw, mx, my, hover) -> {
+                if (cachedAssetHoldings.isEmpty()) {
+                    String msg = "No items currently stored in Vaults";
+                    g.drawString(fnt, msg, rx + (rw - fnt.width(msg)) / 2, ry + 8, TEXT_MUTED);
+                    return;
+                }
+                if (idx >= cachedAssetHoldings.size()) return;
+                var h = cachedAssetHoldings.get(idx);
+
+                if (hover) g.fill(rx, ry, rx + rw, ry + 25, CARD_HOVER);
+                g.fill(rx, ry + 25, rx + rw, ry + 26, PANEL_BORDER);
+
+                ItemStack icon = itemIconCache.computeIfAbsent(h.itemId, id -> {
+                    Item it = BuiltInRegistries.ITEM.get(new ResourceLocation(id));
+                    return new ItemStack(it);
+                });
+                g.renderItem(icon, rx + 4, ry + 5);
+
+                String nameStr = fnt.plainSubstrByWidth(h.displayName, rw - 110);
+                g.drawString(fnt, nameStr, rx + 24, ry + 8, TEXT_PRIMARY);
+
+                String qtyStr = "x" + formatCompact(h.quantity);
+                g.drawString(fnt, qtyStr, rx + rw - 110, ry + 8, TEXT_MUTED);
+
+                String valStr = formatCompact(h.totalValue);
+                int valW = 10 + fnt.width(valStr);
+                renderSmallCoin(g, rx + rw - valW - 4, ry + 8);
+                g.drawString(fnt, valStr, rx + rw - fnt.width(valStr) - 4, ry + 8, ACCENT);
+            },
+            (idx, btn) -> { /* read only */ },
+            PANEL, ACCENT_DIM);
+
+        holdingsList.flex();
+        v.addChild(holdingsList);
         return v;
     }
 
@@ -1406,7 +1785,8 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
             renderConfirmationModal(g, mx, my);
         }
         if (pendingTooltip != null) {
-            g.renderTooltip(this.font, Component.literal(pendingTooltip), mx, my);
+            var lines = this.font.split(Component.literal(pendingTooltip), 180);
+            g.renderTooltip(this.font, lines, mx, my);
         }
     }
 
@@ -1419,8 +1799,11 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         int rows = d.results.size();
         int totalH = rows * DROP_ROW_H;
 
-        // Background + border
-        g.fill(d.x, d.y, d.x + d.w, d.y + totalH, DROP_BG);
+        g.pose().pushPose();
+        g.pose().translate(0, 0, 300);
+
+        // 100% Solid Opaque Dark Background + Border
+        g.fill(d.x, d.y, d.x + d.w, d.y + totalH, 0xFF0E0E1A);
         g.fill(d.x, d.y, d.x + d.w, d.y + 1, DROP_BORDER);
         g.fill(d.x, d.y + totalH - 1, d.x + d.w, d.y + totalH, DROP_BORDER);
         g.fill(d.x, d.y, d.x + 1, d.y + totalH, DROP_BORDER);
@@ -1446,8 +1829,10 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
             int nameX = d.x + 20;
             int nameMaxW = d.w - 22;
             String nameStr = this.font.plainSubstrByWidth(r.displayName, nameMaxW);
-            g.drawString(this.font, nameStr, nameX, ry + 4, TEXT_PRIMARY);
+            g.drawString(this.font, nameStr, nameX, ry + 4, TEXT_PRIMARY, false);
         }
+
+        g.pose().popPose();
     }
 
     private void renderConfirmationModal(GuiGraphics g, int mx, int my) {

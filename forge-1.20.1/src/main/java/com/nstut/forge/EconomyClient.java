@@ -16,6 +16,7 @@ public class EconomyClient {
     public static void onClientSetup(FMLClientSetupEvent event) {
         event.enqueueWork(() -> {
             MenuScreens.register(BlockRegistries.MARKET_MENU.get(), MarketScreen::new);
+            MenuScreens.register(BlockRegistries.VAULT_MENU.get(), com.nstut.forge.client.VaultScreen::new);
         });
     }
 }

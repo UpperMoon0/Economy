@@ -65,7 +65,11 @@ public class VaultBlock extends DirectionalBlock implements EntityBlock {
                     return InteractionResult.CONSUME;
                 }
                 sp.openMenu(new SimpleMenuProvider(
-                        (id, inv, p) -> ChestMenu.sixRows(id, inv, vault),
+                        (id, inv, p) -> new VaultMenu(id, inv, vault, new net.minecraft.world.inventory.ContainerData() {
+                            @Override public int get(int idx) { return vault.getMode().id; }
+                            @Override public void set(int idx, int val) { vault.setMode(VaultBlockEntity.VaultMode.byId(val)); }
+                            @Override public int getCount() { return 1; }
+                        }, vault),
                         Component.translatable("block.economy.vault")
                 ));
             }

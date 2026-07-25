@@ -22,4 +22,6 @@ public class BlockRegistries {
 
     public static final RegistryObject<MenuType<MarketMenu>> MARKET_MENU =
             MENUS.register("market", () -> new MenuType<>(MarketMenu::new, FeatureFlags.DEFAULT_FLAGS));
+    public static final RegistryObject<MenuType<VaultMenu>> VAULT_MENU =
+            MENUS.register("vault", () -> new MenuType<>(VaultMenu::new, FeatureFlags.DEFAULT_FLAGS));
 }

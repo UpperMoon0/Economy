@@ -79,18 +79,20 @@ public class EconomyCommands {
                             boolean isSelf = sender.getUUID().equals(receiver.getUUID());
                             if (senderAccount.transferTo(receiverAccount, amount,
                                 TransactionContext.transfer("Payment from " + sender.getName().getString(), receiver.getUUID()))) {
-                                String amtStr = config.getCurrencySymbol() + amount.toPlainString();
+                                String amtStr = com.nstut.economy.util.EconomyFormatUtil.formatCompact(amount);
                                 if (isSelf) {
                                     context.getSource().sendSuccess(() ->
-                                        Component.literal("Self-payment test: Transferred " + amtStr + " to yourself."), false);
+                                        Component.literal("§2[Market] §aTransferred §e" + amtStr + " coins §fto yourself."), false);
                                     playMoneySound(sender);
                                 } else {
                                     context.getSource().sendSuccess(() ->
-                                        Component.literal("Paid " + amtStr + " to " + receiver.getName().getString()), false);
-                                    receiver.sendSystemMessage(Component.literal("Received " + amtStr + " from " + sender.getName().getString()));
+                                        Component.literal("§2[Market] §aPaid §e" + amtStr + " coins §fto §e" + receiver.getName().getString()), false);
+                                    receiver.sendSystemMessage(Component.literal("§2[Market] §aReceived §e" + amtStr + " coins §ffrom §e" + sender.getName().getString()));
                                     playMoneySound(sender);
                                     playMoneySound(receiver);
                                 }
+                                com.nstut.economy.data.EconomyAccountData.recordSnapshot(sender.getUUID(), sender.serverLevel());
+                                if (!isSelf) com.nstut.economy.data.EconomyAccountData.recordSnapshot(receiver.getUUID(), receiver.serverLevel());
                                 return 1;
                             } else {
                                 context.getSource().sendFailure(Component.literal("Insufficient funds"));
@@ -99,25 +101,6 @@ public class EconomyCommands {
                         })
                     )
                 )
-            )
-            .then(Commands.literal("vault")
-                .executes(context -> {
-                    if (!(context.getSource().getEntity() instanceof ServerPlayer player)) {
-                        context.getSource().sendFailure(Component.literal("This command can only be used by players"));
-                        return 0;
-                    }
-                    var record = VaultManager.getVaultRecord(player.getUUID());
-                    if (record == null) {
-                        context.getSource().sendFailure(Component.literal("You do not have a Vault block. Place one to store trade items."));
-                        return 0;
-                    }
-                    context.getSource().sendSuccess(() ->
-                        Component.literal("Your vault is at " + record.pos.toShortString() +
-                            " in dimension " + record.dimension),
-                        false
-                    );
-                    return 1;
-                })
             )
             .then(Commands.literal("serverorder")
                 .requires(source -> source.hasPermission(2))
@@ -242,11 +225,11 @@ public class EconomyCommands {
         Order order = orderManager.createServerBuyOrder(commodity, quantity, pricePerUnit);
 
         EconomyConfig config = EconomyConfig.getInstance();
-        String priceStr = order.getTotalPrice().setScale(2, RoundingMode.HALF_UP).toPlainString();
+        String priceStr = order.getTotalPrice().setScale(0, RoundingMode.HALF_UP).toPlainString();
         context.getSource().sendSuccess(() ->
             Component.literal("Server buy order created: " + quantity + "x " +
                 commodity.getDisplayName().getString() + " @ " + config.getCurrencySymbol() +
-                pricePerUnit.setScale(2, RoundingMode.HALF_UP).toPlainString() + " each (total: " +
+                pricePerUnit.setScale(0, RoundingMode.HALF_UP).toPlainString() + " each (total: " +
                 config.getCurrencySymbol() + priceStr + ")"),
             true
         );
@@ -270,11 +253,11 @@ public class EconomyCommands {
         Order order = orderManager.createServerSellOrder(commodity, quantity, pricePerUnit);
 
         EconomyConfig config = EconomyConfig.getInstance();
-        String priceStr = order.getTotalPrice().setScale(2, RoundingMode.HALF_UP).toPlainString();
+        String priceStr = order.getTotalPrice().setScale(0, RoundingMode.HALF_UP).toPlainString();
         context.getSource().sendSuccess(() ->
             Component.literal("Server sell order created: " + quantity + "x " +
                 commodity.getDisplayName().getString() + " @ " + config.getCurrencySymbol() +
-                pricePerUnit.setScale(2, RoundingMode.HALF_UP).toPlainString() + " each (total: " +
+                pricePerUnit.setScale(0, RoundingMode.HALF_UP).toPlainString() + " each (total: " +
                 config.getCurrencySymbol() + priceStr + ")"),
             true
         );

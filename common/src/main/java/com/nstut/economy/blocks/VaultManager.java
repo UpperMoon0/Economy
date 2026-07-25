@@ -68,12 +68,6 @@ public class VaultManager {
     }
 
     @Nullable
-    public static VaultRecord getVaultRecord(UUID owner) {
-        List<VaultRecord> list = vaults.get(owner);
-        return (list != null && !list.isEmpty()) ? list.get(0) : null;
-    }
-
-    @Nullable
     public static VaultBlockEntity getVault(Level level, UUID owner) {
         List<VaultBlockEntity> list = getVaults(level, owner);
         return list.isEmpty() ? null : list.get(0);
@@ -101,7 +95,9 @@ public class VaultManager {
     public static int countItemInVaults(Level level, UUID owner, Item item) {
         int count = 0;
         for (VaultBlockEntity v : getVaults(level, owner)) {
-            count += v.countItem(item);
+            if (v.getMode() == VaultBlockEntity.VaultMode.BOTH || v.getMode() == VaultBlockEntity.VaultMode.INPUT) {
+                count += v.countItem(item);
+            }
         }
         return count;
     }
@@ -109,7 +105,9 @@ public class VaultManager {
     public static int countAvailableSpaceInVaults(Level level, UUID owner, ItemStack stack) {
         int space = 0;
         for (VaultBlockEntity v : getVaults(level, owner)) {
-            space += v.countAvailableSpace(stack);
+            if (v.getMode() == VaultBlockEntity.VaultMode.BOTH || v.getMode() == VaultBlockEntity.VaultMode.OUTPUT) {
+                space += v.countAvailableSpace(stack);
+            }
         }
         return space;
     }
@@ -119,6 +117,7 @@ public class VaultManager {
         int remaining = amount;
         for (VaultBlockEntity v : getVaults(level, owner)) {
             if (remaining <= 0) break;
+            if (v.getMode() != VaultBlockEntity.VaultMode.BOTH && v.getMode() != VaultBlockEntity.VaultMode.INPUT) continue;
             int countInVault = v.countItem(item);
             if (countInVault > 0) {
                 int take = Math.min(remaining, countInVault);
@@ -138,6 +137,7 @@ public class VaultManager {
 
         for (VaultBlockEntity v : getVaults(level, owner)) {
             if (remaining.isEmpty()) break;
+            if (v.getMode() != VaultBlockEntity.VaultMode.BOTH && v.getMode() != VaultBlockEntity.VaultMode.OUTPUT) continue;
             NonNullList<ItemStack> toInsert = NonNullList.create();
             for (ItemStack s : remaining) if (!s.isEmpty()) toInsert.add(s.copy());
             if (toInsert.isEmpty()) break;
