@@ -127,11 +127,51 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
     private EditBoxWrapper qtyField, priceField, itemIdField;
 
     private String searchQuery = "";
+    private String historySearchQuery = "";
     private int viewMode = 0;
     private int createOrderSourceMode = 0;
     private String selectedItemId;
     private boolean createSellMode = true;
     private UIComponent historyView;
+
+    private EditBoxWrapper historySearchField;
+
+    private int browseFilterMode = 0; // 0 = All, 1 = Active Only
+    private int browseSortMode = 0;   // 0 = Price ▲, 1 = Price ▼, 2 = Name A-Z, 3 = Most Active
+    private ButtonWidget browseFilterBtn, browseSortBtn;
+
+    private int historyFilterMode = 0; // 0 = All Trades, 1 = Sales Only, 2 = Purchases Only
+    private int historySortMode = 0;   // 0 = Newest, 1 = Oldest, 2 = Highest Total
+    private ButtonWidget historyFilterBtn, historySortBtn;
+
+    private String getBrowseFilterLabel() {
+        return browseFilterMode == 1 ? "Active Only" : "All";
+    }
+
+    private String getBrowseSortLabel() {
+        switch (browseSortMode) {
+            case 1: return "Price \u25BC";
+            case 2: return "Name A-Z";
+            case 3: return "Most Active";
+            default: return "Price \u25B2";
+        }
+    }
+
+    private String getHistoryFilterLabel() {
+        switch (historyFilterMode) {
+            case 1: return "Sales";
+            case 2: return "Purchases";
+            default: return "All";
+        }
+    }
+
+    private String getHistorySortLabel() {
+        switch (historySortMode) {
+            case 1: return "Oldest";
+            case 2: return "Highest $";
+            default: return "Newest";
+        }
+    }
     /** Set when the player clicked a search result; cleared when they type again. */
     private String itemSearchAutoFilled = null;
     /** Per-frame data for the late-rendered item search dropdown. */
@@ -179,6 +219,7 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         super.init();
         buildTree();
         if (searchField != null) this.addRenderableWidget(searchField.getEditBox());
+        if (historySearchField != null) this.addRenderableWidget(historySearchField.getEditBox());
         if (itemIdField != null) this.addRenderableWidget(itemIdField.getEditBox());
         if (qtyField != null) this.addRenderableWidget(qtyField.getEditBox());
         if (priceField != null) this.addRenderableWidget(priceField.getEditBox());
@@ -191,6 +232,12 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
             searchField.getEditBox().setY(searchField.getY() + 3);
             searchField.getEditBox().setWidth(Math.max(10, searchField.getWidth() - 8));
             searchField.getEditBox().setHeight(12);
+        }
+        if (historySearchField != null && historySearchField.isVisible()) {
+            historySearchField.getEditBox().setX(historySearchField.getX() + 4);
+            historySearchField.getEditBox().setY(historySearchField.getY() + 3);
+            historySearchField.getEditBox().setWidth(Math.max(10, historySearchField.getWidth() - 8));
+            historySearchField.getEditBox().setHeight(12);
         }
         if (itemIdField != null && itemIdField.isVisible()) {
             itemIdField.getEditBox().setX(itemIdField.getX() + 4);
@@ -307,9 +354,25 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
     }
 
     private UIComponent buildBrowser(Font font) {
-        VStack v = new VStack().gap(6);
+        VStack v = new VStack().gap(4);
         searchField = new EditBoxWrapper(60, TEXT_PRIMARY, PANEL, font).setPlaceholder("Search products...");
         v.addChild(searchField);
+
+        HStack bar = new HStack().gap(4);
+        browseFilterBtn = btn("Filter: " + getBrowseFilterLabel(), PANEL, CARD_HOVER).onPress(() -> {
+            browseFilterMode = (browseFilterMode + 1) % 2;
+            browseFilterBtn.setLabel("Filter: " + getBrowseFilterLabel());
+        });
+        browseFilterBtn.flex();
+        bar.addChild(browseFilterBtn);
+
+        browseSortBtn = btn("Sort: " + getBrowseSortLabel(), PANEL, CARD_HOVER).onPress(() -> {
+            browseSortMode = (browseSortMode + 1) % 4;
+            browseSortBtn.setLabel("Sort: " + getBrowseSortLabel());
+        });
+        browseSortBtn.flex();
+        bar.addChild(browseSortBtn);
+        v.addChild(bar);
 
         cardGrid = new ScrollList(
             () -> filterCards().size(),
@@ -470,15 +533,24 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
             }
         });
 
-        HStack cols = new HStack().gap(4);
+        HStack cols = new HStack().gap(6);
         cols.flex();
         cols.addChild(buildOrderColumn(font, true));
+        cols.addChild(new UIComponent() {
+            @Override public int preferredWidth(Font f) { return 1; }
+            @Override public int preferredHeight(Font f) { return 1; }
+            @Override
+            public void render(GuiGraphics g, Font fnt, int mx, int my, float pt) {
+                g.fill(x, y + 2, x + 1, y + height - 2, PANEL_BORDER);
+            }
+        });
         cols.addChild(buildOrderColumn(font, false));
         v.addChild(cols);
 
         // My Orders Section
         v.addChild(new SizedBox(0, 2));
         v.addChild(TextWidget.centered("MY ORDERS", ACCENT));
+        final ScrollList[] myOrderListHolder = new ScrollList[1];
         ScrollList myOrderList = new ScrollList(
             () -> Math.max(1, getMyOrders().size()),
             16,
@@ -492,28 +564,74 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
                 if (idx >= myOrders.size()) return;
                 MarketNetwork.OrderEntry e = myOrders.get(idx);
                 boolean isSell = cachedDetail != null && cachedDetail.asks.contains(e);
-                String typePrefix = isSell ? "[SELL] " : "[BUY] ";
-                int clr = isSell ? RED : GREEN;
-                if (hover) g.fill(rx, ry, rx + rw, ry + 15, CARD_HOVER);
 
-                g.drawString(fnt, typePrefix, rx + 2, ry + 3, clr);
-                int px = rx + 2 + fnt.width(typePrefix);
-                renderSmallCoin(g, px - 1, ry + 4);
+                if (hover) g.fill(rx, ry, rx + rw, ry + 16, CARD_HOVER);
+
+                // 1. Order Type Badge (SELL or BUY)
+                String typeText = isSell ? "SELL" : "BUY";
+                int typeW = fnt.width(typeText);
+                int badgeW = typeW + 6;
+                int badgeH = 11;
+                int badgeX = rx + 3;
+                int badgeY = ry + 2;
+
+                int bgClr = isSell ? 0x40801818 : 0x40105028;
+                int borderClr = isSell ? 0xFFC03030 : 0xFF20A050;
+                int textClr = isSell ? 0xFFFF6666 : 0xFF66FF66;
+
+                g.fill(badgeX, badgeY, badgeX + badgeW, badgeY + badgeH, bgClr);
+                g.fill(badgeX, badgeY, badgeX + badgeW, badgeY + 1, borderClr);
+                g.fill(badgeX, badgeY + badgeH - 1, badgeX + badgeW, badgeY + badgeH, borderClr);
+                g.fill(badgeX, badgeY, badgeX + 1, badgeY + badgeH, borderClr);
+                g.fill(badgeX + badgeW - 1, badgeY, badgeX + badgeW, badgeY + badgeH, borderClr);
+                g.drawString(fnt, typeText, badgeX + 3, badgeY + 2, textClr);
+
+                // 2. Coin Icon & Price x Quantity
+                int px = badgeX + badgeW + 5;
+                renderSmallCoin(g, px, ry + 4);
                 String line = e.price + " x" + e.quantity;
+                int clr = isSell ? RED : GREEN;
                 g.drawString(fnt, line, px + 10, ry + 3, clr);
 
-                String cancelText = "[Cancel]";
-                int cancelW = fnt.width(cancelText);
-                g.drawString(fnt, cancelText, rx + rw - cancelW - 2, ry + 3, RED);
+                // 3. Cancel Button Widget
+                String cancelText = "Cancel";
+                int btnW = fnt.width(cancelText) + 8;
+                int btnH = 12;
+                int btnX = rx + rw - btnW - 3;
+                int btnY = ry + 2;
+
+                boolean isCancelHover = (mx >= btnX && mx <= btnX + btnW && my >= btnY && my <= btnY + btnH);
+                int btnBg = isCancelHover ? 0xFFC02020 : 0x60901818;
+                int btnBorder = 0xFFFF4444;
+
+                g.fill(btnX, btnY, btnX + btnW, btnY + btnH, btnBg);
+                g.fill(btnX, btnY, btnX + btnW, btnY + 1, btnBorder);
+                g.fill(btnX, btnY + badgeH - 1, btnX + btnW, btnY + btnH, btnBorder);
+                g.fill(btnX, btnY, btnX + 1, btnY + btnH, btnBorder);
+                g.fill(btnX + btnW - 1, btnX + btnW, btnY, btnY + btnH, btnBorder);
+                g.drawString(fnt, cancelText, btnX + 4, btnY + 2, 0xFFFFFFFF);
             },
-            (idx, btn) -> {
+            (idx, button, mx, my) -> {
                 List<MarketNetwork.OrderEntry> myOrders = getMyOrders();
                 if (idx >= 0 && idx < myOrders.size()) {
-                    MarketNetwork.OrderEntry e = myOrders.get(idx);
-                    MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.CancelOrderPacket(e.orderId));
+                    Font fnt = net.minecraft.client.Minecraft.getInstance().font;
+                    String cancelText = "Cancel";
+                    int btnW = fnt.width(cancelText) + 8;
+                    if (myOrderListHolder[0] != null) {
+                        int listX = myOrderListHolder[0].getX();
+                        int listW = myOrderListHolder[0].getWidth() - 4;
+                        int btnX = listX + listW - btnW - 3;
+
+                        // Only process cancellation if click occurred inside Cancel button bounds
+                        if (mx >= btnX && mx <= btnX + btnW) {
+                            MarketNetwork.OrderEntry e = myOrders.get(idx);
+                            MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.CancelOrderPacket(e.orderId));
+                        }
+                    }
                 }
             },
             PANEL, ACCENT_DIM);
+        myOrderListHolder[0] = myOrderList;
         v.addChild(myOrderList);
 
         v.addChild(new SizedBox(0, 2));
@@ -831,7 +949,7 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
             browseBtn.setActive(mode == 0);
         }
         if (newOrderBtn != null) {
-            newOrderBtn.setVisible(mode == 0 || mode == 3);
+            newOrderBtn.setVisible(true);
             newOrderBtn.setActive(mode == 2);
         }
         if (orderHistoryBtn != null) {
@@ -841,6 +959,10 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         if (searchField != null) {
             searchField.setVisible(mode == 0);
             if (mode != 0) searchField.getEditBox().setFocused(false);
+        }
+        if (historySearchField != null) {
+            historySearchField.setVisible(mode == 3);
+            if (mode != 3) historySearchField.getEditBox().setFocused(false);
         }
         if (itemIdField != null) {
             com.nstut.Economy.LOGGER.info("[MarketScreen] switchView itemIdField.getValue()='{}' BEFORE setVisible({})", itemIdField.getValue(), mode == 2);
@@ -884,9 +1006,73 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         List<MarketNetwork.ItemCardData> f = new ArrayList<>();
         String q = searchQuery.toLowerCase().trim();
         for (MarketNetwork.ItemCardData c : cachedCards) {
-            if (q.isEmpty() || c.displayName.toLowerCase().contains(q)) f.add(c);
+            if (!q.isEmpty() && !c.displayName.toLowerCase().contains(q) && !c.itemId.toLowerCase().contains(q)) {
+                continue;
+            }
+            if (browseFilterMode == 1 && c.offerCount <= 0) {
+                continue; // Active Trades Only
+            }
+            f.add(c);
         }
+
+        f.sort((a, b) -> {
+            if (browseSortMode == 0) { // Price Low to High
+                BigDecimal pa = parsePrice(a.globalPrice);
+                BigDecimal pb = parsePrice(b.globalPrice);
+                return pa.compareTo(pb);
+            } else if (browseSortMode == 1) { // Price High to Low
+                BigDecimal pa = parsePrice(a.globalPrice);
+                BigDecimal pb = parsePrice(b.globalPrice);
+                return pb.compareTo(pa);
+            } else if (browseSortMode == 2) { // Name A-Z
+                return a.displayName.compareToIgnoreCase(b.displayName);
+            } else if (browseSortMode == 3) { // Orders: Most
+                return Integer.compare(b.offerCount, a.offerCount);
+            }
+            return 0;
+        });
+
         return f;
+    }
+
+    private List<MarketNetwork.HistoryEntry> filterHistory() {
+        List<MarketNetwork.HistoryEntry> f = new ArrayList<>();
+        String q = historySearchQuery.toLowerCase().trim();
+        for (MarketNetwork.HistoryEntry e : cachedHistory) {
+            if (historyFilterMode == 1 && !e.wasSell) continue; // Sales Only
+            if (historyFilterMode == 2 && e.wasSell) continue;  // Purchases Only
+            if (!q.isEmpty()) {
+                boolean matchName = e.displayName.toLowerCase().contains(q);
+                boolean matchId = e.itemId.toLowerCase().contains(q);
+                boolean matchPlayer = e.counterparty.toLowerCase().contains(q);
+                if (!matchName && !matchId && !matchPlayer) continue;
+            }
+            f.add(e);
+        }
+
+        f.sort((a, b) -> {
+            if (historySortMode == 0) { // Newest First
+                return Long.compare(b.timestamp, a.timestamp);
+            } else if (historySortMode == 1) { // Oldest First
+                return Long.compare(a.timestamp, b.timestamp);
+            } else if (historySortMode == 2) { // Highest Total Price
+                BigDecimal totalA = new BigDecimal(a.price).multiply(BigDecimal.valueOf(a.quantity));
+                BigDecimal totalB = new BigDecimal(b.price).multiply(BigDecimal.valueOf(b.quantity));
+                return totalB.compareTo(totalA);
+            }
+            return 0;
+        });
+
+        return f;
+    }
+
+    private BigDecimal parsePrice(String s) {
+        if (s == null || s.equals("--") || s.isEmpty()) return BigDecimal.valueOf(999999999);
+        try {
+            return new BigDecimal(s);
+        } catch (Exception e) {
+            return BigDecimal.valueOf(999999999);
+        }
     }
 
     /** Searches the item registry for entries whose display name or registry id
@@ -912,19 +1098,40 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
     private UIComponent buildHistory(Font font) {
         VStack v = new VStack().gap(4);
         v.addChild(TextWidget.centered("ORDER HISTORY", ACCENT));
+
+        historySearchField = new EditBoxWrapper(60, TEXT_PRIMARY, PANEL, font).setPlaceholder("Search item or player...");
+        v.addChild(historySearchField);
+
+        HStack bar = new HStack().gap(4);
+        historyFilterBtn = btn("Filter: " + getHistoryFilterLabel(), PANEL, CARD_HOVER).onPress(() -> {
+            historyFilterMode = (historyFilterMode + 1) % 3;
+            historyFilterBtn.setLabel("Filter: " + getHistoryFilterLabel());
+        });
+        historyFilterBtn.flex();
+        bar.addChild(historyFilterBtn);
+
+        historySortBtn = btn("Sort: " + getHistorySortLabel(), PANEL, CARD_HOVER).onPress(() -> {
+            historySortMode = (historySortMode + 1) % 3;
+            historySortBtn.setLabel("Sort: " + getHistorySortLabel());
+        });
+        historySortBtn.flex();
+        bar.addChild(historySortBtn);
+        v.addChild(bar);
+
         v.addChild(new Divider(PANEL_BORDER));
 
         ScrollList list = new ScrollList(
-            () -> Math.max(1, cachedHistory.size()),
+            () -> Math.max(1, filterHistory().size()),
             28,
             (g, fnt, idx, rx, ry, rw, mx, my, hover) -> {
-                if (cachedHistory.isEmpty()) {
-                    String msg = "No trades recorded yet";
+                List<MarketNetwork.HistoryEntry> entries = filterHistory();
+                if (entries.isEmpty()) {
+                    String msg = "No trades matching filter";
                     g.drawString(fnt, msg, rx + (rw - fnt.width(msg)) / 2, ry + 8, TEXT_MUTED);
                     return;
                 }
-                if (idx >= cachedHistory.size()) return;
-                MarketNetwork.HistoryEntry e = cachedHistory.get(idx);
+                if (idx >= entries.size()) return;
+                MarketNetwork.HistoryEntry e = entries.get(idx);
 
                 if (hover) g.fill(rx, ry, rx + rw, ry + 27, CARD_HOVER);
                 g.fill(rx, ry + 27, rx + rw, ry + 28, PANEL_BORDER);
@@ -1137,6 +1344,13 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         }
 
         return super.keyPressed(key, scan, mod);
+    }
+
+    @Override
+    public void containerTick() {
+        super.containerTick();
+        if (searchField != null) searchQuery = searchField.getValue();
+        if (historySearchField != null) historySearchQuery = historySearchField.getValue();
     }
 }
 

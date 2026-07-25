@@ -65,7 +65,7 @@ public class VaultBlock extends DirectionalBlock implements EntityBlock {
                     return InteractionResult.CONSUME;
                 }
                 sp.openMenu(new SimpleMenuProvider(
-                        (id, inv, p) -> ChestMenu.threeRows(id, inv, vault),
+                        (id, inv, p) -> ChestMenu.sixRows(id, inv, vault),
                         Component.translatable("block.economy.vault")
                 ));
             }

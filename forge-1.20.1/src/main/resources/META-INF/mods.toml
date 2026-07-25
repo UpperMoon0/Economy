@@ -1,14 +1,15 @@
 modLoader = "javafml"
 loaderVersion = "${loader_version_range}"
-license = "All Rights Reserved"
+license = "MIT"
+issueTrackerURL = "https://github.com/nstut/economy/issues"
 
 [[mods]]
 modId = "economy"
 version = "${version}"
-displayName = "Economy"
+displayName = "Global Economy & Market"
 authors = "NsTut"
 description = '''
-A global economy system with currency, trading, and vault storage.
+A modern, feature-rich Minecraft Economy mod featuring a full Order Book Market Terminal UI, Vault physical storage integration, player-to-player transfers, automated order matching, and sound-effect enabled financial transactions.
 '''
 
 [[dependencies.economy]]

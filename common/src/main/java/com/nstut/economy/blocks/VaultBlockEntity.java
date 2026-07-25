@@ -15,7 +15,7 @@ import java.util.UUID;
 
 public class VaultBlockEntity extends BlockEntity implements Container {
 
-    private static final int SIZE = 27;
+    private static final int SIZE = 54;
     private NonNullList<ItemStack> items;
     private UUID owner;
 
