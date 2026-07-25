@@ -14,16 +14,6 @@ Transform your Minecraft server into a thriving financial empire! **Global Econo
 - **Player Payments**: Send coins directly to other players anywhere on the server with custom audio feedback.
 - **Server Shops**: Admins can set up infinite buy/sell orders to create server-wide baseline economies.
 
----
-
-## Getting Started
-
-1. **Craft a Vault**: Craft a Vault block (**4 Diamonds**, **4 Iron Ingots**, **1 Chest**) and place it in the world to activate your secure storage.
-2. **Access the Market**: Open the Market terminal block to view live listings, item price graphs, and your current balance.
-3. **Trade Goods**: Submit Buy or Sell orders at your desired price. Orders match automatically in the background with immediate fund and item transfer!
-
----
-
 ## Commands
 
 | Command | Permission | Description |
