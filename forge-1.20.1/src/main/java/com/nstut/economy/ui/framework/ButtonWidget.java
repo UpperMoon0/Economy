@@ -32,8 +32,14 @@ public class ButtonWidget extends UIComponent {
     public void render(GuiGraphics g, Font font, int mx, int my, float pt) {
         int fillColor = (active || isHovered()) ? hoverColor : normalColor;
         g.fill(x, y, x + width, y + height, fillColor);
+        if (active) {
+            // Draw subtle accent top/bottom highlight border for active state
+            g.fill(x, y, x + width, y + 1, 0xFF00D4AA);
+            g.fill(x, y + height - 1, x + width, y + height, 0xFF00D4AA);
+        }
         int tw = font.width(label);
-        g.drawString(font, label, x + (width - tw) / 2, y + 2, textColor);
+        int ty = y + (height - font.lineHeight) / 2;
+        g.drawString(font, label, x + (width - tw) / 2, ty, textColor);
     }
 
     @Override

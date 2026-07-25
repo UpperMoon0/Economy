@@ -70,13 +70,13 @@ public class EditBoxWrapper extends UIComponent {
 
         // keep editbox inner bounds aligned with padding
         editBox.setX(x + 4);
-        editBox.setY(y + (height - 8) / 2);
+        editBox.setY(y + (height - 10) / 2);
         editBox.setWidth(Math.max(10, width - 8));
         editBox.setHeight(10);
 
         if (editBox.getValue().isEmpty() && !placeholder.isEmpty()) {
             int placeholderColor = editBox.isFocused() ? 0xFF45455A : 0xFF65657A;
-            g.drawString(font, placeholder, x + 4, y + (height - 8) / 2, placeholderColor);
+            g.drawString(font, placeholder, x + 4, y + (height - font.lineHeight) / 2, placeholderColor);
         }
     }
 }

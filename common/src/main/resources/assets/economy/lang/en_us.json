@@ -3,6 +3,8 @@
   "block.economy.vault": "Vault",
   "item.economy.market": "Market",
   "item.economy.vault": "Vault",
+  "item.economy.coin": "Coin",
   "itemGroup.economy": "Economy",
+  "subtitles.economy.money": "Ka-Ching! Money transferred",
   "message.economy.vault.not_owner": "This vault does not belong to you."
 }

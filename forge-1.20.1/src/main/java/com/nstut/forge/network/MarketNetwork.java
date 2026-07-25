@@ -2,14 +2,14 @@ package com.nstut.forge.network;
 
 import com.nstut.Economy;
 import com.nstut.economy.api.IAccountManager;
-import com.nstut.economy.api.IOffer;
+import com.nstut.economy.api.IOrder;
 import com.nstut.economy.blocks.VaultManager;
 import com.nstut.economy.config.EconomyConfig;
 import com.nstut.economy.data.EconomyTradeData;
 import com.nstut.economy.data.TradeLedger;
 import com.nstut.economy.trading.ItemCommodity;
-import com.nstut.economy.trading.Offer;
-import com.nstut.economy.trading.OfferManager;
+import com.nstut.economy.trading.Order;
+import com.nstut.economy.trading.OrderManager;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
@@ -42,10 +42,12 @@ public class MarketNetwork {
         CHANNEL.registerMessage(packetId++, SyncItemListPacket.class, SyncItemListPacket::encode, SyncItemListPacket::decode, SyncItemListPacket::handle);
         CHANNEL.registerMessage(packetId++, RequestItemDetailPacket.class, RequestItemDetailPacket::encode, RequestItemDetailPacket::decode, RequestItemDetailPacket::handle);
         CHANNEL.registerMessage(packetId++, SyncItemDetailPacket.class, SyncItemDetailPacket::encode, SyncItemDetailPacket::decode, SyncItemDetailPacket::handle);
-        CHANNEL.registerMessage(packetId++, CreateOfferPacket.class, CreateOfferPacket::encode, CreateOfferPacket::decode, CreateOfferPacket::handle);
-        CHANNEL.registerMessage(packetId++, AcceptOfferPacket.class, AcceptOfferPacket::encode, AcceptOfferPacket::decode, AcceptOfferPacket::handle);
-        CHANNEL.registerMessage(packetId++, CancelOfferPacket.class, CancelOfferPacket::encode, CancelOfferPacket::decode, CancelOfferPacket::handle);
+        CHANNEL.registerMessage(packetId++, CreateOrderPacket.class, CreateOrderPacket::encode, CreateOrderPacket::decode, CreateOrderPacket::handle);
+        CHANNEL.registerMessage(packetId++, AcceptOrderPacket.class, AcceptOrderPacket::encode, AcceptOrderPacket::decode, AcceptOrderPacket::handle);
+        CHANNEL.registerMessage(packetId++, CancelOrderPacket.class, CancelOrderPacket::encode, CancelOrderPacket::decode, CancelOrderPacket::handle);
         CHANNEL.registerMessage(packetId++, RequestRefreshPacket.class, RequestRefreshPacket::encode, RequestRefreshPacket::decode, RequestRefreshPacket::handle);
+        CHANNEL.registerMessage(packetId++, RequestOrderHistoryPacket.class, RequestOrderHistoryPacket::encode, RequestOrderHistoryPacket::decode, RequestOrderHistoryPacket::handle);
+        CHANNEL.registerMessage(packetId++, SyncOrderHistoryPacket.class, SyncOrderHistoryPacket::encode, SyncOrderHistoryPacket::decode, SyncOrderHistoryPacket::handle);
     }
 
     public static class ItemCardData {
@@ -71,7 +73,7 @@ public class MarketNetwork {
     }
 
     public static class OrderEntry {
-        public final UUID offerId;
+        public final UUID orderId;
         public final UUID ownerId;
         public final String sellerName;
         public final String price;
@@ -79,12 +81,12 @@ public class MarketNetwork {
         public final boolean isPlayerOwned;
         public final boolean isServerOrder;
 
-        public OrderEntry(UUID offerId, UUID ownerId, String sellerName, String price, int quantity, boolean isPlayerOwned, boolean isServerOrder) {
-            this.offerId = offerId; this.ownerId = ownerId; this.sellerName = sellerName; this.price = price; this.quantity = quantity; this.isPlayerOwned = isPlayerOwned; this.isServerOrder = isServerOrder;
+        public OrderEntry(UUID orderId, UUID ownerId, String sellerName, String price, int quantity, boolean isPlayerOwned, boolean isServerOrder) {
+            this.orderId = orderId; this.ownerId = ownerId; this.sellerName = sellerName; this.price = price; this.quantity = quantity; this.isPlayerOwned = isPlayerOwned; this.isServerOrder = isServerOrder;
         }
 
         public void write(FriendlyByteBuf buf) {
-            buf.writeUUID(offerId);
+            buf.writeUUID(orderId);
             buf.writeUUID(ownerId);
             buf.writeUtf(sellerName);
             buf.writeUtf(price);
@@ -211,30 +213,30 @@ public class MarketNetwork {
         }
     }
 
-    public static class CreateOfferPacket {
+    public static class CreateOrderPacket {
         public final String itemId;
         public final int quantity;
         public final String pricePerUnit;
         public final boolean isSell;
 
-        public CreateOfferPacket(String itemId, int quantity, String pricePerUnit, boolean isSell) {
+        public CreateOrderPacket(String itemId, int quantity, String pricePerUnit, boolean isSell) {
             this.itemId = itemId; this.quantity = quantity; this.pricePerUnit = pricePerUnit; this.isSell = isSell;
         }
 
-        public static void encode(CreateOfferPacket pkt, FriendlyByteBuf buf) {
+        public static void encode(CreateOrderPacket pkt, FriendlyByteBuf buf) {
             buf.writeUtf(pkt.itemId); buf.writeInt(pkt.quantity); buf.writeUtf(pkt.pricePerUnit); buf.writeBoolean(pkt.isSell);
         }
 
-        public static CreateOfferPacket decode(FriendlyByteBuf buf) {
-            return new CreateOfferPacket(buf.readUtf(), buf.readInt(), buf.readUtf(), buf.readBoolean());
+        public static CreateOrderPacket decode(FriendlyByteBuf buf) {
+            return new CreateOrderPacket(buf.readUtf(), buf.readInt(), buf.readUtf(), buf.readBoolean());
         }
 
-        public static void handle(CreateOfferPacket pkt, Supplier<NetworkEvent.Context> ctx) {
+        public static void handle(CreateOrderPacket pkt, Supplier<NetworkEvent.Context> ctx) {
             ctx.get().enqueueWork(() -> {
                 ServerPlayer player = ctx.get().getSender();
                 if (player == null) return;
                 ServerLevel level = player.serverLevel();
-                OfferManager offerManager = Economy.getOfferManager();
+                OrderManager orderManager = Economy.getOrderManager();
 
                 Item item = BuiltInRegistries.ITEM.get(new ResourceLocation(pkt.itemId));
                 if (item == net.minecraft.world.item.Items.AIR) { sendItemList(player); return; }
@@ -245,11 +247,11 @@ public class MarketNetwork {
                     if (VaultManager.countItemInVaults(level, player.getUUID(), item) < pkt.quantity) { sendItemDetail(player, pkt.itemId); return; }
                     net.minecraft.core.NonNullList<net.minecraft.world.item.ItemStack> reserved = net.minecraft.core.NonNullList.create();
                     if (!VaultManager.extractItemFromVaults(level, player.getUUID(), item, pkt.quantity, reserved)) { sendItemDetail(player, pkt.itemId); return; }
-                    offerManager.createSellOffer(player.getUUID(), commodity, pkt.quantity, price, reserved, level);
+                    orderManager.createSellOrder(player.getUUID(), commodity, pkt.quantity, price, reserved, level);
                 } else {
-                    offerManager.createBuyOffer(player.getUUID(), commodity, pkt.quantity, price, level);
+                    orderManager.createBuyOrder(player.getUUID(), commodity, pkt.quantity, price, level);
                 }
-                offerManager.matchAllPendingOrders(level);
+                orderManager.matchAllPendingOrders(level);
                 sendItemDetail(player, pkt.itemId);
                 sendItemList(player);
             });
@@ -257,25 +259,25 @@ public class MarketNetwork {
         }
     }
 
-    public static class AcceptOfferPacket {
-        public final UUID offerId;
+    public static class AcceptOrderPacket {
+        public final UUID orderId;
 
-        public AcceptOfferPacket(UUID offerId) { this.offerId = offerId; }
+        public AcceptOrderPacket(UUID orderId) { this.orderId = orderId; }
 
-        public static void encode(AcceptOfferPacket pkt, FriendlyByteBuf buf) { buf.writeUUID(pkt.offerId); }
-        public static AcceptOfferPacket decode(FriendlyByteBuf buf) { return new AcceptOfferPacket(buf.readUUID()); }
+        public static void encode(AcceptOrderPacket pkt, FriendlyByteBuf buf) { buf.writeUUID(pkt.orderId); }
+        public static AcceptOrderPacket decode(FriendlyByteBuf buf) { return new AcceptOrderPacket(buf.readUUID()); }
 
-        public static void handle(AcceptOfferPacket pkt, Supplier<NetworkEvent.Context> ctx) {
+        public static void handle(AcceptOrderPacket pkt, Supplier<NetworkEvent.Context> ctx) {
             ctx.get().enqueueWork(() -> {
                 ServerPlayer player = ctx.get().getSender();
                 if (player == null) return;
-                OfferManager offerManager = Economy.getOfferManager();
-                var opt = offerManager.getOffer(pkt.offerId);
+                OrderManager orderManager = Economy.getOrderManager();
+                var opt = orderManager.getOrder(pkt.orderId);
                 if (opt.isEmpty() || opt.get().getOwner().equals(player.getUUID())) { sendItemList(player); return; }
-                Offer offer = opt.get();
-                IOffer.TransactionResult result = offer.execute(player.getUUID(), player.serverLevel());
-                offerManager.cleanupOffers();
-                if (offer.getCommodity() instanceof ItemCommodity ic) {
+                Order order = opt.get();
+                IOrder.TransactionResult result = order.execute(player.getUUID(), player.serverLevel());
+                orderManager.cleanupOrders();
+                if (order.getCommodity() instanceof ItemCommodity ic) {
                     sendItemDetail(player, ic.getId().toString());
                 } else {
                     sendItemList(player);
@@ -285,27 +287,27 @@ public class MarketNetwork {
         }
     }
 
-    public static class CancelOfferPacket {
-        public final UUID offerId;
+    public static class CancelOrderPacket {
+        public final UUID orderId;
 
-        public CancelOfferPacket(UUID offerId) { this.offerId = offerId; }
+        public CancelOrderPacket(UUID orderId) { this.orderId = orderId; }
 
-        public static void encode(CancelOfferPacket pkt, FriendlyByteBuf buf) { buf.writeUUID(pkt.offerId); }
-        public static CancelOfferPacket decode(FriendlyByteBuf buf) { return new CancelOfferPacket(buf.readUUID()); }
+        public static void encode(CancelOrderPacket pkt, FriendlyByteBuf buf) { buf.writeUUID(pkt.orderId); }
+        public static CancelOrderPacket decode(FriendlyByteBuf buf) { return new CancelOrderPacket(buf.readUUID()); }
 
-        public static void handle(CancelOfferPacket pkt, Supplier<NetworkEvent.Context> ctx) {
+        public static void handle(CancelOrderPacket pkt, Supplier<NetworkEvent.Context> ctx) {
             ctx.get().enqueueWork(() -> {
                 ServerPlayer player = ctx.get().getSender();
                 if (player == null) return;
-                OfferManager offerManager = Economy.getOfferManager();
-                var opt = offerManager.getOffer(pkt.offerId);
+                OrderManager orderManager = Economy.getOrderManager();
+                var opt = orderManager.getOrder(pkt.orderId);
                 if (opt.isPresent() && opt.get().getOwner().equals(player.getUUID())) {
-                    Offer offer = opt.get();
-                    if (offer.getType() == IOffer.OfferType.SELL && !offer.getReservedItems().isEmpty()) {
-                        VaultManager.insertItemStacksToVaults(player.serverLevel(), player.getUUID(), offer.getReservedItems());
+                    Order order = opt.get();
+                    if (order.getType() == IOrder.OrderType.SELL && !order.getReservedItems().isEmpty()) {
+                        VaultManager.insertItemStacksToVaults(player.serverLevel(), player.getUUID(), order.getReservedItems());
                     }
-                    offer.cancel();
-                    offerManager.cleanupOffers();
+                    order.cancel();
+                    orderManager.cleanupOrders();
                 }
                 if (opt.isPresent() && opt.get().getCommodity() instanceof ItemCommodity ic) {
                     sendItemDetail(player, ic.getId().toString());
@@ -332,7 +334,7 @@ public class MarketNetwork {
     }
 
     private static void sendItemList(ServerPlayer player) {
-        OfferManager offerManager = Economy.getOfferManager();
+        OrderManager orderManager = Economy.getOrderManager();
         var account = IAccountManager.getInstance().getOrCreatePlayerAccount(player.getUUID());
         EconomyConfig config = EconomyConfig.getInstance();
         String balance = account.getBalance().setScale(2, RoundingMode.HALF_UP).toPlainString();
@@ -344,14 +346,14 @@ public class MarketNetwork {
         java.util.Map<String, Integer> counts = new java.util.LinkedHashMap<>();
 
         UUID playerId = player.getUUID();
-        for (Offer offer : offerManager.getAllOffers()) {
-            if (!(offer.getCommodity() instanceof ItemCommodity ic)) continue;
+        for (Order order : orderManager.getAllOrders()) {
+            if (!(order.getCommodity() instanceof ItemCommodity ic)) continue;
             String itemId = ic.getItem().builtInRegistryHolder().key().location().toString();
             displayNames.putIfAbsent(itemId, ic.getDisplayName().getString());
             counts.merge(itemId, 1, Integer::sum);
 
-            BigDecimal price = offer.getPricePerUnit();
-            if (offer.getType() == IOffer.OfferType.SELL) {
+            BigDecimal price = order.getPricePerUnit();
+            if (order.getType() == IOrder.OrderType.SELL) {
                 BigDecimal cur = bestAsks.get(itemId);
                 if (cur == null || price.compareTo(cur) < 0) bestAsks.put(itemId, price);
             } else {
@@ -381,7 +383,7 @@ public class MarketNetwork {
     }
 
     private static void sendItemDetail(ServerPlayer player, String itemId) {
-        OfferManager offerManager = Economy.getOfferManager();
+        OrderManager orderManager = Economy.getOrderManager();
         EconomyConfig config = EconomyConfig.getInstance();
         UUID playerId = player.getUUID();
 
@@ -394,24 +396,24 @@ public class MarketNetwork {
         List<OrderEntry> asks = new ArrayList<>();
         List<OrderEntry> bids = new ArrayList<>();
 
-        for (Offer offer : offerManager.getAllOffers()) {
-            if (!(offer.getCommodity() instanceof ItemCommodity ic)) continue;
+        for (Order order : orderManager.getAllOrders()) {
+            if (!(order.getCommodity() instanceof ItemCommodity ic)) continue;
             if (!ic.getItem().builtInRegistryHolder().key().location().toString().equals(itemId)) continue;
 
             String sellerName = "?";
-            if (offer.isServerOrder()) {
+            if (order.isServerOrder()) {
                 sellerName = "SERVER";
             } else {
-                var profile = player.server.getProfileCache().get(offer.getOwner());
+                var profile = player.server.getProfileCache().get(order.getOwner());
                 if (profile.isPresent()) sellerName = profile.get().getName();
             }
 
             OrderEntry entry = new OrderEntry(
-                offer.getOfferId(), offer.getOwner(), sellerName,
-                offer.getPricePerUnit().setScale(2, RoundingMode.HALF_UP).toPlainString(),
-                offer.getQuantity(), offer.getOwner().equals(playerId), offer.isServerOrder());
+                order.getOrderId(), order.getOwner(), sellerName,
+                order.getPricePerUnit().setScale(2, RoundingMode.HALF_UP).toPlainString(),
+                order.getQuantity(), order.getOwner().equals(playerId), order.isServerOrder());
 
-            if (offer.getType() == IOffer.OfferType.SELL) {
+            if (order.getType() == IOrder.OrderType.SELL) {
                 asks.add(entry);
             } else {
                 bids.add(entry);
@@ -437,5 +439,114 @@ public class MarketNetwork {
         }
 
         CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), new SyncItemDetailPacket(itemId, displayName, vaultCount, asks, bids, chart));
+    }
+
+    // ── Order History ────────────────────────────────────────────────────────
+
+    public static class HistoryEntry {
+        public final String itemId;
+        public final String displayName;
+        public final String price;
+        public final int quantity;
+        /** true = player was the seller, false = buyer */
+        public final boolean wasSell;
+        /** epoch-millis */
+        public final long timestamp;
+        public final String counterparty;
+
+        public HistoryEntry(String itemId, String displayName, String price, int quantity,
+                            boolean wasSell, long timestamp, String counterparty) {
+            this.itemId = itemId; this.displayName = displayName; this.price = price;
+            this.quantity = quantity; this.wasSell = wasSell;
+            this.timestamp = timestamp; this.counterparty = counterparty;
+        }
+
+        public void write(FriendlyByteBuf buf) {
+            buf.writeUtf(itemId);
+            buf.writeUtf(displayName);
+            buf.writeUtf(price);
+            buf.writeInt(quantity);
+            buf.writeBoolean(wasSell);
+            buf.writeLong(timestamp);
+            buf.writeUtf(counterparty);
+        }
+
+        public static HistoryEntry read(FriendlyByteBuf buf) {
+            return new HistoryEntry(buf.readUtf(), buf.readUtf(), buf.readUtf(),
+                    buf.readInt(), buf.readBoolean(), buf.readLong(), buf.readUtf());
+        }
+    }
+
+    public static class RequestOrderHistoryPacket {
+        public RequestOrderHistoryPacket() {}
+        public static void encode(RequestOrderHistoryPacket pkt, FriendlyByteBuf buf) {}
+        public static RequestOrderHistoryPacket decode(FriendlyByteBuf buf) { return new RequestOrderHistoryPacket(); }
+
+        public static void handle(RequestOrderHistoryPacket pkt, Supplier<NetworkEvent.Context> ctx) {
+            ctx.get().enqueueWork(() -> {
+                ServerPlayer player = ctx.get().getSender();
+                if (player != null) sendOrderHistory(player);
+            });
+            ctx.get().setPacketHandled(true);
+        }
+    }
+
+    public static class SyncOrderHistoryPacket {
+        public final List<HistoryEntry> entries;
+
+        public SyncOrderHistoryPacket(List<HistoryEntry> entries) { this.entries = entries; }
+
+        public static void encode(SyncOrderHistoryPacket pkt, FriendlyByteBuf buf) {
+            buf.writeInt(pkt.entries.size());
+            for (HistoryEntry e : pkt.entries) e.write(buf);
+        }
+
+        public static SyncOrderHistoryPacket decode(FriendlyByteBuf buf) {
+            int count = buf.readInt();
+            List<HistoryEntry> entries = new ArrayList<>();
+            for (int i = 0; i < count; i++) entries.add(HistoryEntry.read(buf));
+            return new SyncOrderHistoryPacket(entries);
+        }
+
+        public static void handle(SyncOrderHistoryPacket pkt, Supplier<NetworkEvent.Context> ctx) {
+            ctx.get().enqueueWork(() -> com.nstut.forge.client.MarketScreen.handleSyncOrderHistory(pkt));
+            ctx.get().setPacketHandled(true);
+        }
+    }
+
+    private static void sendOrderHistory(ServerPlayer player) {
+        UUID playerId = player.getUUID();
+        List<com.nstut.economy.data.EconomyTradeData.TradeSnapshot> all =
+                com.nstut.economy.data.TradeLedger.getAllTrades();
+
+        List<HistoryEntry> entries = new ArrayList<>();
+        // Iterate newest-first
+        for (int i = all.size() - 1; i >= 0; i--) {
+            com.nstut.economy.data.EconomyTradeData.TradeSnapshot t = all.get(i);
+            boolean isBuyer  = playerId.equals(t.buyer);
+            boolean isSeller = playerId.equals(t.seller);
+            if (!isBuyer && !isSeller) continue;
+
+            // Resolve item display name
+            net.minecraft.resources.ResourceLocation rl = new net.minecraft.resources.ResourceLocation(t.itemId);
+            net.minecraft.world.item.Item item = net.minecraft.core.registries.BuiltInRegistries.ITEM.get(rl);
+            String displayName = new net.minecraft.world.item.ItemStack(item).getHoverName().getString();
+
+            // Resolve counterparty name
+            UUID counterUUID = isSeller ? t.buyer : t.seller;
+            String counterName = "?";
+            if (com.nstut.economy.trading.OrderManager.SERVER_ID.equals(counterUUID)) {
+                counterName = "SERVER";
+            } else {
+                var profile = player.server.getProfileCache().get(counterUUID);
+                if (profile.isPresent()) counterName = profile.get().getName();
+            }
+
+            entries.add(new HistoryEntry(t.itemId, displayName,
+                    new java.math.BigDecimal(t.price).setScale(2, java.math.RoundingMode.HALF_UP).toPlainString(),
+                    t.quantity, isSeller, t.timestamp, counterName));
+        }
+
+        CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), new SyncOrderHistoryPacket(entries));
     }
 }

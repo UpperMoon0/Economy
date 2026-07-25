@@ -13,8 +13,11 @@ import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 
+import java.math.BigDecimal;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -22,7 +25,7 @@ import java.util.Map;
 public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
 
     private static final int SCREEN_W = 320;
-    private static final int SCREEN_H = 250;
+    private static final int SCREEN_H = 220;
 
     private static final int BG_DARK = 0xFF141424;
     private static final int PANEL = 0xFF1E1E30;
@@ -37,19 +40,86 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
     private static final int RED = 0xFFEE4444;
     private static final int CHART_BG = 0xFF18182A;
     private static final int CHART_LINE = 0xFF00D4AA;
-    private static final int SIDEBAR_W = 68;
+    private static final int SIDEBAR_W = 74;
+
+    private static class PaddingBox extends UIComponent {
+        private final int top, right, bottom, left;
+
+        public PaddingBox(int top, int right, int bottom, int left, UIComponent child) {
+            this.top = top; this.right = right; this.bottom = bottom; this.left = left;
+            if (child != null) addChild(child);
+        }
+
+        @Override
+        public int preferredWidth(Font font) {
+            int max = 0;
+            for (UIComponent c : children) max = Math.max(max, c.preferredWidth(font));
+            return max + left + right;
+        }
+
+        @Override
+        public int preferredHeight(Font font) {
+            int total = 0;
+            for (UIComponent c : children) total += c.preferredHeight(font);
+            return total + top + bottom;
+        }
+
+        @Override
+        public void layout(int x, int y, int availableWidth, int availableHeight) {
+            setBounds(x, y, availableWidth, availableHeight);
+            int cw = Math.max(0, availableWidth - left - right);
+            int ch = Math.max(0, availableHeight - top - bottom);
+            for (UIComponent c : children) {
+                c.layout(x + left, y + top, cw, ch);
+            }
+        }
+
+        @Override
+        public void render(GuiGraphics g, Font font, int mx, int my, float pt) {
+            if (!visible) return;
+            for (UIComponent c : children) if (c.isVisible()) c.render(g, font, mx, my, pt);
+        }
+
+        @Override
+        public boolean mouseClicked(double mx, double my, int button) {
+            if (!visible) return false;
+            for (int i = children.size() - 1; i >= 0; i--) {
+                UIComponent c = children.get(i);
+                if (c.isVisible() && c.mouseClicked(mx, my, button)) return true;
+            }
+            return false;
+        }
+
+        @Override
+        public boolean mouseScrolled(double mx, double my, double delta) {
+            if (!visible) return false;
+            for (UIComponent c : children) {
+                if (c.isVisible() && c.mouseScrolled(mx, my, delta)) return true;
+            }
+            return false;
+        }
+    }
+
+    private static void renderSmallCoin(GuiGraphics g, int x, int y) {
+        g.pose().pushPose();
+        g.pose().translate(x, y, 0);
+        g.pose().scale(0.5f, 0.5f, 0.5f);
+        g.renderItem(COIN_ICON, 0, 0);
+        g.pose().popPose();
+    }
 
     private static List<MarketNetwork.ItemCardData> cachedCards = new ArrayList<>();
     private static String cachedBalance = "0.00";
     private static int cachedVaultCount;
     private static MarketNetwork.SyncItemDetailPacket cachedDetail;
+    private static List<MarketNetwork.HistoryEntry> cachedHistory = new ArrayList<>();
     private static final Map<String, ItemStack> itemIconCache = new HashMap<>();
-    private static final ItemStack COIN_ICON = new ItemStack(BuiltInRegistries.ITEM.get(new ResourceLocation("minecraft", "gold_nugget")));
+    private static final ItemStack COIN_ICON = new ItemStack(BuiltInRegistries.ITEM.get(new ResourceLocation(com.nstut.Economy.MOD_ID, "coin")));
 
     private UIComponent root;
     private TextWidget vaultWidget;
     private UIComponent balanceWidget;
-    private ButtonWidget browseBtn, newOrderBtn;
+    private ButtonWidget browseBtn, newOrderBtn, orderHistoryBtn;
     private EditBoxWrapper searchField;
     private ScrollList cardGrid;
     private ScrollList askList, bidList;
@@ -61,6 +131,28 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
     private int createOrderSourceMode = 0;
     private String selectedItemId;
     private boolean createSellMode = true;
+    private UIComponent historyView;
+    /** Set when the player clicked a search result; cleared when they type again. */
+    private String itemSearchAutoFilled = null;
+    /** Per-frame data for the late-rendered item search dropdown. */
+    private ItemDropdownData pendingDropdown = null;
+
+    /** Lightweight struct used only for the late-render dropdown pass. */
+    private static class ItemDropdownData {
+        final int x, y, w;
+        final List<ItemSearchResult> results;
+        ItemDropdownData(int x, int y, int w, List<ItemSearchResult> results) {
+            this.x = x; this.y = y; this.w = w; this.results = results;
+        }
+    }
+
+    private static class ItemSearchResult {
+        final String itemId;
+        final String displayName;
+        ItemSearchResult(String itemId, String displayName) {
+            this.itemId = itemId; this.displayName = displayName;
+        }
+    }
 
     public MarketScreen(MarketMenu menu, Inventory inv, Component title) {
         super(menu, inv, title);
@@ -76,6 +168,10 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
 
     public static void handleSyncItemDetail(MarketNetwork.SyncItemDetailPacket pkt) {
         cachedDetail = pkt;
+    }
+
+    public static void handleSyncOrderHistory(MarketNetwork.SyncOrderHistoryPacket pkt) {
+        cachedHistory = pkt.entries;
     }
 
     @Override
@@ -124,30 +220,36 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         HStack main = new HStack().gap(0);
         root.addChild(main);
 
-        // Sidebar
-        VStack sidebar = new VStack().gap(4);
+        // Sidebar with Padding & Padding Boxes around buttons
+        VStack sidebar = new VStack().gap(5);
+        sidebar.addChild(new SizedBox(0, 4)); // top margin
         sidebar.addChild(TextWidget.centered("Market", ACCENT));
         balanceWidget = new UIComponent() {
             @Override public int preferredWidth(Font f) { return SIDEBAR_W; }
-            @Override public int preferredHeight(Font f) { return 14; }
+            @Override public int preferredHeight(Font f) { return 16; }
             @Override
             public void render(GuiGraphics g, Font fnt, int mx, int my, float pt) {
-                g.renderItem(COIN_ICON, x + 2, y - 2);
-                g.drawString(fnt, cachedBalance, x + 18, y + 2, TEXT_PRIMARY);
+                int textW = fnt.width(cachedBalance);
+                int totalW = 8 + 3 + textW;
+                int startX = x + (width - totalW) / 2;
+                renderSmallCoin(g, startX, y + 4);
+                g.drawString(fnt, cachedBalance, startX + 11, y + 3, TEXT_PRIMARY);
             }
         };
         sidebar.addChild(balanceWidget);
         vaultWidget = TextWidget.centered(cachedVaultCount > 0 ? cachedVaultCount + " Vault" + (cachedVaultCount > 1 ? "s" : "") : "No Vault!", cachedVaultCount > 0 ? GREEN : RED);
         sidebar.addChild(vaultWidget);
+        sidebar.addChild(new SizedBox(0, 2));
         sidebar.addChild(new Divider(PANEL_BORDER));
+        sidebar.addChild(new SizedBox(0, 2));
 
-        browseBtn = btn("Browse", PANEL, ACCENT).onPress(() -> {
+        browseBtn = btn("Browse", PANEL, CARD_HOVER).onPress(() -> {
             selectedItemId = null;
             switchView(0);
         });
-        sidebar.addChild(browseBtn);
+        sidebar.addChild(new PaddingBox(0, 4, 0, 4, browseBtn));
 
-        newOrderBtn = btn("New Order", PANEL, ACCENT).onPress(() -> {
+        newOrderBtn = btn("New Order", PANEL, CARD_HOVER).onPress(() -> {
             createOrderSourceMode = 0;
             selectedItemId = null;
             createSellMode = true;
@@ -156,14 +258,21 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
             if (priceField != null) priceField.setValue("");
             switchView(2);
         });
-        sidebar.addChild(newOrderBtn);
+        sidebar.addChild(new PaddingBox(0, 4, 0, 4, newOrderBtn));
+
+        orderHistoryBtn = btn("History", PANEL, CARD_HOVER).onPress(() -> {
+            cachedHistory = new ArrayList<>();
+            switchView(3);
+            MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestOrderHistoryPacket());
+        });
+        sidebar.addChild(new PaddingBox(0, 4, 0, 4, orderHistoryBtn));
 
         sidebar.addChild(new Spacer());
         SizedBox sidebarBox = new SizedBox(SIDEBAR_W, SCREEN_H);
         sidebarBox.addChild(sidebar);
         main.addChild(sidebarBox);
 
-        // Content Container with Margin & Padding
+        // Content Container wrapped with 8px Margin & Padding
         VStack contentArea = new VStack().gap(4);
         contentArea.flex();
 
@@ -181,7 +290,16 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         createOffer.setVisible(false);
         contentArea.addChild(createOffer);
 
-        main.addChild(contentArea);
+        UIComponent history = buildHistory(font);
+        history.flex();
+        history.setVisible(false);
+        // store reference so switchView can toggle visibility
+        this.historyView = history;
+        contentArea.addChild(history);
+
+        PaddingBox contentPadding = new PaddingBox(8, 8, 8, 8, contentArea);
+        contentPadding.flex();
+        main.addChild(contentPadding);
     }
 
     private ButtonWidget btn(String label, int normal, int hover) {
@@ -220,24 +338,24 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
                     Item it = BuiltInRegistries.ITEM.get(new ResourceLocation(id));
                     return new ItemStack(it);
                 });
-                g.renderItem(icon, cx + 8, cy + (cardH - 16) / 2);
+                g.renderItem(icon, cx + 6, cy + (cardH - 16) / 2);
 
                 String nameText = fnt.plainSubstrByWidth(card.displayName, cardW - 80);
-                g.drawString(fnt, nameText, cx + 30, cy + 6, TEXT_PRIMARY);
+                g.drawString(fnt, nameText, cx + 28, cy + 6, TEXT_PRIMARY);
 
                 if (card.globalPrice != null && !card.globalPrice.isEmpty()) {
                     if (!card.globalPrice.equals("--")) {
-                        g.renderItem(COIN_ICON, cx + 28, cy + 18);
-                        g.drawString(fnt, card.globalPrice, cx + 46, cy + 22, ACCENT);
+                        renderSmallCoin(g, cx + 26, cy + 22);
+                        g.drawString(fnt, card.globalPrice, cx + 37, cy + 22, ACCENT);
                     } else {
-                        g.drawString(fnt, card.globalPrice, cx + 30, cy + 22, TEXT_MUTED);
+                        g.drawString(fnt, card.globalPrice, cx + 28, cy + 22, TEXT_MUTED);
                     }
                 }
 
                 if (card.offerCount > 0) {
                     String countText = card.offerCount + (card.offerCount == 1 ? " order" : " orders");
                     int countW = fnt.width(countText);
-                    g.drawString(fnt, countText, cx + cardW - countW - 8, cy + 16, TEXT_MUTED);
+                    g.drawString(fnt, countText, cx + cardW - countW - 6, cy + 16, TEXT_MUTED);
                 }
             },
             (idx, btn, mx, my) -> {
@@ -287,7 +405,7 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         // Chart box
         v.addChild(new UIComponent() {
             @Override public int preferredWidth(Font f) { return 0; }
-            @Override public int preferredHeight(Font f) { return 48; }
+            @Override public int preferredHeight(Font f) { return 40; }
             @Override
             public void render(GuiGraphics g, Font fnt, int mx, int my, float pt) {
                 g.fill(x, y, x + width, y + height, CHART_BG);
@@ -307,31 +425,45 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
                     float range = maxP - minP;
 
                     // Draw min/max price text labels on the left
-                    g.drawString(fnt, String.valueOf(maxP), x + 3, y + 2, TEXT_MUTED);
-                    g.drawString(fnt, String.valueOf(minP), x + 3, y + height - 10, TEXT_MUTED);
+                    g.drawString(fnt, String.valueOf(maxP), x + 3, y + 3, TEXT_MUTED);
+                    g.drawString(fnt, String.valueOf(minP), x + 3, y + height - 11, TEXT_MUTED);
 
-                    // Draw current price label on the right
+                    // Right current price badge dimensions
                     int currentPrice = pts.get(pts.size() - 1).price;
-                    int currentPriceY = y + height - 5 - (int)((currentPrice - minP) / range * (height - 10)) - 4;
                     String currentPriceStr = String.valueOf(currentPrice);
                     int currentPriceW = fnt.width(currentPriceStr);
-                    g.drawString(fnt, currentPriceStr, x + width - currentPriceW - 3, currentPriceY, ACCENT);
+                    int badgeW = currentPriceW + 8;
+                    int badgeH = 12;
+                    int badgeX = x + width - badgeW - 4;
+                    int rawY = y + height - 6 - (int)((currentPrice - minP) / range * (height - 12));
+                    int badgeY = Math.max(y + 2, Math.min(y + height - badgeH - 2, rawY - 5));
 
-                    // Draw dotted horizontal line at current price level
-                    int lineY = y + height - 5 - (int)((currentPrice - minP) / range * (height - 10));
-                    int lineStart = x + 30 + (int)((pts.size() - 1) * (width - 36) / Math.max(1, pts.size() - 1));
+                    // Dotted line stops before reaching the right price badge
+                    int lineY = rawY;
+                    int chartLeft = x + 26;
+                    int chartRight = badgeX - 4;
                     int dotStep = 4;
-                    for (int lx = x + 30; lx <= lineStart; lx += dotStep) {
-                        g.fill(lx, lineY, Math.min(lx + 2, lineStart + 1), lineY + 1, ACCENT_DIM);
+                    for (int lx = chartLeft; lx <= chartRight; lx += dotStep) {
+                        g.fill(lx, lineY, Math.min(lx + 2, chartRight), lineY + 1, ACCENT_DIM);
                     }
 
-                    for (int i = 1; i < pts.size(); i++) {
-                        int x0 = x + 30 + (i - 1) * (width - 36) / Math.max(1, pts.size() - 1);
-                        int x1 = x + 30 + i * (width - 36) / Math.max(1, pts.size() - 1);
-                        int y0 = y + height - 5 - (int)((pts.get(i - 1).price - minP) / range * (height - 10));
-                        int y1 = y + height - 5 - (int)((pts.get(i).price - minP) / range * (height - 10));
+                    // Line graph plot
+                    int ptsCount = pts.size();
+                    for (int i = 1; i < ptsCount; i++) {
+                        int x0 = chartLeft + (i - 1) * (chartRight - chartLeft) / Math.max(1, ptsCount - 1);
+                        int x1 = chartLeft + i * (chartRight - chartLeft) / Math.max(1, ptsCount - 1);
+                        int y0 = y + height - 6 - (int)((pts.get(i - 1).price - minP) / range * (height - 12));
+                        int y1 = y + height - 6 - (int)((pts.get(i).price - minP) / range * (height - 12));
                         drawLine(g, x0, y0, x1, y1, CHART_LINE);
                     }
+
+                    // Draw right current price badge pill container on top of chart background
+                    g.fill(badgeX, badgeY, badgeX + badgeW, badgeY + badgeH, 0xFF003024);
+                    g.fill(badgeX, badgeY, badgeX + badgeW, badgeY + 1, ACCENT);
+                    g.fill(badgeX, badgeY + badgeH - 1, badgeX + badgeW, badgeY + badgeH, ACCENT);
+                    g.fill(badgeX, badgeY, badgeX + 1, badgeY + badgeH, ACCENT);
+                    g.fill(badgeX + badgeW - 1, badgeY, badgeX + badgeW, badgeY + badgeH, ACCENT);
+                    g.drawString(fnt, currentPriceStr, badgeX + 4, badgeY + 2, ACCENT);
                 } else {
                     g.drawString(fnt, "No trade history available yet", x + (width - fnt.width("No trade history available yet")) / 2, y + 18, TEXT_MUTED);
                 }
@@ -345,15 +477,16 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         v.addChild(cols);
 
         // My Orders Section
+        v.addChild(new SizedBox(0, 2));
         v.addChild(TextWidget.centered("MY ORDERS", ACCENT));
         ScrollList myOrderList = new ScrollList(
             () -> Math.max(1, getMyOrders().size()),
-            14,
+            16,
             (g, fnt, idx, rx, ry, rw, mx, my, hover) -> {
                 List<MarketNetwork.OrderEntry> myOrders = getMyOrders();
                 if (myOrders.isEmpty()) {
                     String emptyText = "No active orders for this item";
-                    g.drawString(fnt, emptyText, rx + (rw - fnt.width(emptyText)) / 2, ry + 2, TEXT_MUTED);
+                    g.drawString(fnt, emptyText, rx + (rw - fnt.width(emptyText)) / 2, ry + 3, TEXT_MUTED);
                     return;
                 }
                 if (idx >= myOrders.size()) return;
@@ -361,28 +494,29 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
                 boolean isSell = cachedDetail != null && cachedDetail.asks.contains(e);
                 String typePrefix = isSell ? "[SELL] " : "[BUY] ";
                 int clr = isSell ? RED : GREEN;
-                if (hover) g.fill(rx, ry, rx + rw, ry + 13, CARD_HOVER);
+                if (hover) g.fill(rx, ry, rx + rw, ry + 15, CARD_HOVER);
 
-                g.drawString(fnt, typePrefix, rx + 2, ry + 2, clr);
+                g.drawString(fnt, typePrefix, rx + 2, ry + 3, clr);
                 int px = rx + 2 + fnt.width(typePrefix);
-                g.renderItem(COIN_ICON, px - 2, ry - 2);
+                renderSmallCoin(g, px - 1, ry + 4);
                 String line = e.price + " x" + e.quantity;
-                g.drawString(fnt, line, px + 15, ry + 2, clr);
+                g.drawString(fnt, line, px + 10, ry + 3, clr);
 
                 String cancelText = "[Cancel]";
                 int cancelW = fnt.width(cancelText);
-                g.drawString(fnt, cancelText, rx + rw - cancelW - 2, ry + 2, RED);
+                g.drawString(fnt, cancelText, rx + rw - cancelW - 2, ry + 3, RED);
             },
             (idx, btn) -> {
                 List<MarketNetwork.OrderEntry> myOrders = getMyOrders();
                 if (idx >= 0 && idx < myOrders.size()) {
                     MarketNetwork.OrderEntry e = myOrders.get(idx);
-                    MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.CancelOfferPacket(e.offerId));
+                    MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.CancelOrderPacket(e.orderId));
                 }
             },
             PANEL, ACCENT_DIM);
         v.addChild(myOrderList);
 
+        v.addChild(new SizedBox(0, 2));
         v.addChild(btn("Create Order for this Item", ACCENT_DIM, ACCENT).onPress(() -> {
             createOrderSourceMode = 1;
             createSellMode = true;
@@ -454,44 +588,64 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
 
         ScrollList list = new ScrollList(
             () -> Math.max(1, getOtherOrders(isAsks).size()),
-            14,
+            18,
             (g, fnt, idx, rx, ry, rw, mx, my, hover) -> {
                 List<MarketNetwork.OrderEntry> entries = getOtherOrders(isAsks);
                 if (entries.isEmpty()) {
                     String emptyText = isAsks ? "No sell orders" : "No buy orders";
-                    g.drawString(fnt, emptyText, rx + (rw - fnt.width(emptyText)) / 2, ry + 2, TEXT_MUTED);
+                    g.drawString(fnt, emptyText, rx + (rw - fnt.width(emptyText)) / 2, ry + 4, TEXT_MUTED);
                     return;
                 }
                 if (idx >= entries.size()) return;
                 MarketNetwork.OrderEntry e = entries.get(idx);
                 int clr = e.isServerOrder ? ACCENT : (isAsks ? RED : GREEN);
-                if (hover) g.fill(rx, ry, rx + rw, ry + 13, CARD_HOVER);
+                if (hover) g.fill(rx, ry, rx + rw, ry + 17, CARD_HOVER);
 
-                int textX = rx + 2;
+                int textX = rx + 3;
                 if (e.isServerOrder) {
                     String badge = "SERVER";
-                    int badgeW = fnt.width(badge) + 4;
-                    int badgeH = 10;
+                    int badgeW = fnt.width(badge) + 8;
+                    int badgeH = 12;
                     int badgeX = rx + 2;
-                    int badgeY = ry + 2;
+                    int badgeY = ry + 3;
 
-                    g.fill(badgeX, badgeY, badgeX + badgeW, badgeY + badgeH, 0xFF00382B);
+                    g.fill(badgeX, badgeY, badgeX + badgeW, badgeY + badgeH, 0xFF003024);
                     g.fill(badgeX, badgeY, badgeX + badgeW, badgeY + 1, ACCENT);
                     g.fill(badgeX, badgeY + badgeH - 1, badgeX + badgeW, badgeY + badgeH, ACCENT);
                     g.fill(badgeX, badgeY, badgeX + 1, badgeY + badgeH, ACCENT);
                     g.fill(badgeX + badgeW - 1, badgeY, badgeX + badgeW, badgeY + badgeH, ACCENT);
 
-                    g.drawString(fnt, badge, badgeX + 2, badgeY + 1, ACCENT);
+                    g.drawString(fnt, badge, badgeX + 4, badgeY + 2, ACCENT);
                     textX += badgeW + 4;
 
                     if (mx >= badgeX && mx < badgeX + badgeW && my >= badgeY && my < badgeY + badgeH) {
                         pendingTooltip = "Server Order: Generated by the server to provide market liquidity.";
                     }
+                } else {
+                    String rawName = e.sellerName != null && !e.sellerName.isEmpty() ? e.sellerName : "Player";
+                    String dispName = fnt.plainSubstrByWidth(rawName, 44);
+                    int badgeW = fnt.width(dispName) + 6;
+                    int badgeH = 12;
+                    int badgeX = rx + 2;
+                    int badgeY = ry + 3;
+
+                    g.fill(badgeX, badgeY, badgeX + badgeW, badgeY + badgeH, 0xFF232338);
+                    g.fill(badgeX, badgeY, badgeX + badgeW, badgeY + 1, PANEL_BORDER);
+                    g.fill(badgeX, badgeY + badgeH - 1, badgeX + badgeW, badgeY + badgeH, PANEL_BORDER);
+                    g.fill(badgeX, badgeY, badgeX + 1, badgeY + badgeH, PANEL_BORDER);
+                    g.fill(badgeX + badgeW - 1, badgeY, badgeX + badgeW, badgeY + badgeH, PANEL_BORDER);
+
+                    g.drawString(fnt, dispName, badgeX + 3, badgeY + 2, TEXT_PRIMARY);
+                    textX += badgeW + 4;
+
+                    if (mx >= badgeX && mx < badgeX + badgeW && my >= badgeY && my < badgeY + badgeH) {
+                        pendingTooltip = (isAsks ? "Seller: " : "Buyer: ") + rawName;
+                    }
                 }
 
-                g.renderItem(COIN_ICON, textX - 2, ry - 2);
+                renderSmallCoin(g, textX - 1, ry + 4);
                 String line = e.price + " x" + e.quantity;
-                g.drawString(fnt, line, textX + 15, ry + 2, clr);
+                g.drawString(fnt, line, textX + 10, ry + 4, clr);
             },
             (idx, btn) -> {
                 List<MarketNetwork.OrderEntry> entries = getOtherOrders(isAsks);
@@ -519,16 +673,45 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
 
     private UIComponent buildCreateOffer(Font font) {
         VStack v = new VStack().gap(6);
-        v.addChild(btn("< Back", PANEL, CARD_HOVER).onPress(() -> switchView(createOrderSourceMode)));
 
+        HStack header = new HStack().gap(6);
+        ButtonWidget backBtn = btn("< Back", PANEL, CARD_HOVER).onPress(() -> switchView(createOrderSourceMode));
+        header.addChild(backBtn);
         createOfferTitleLabel = TextWidget.label(createSellMode ? "Create Sell Order" : "Create Buy Order", TEXT_PRIMARY);
-        v.addChild(createOfferTitleLabel);
+        header.addChild(createOfferTitleLabel);
+        v.addChild(header);
 
-        itemIdField = new EditBoxWrapper(128, TEXT_PRIMARY, PANEL, font).setPlaceholder("Item ID (e.g. minecraft:diamond)");
+        itemIdField = new EditBoxWrapper(128, TEXT_PRIMARY, PANEL, font).setPlaceholder("Search item name or ID...");
         if (selectedItemId != null) {
             itemIdField.setValue(selectedItemId);
+            itemSearchAutoFilled = selectedItemId;
         }
         v.addChild(itemIdField);
+
+        // ── Search hint label ──
+        v.addChild(new UIComponent() {
+            @Override public int preferredWidth(Font f) { return 0; }
+            @Override public int preferredHeight(Font f) { return 0; }
+            @Override public void render(GuiGraphics g, Font fnt, int mx, int my, float pt) {
+                if (!visible) return;
+                String query = itemIdField != null ? itemIdField.getValue().trim() : "";
+                boolean showDropdown = !query.isEmpty()
+                        && !query.equals(itemSearchAutoFilled);
+                if (showDropdown) {
+                    List<ItemSearchResult> results = getItemSearchResults(query);
+                    if (!results.isEmpty()) {
+                        int dx = itemIdField != null ? itemIdField.getX() : x;
+                        int dy = itemIdField != null ? (itemIdField.getY() + itemIdField.getHeight() + 1) : y;
+                        int dw = itemIdField != null ? itemIdField.getWidth() : width;
+                        pendingDropdown = new ItemDropdownData(dx, dy, dw, results);
+                    } else {
+                        pendingDropdown = null;
+                    }
+                } else {
+                    pendingDropdown = null;
+                }
+            }
+        });
 
         qtyField = new EditBoxWrapper(10, TEXT_PRIMARY, PANEL, font).setPlaceholder("Quantity (e.g. 10)");
         v.addChild(qtyField);
@@ -536,13 +719,16 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         priceField = new EditBoxWrapper(20, TEXT_PRIMARY, PANEL, font).setPlaceholder("Price per unit (e.g. 150.00)");
         v.addChild(priceField);
 
+        v.addChild(new SizedBox(0, 4)); // Spacing before buttons
         ButtonWidget createBtn = btn("Submit Order", ACCENT_DIM, ACCENT).onPress(this::submitOffer);
         v.addChild(createBtn);
+
         switchModeBtn = btn(createSellMode ? "Switch to Buy Mode" : "Switch to Sell Mode", PANEL, CARD_HOVER).onPress(() -> {
             createSellMode = !createSellMode;
             updateCreateOfferLabels();
         });
         v.addChild(switchModeBtn);
+
         createOfferErrorLabel = TextWidget.label("", RED);
         createOfferErrorLabel.setVisible(false);
         v.addChild(createOfferErrorLabel);
@@ -568,26 +754,52 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
             showCreateError("Item ID is required.");
             return;
         }
+        String priceStr = priceField.getValue().trim();
+        if (priceStr.isEmpty()) { showCreateError("Price is required."); return; }
+        BigDecimal price;
         try {
-            int qty = Integer.parseInt(qtyField.getValue().trim());
-            String price = priceField.getValue().trim();
+            price = new BigDecimal(priceStr);
+            if (price.compareTo(BigDecimal.ZERO) <= 0) {
+                showCreateError("Price must be greater than 0.");
+                return;
+            }
+        } catch (NumberFormatException e) {
+            showCreateError("Price must be a valid number.");
+            return;
+        }
+        int qty;
+        try {
+            qty = Integer.parseInt(qtyField.getValue().trim());
             if (qty <= 0) { showCreateError("Quantity must be greater than 0."); return; }
-            if (price.isEmpty()) { showCreateError("Price is required."); return; }
-            // Vault check for sell orders
-            if (createSellMode && cachedDetail != null && cachedDetail.vaultCount >= 0) {
+        } catch (NumberFormatException ignored) {
+            showCreateError("Quantity must be a valid number.");
+            return;
+        }
+        if (createSellMode) {
+            if (cachedDetail != null && cachedDetail.itemId.equalsIgnoreCase(itemId)) {
                 if (qty > cachedDetail.vaultCount) {
                     showCreateError("Not enough in vault. You have " + cachedDetail.vaultCount + ".");
                     return;
                 }
             }
-            MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.CreateOfferPacket(itemId, qty, price, createSellMode));
-            selectedItemId = itemId;
-            cachedDetail = null;
-            switchView(1);
-            MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestItemDetailPacket(itemId));
-        } catch (NumberFormatException ignored) {
-            showCreateError("Quantity must be a valid number.");
+        } else {
+            BigDecimal totalCost = price.multiply(BigDecimal.valueOf(qty));
+            try {
+                BigDecimal balance = new BigDecimal(cachedBalance);
+                if (totalCost.compareTo(balance) > 0) {
+                    showCreateError("Insufficient funds. Balance: " + cachedBalance + ".");
+                    return;
+                }
+            } catch (NumberFormatException ignored) {
+                showCreateError("Cannot verify balance. Try again.");
+                return;
+            }
         }
+        MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.CreateOrderPacket(itemId, qty, price.toPlainString(), createSellMode));
+        selectedItemId = itemId;
+        cachedDetail = null;
+        switchView(1);
+        MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestItemDetailPacket(itemId));
     }
 
     private void showCreateError(String msg) {
@@ -606,15 +818,25 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         browser.setVisible(mode == 0);
         detail.setVisible(mode == 1);
         createOffer.setVisible(mode == 2);
-        if (mode == 2) updateCreateOfferLabels();
+        if (historyView != null) historyView.setVisible(mode == 3);
+        if (mode == 2) {
+            updateCreateOfferLabels();
+            // Reset dropdown guard whenever we (re-)enter the form
+            itemSearchAutoFilled = selectedItemId; // pre-filled IDs shouldn't auto-open dropdown
+            pendingDropdown = null;
+        }
 
         if (browseBtn != null) {
             browseBtn.setVisible(true);
             browseBtn.setActive(mode == 0);
         }
         if (newOrderBtn != null) {
-            newOrderBtn.setVisible(mode == 0);
+            newOrderBtn.setVisible(mode == 0 || mode == 3);
             newOrderBtn.setActive(mode == 2);
+        }
+        if (orderHistoryBtn != null) {
+            orderHistoryBtn.setVisible(true);
+            orderHistoryBtn.setActive(mode == 3);
         }
         if (searchField != null) {
             searchField.setVisible(mode == 0);
@@ -667,6 +889,82 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         return f;
     }
 
+    /** Searches the item registry for entries whose display name or registry id
+     *  contains the query (case-insensitive). Returns at most 6 results. */
+    private List<ItemSearchResult> getItemSearchResults(String query) {
+        if (query == null || query.length() < 2) return Collections.emptyList();
+        String q = query.toLowerCase(java.util.Locale.ROOT);
+        List<ItemSearchResult> results = new ArrayList<>();
+        for (net.minecraft.resources.ResourceLocation rl : BuiltInRegistries.ITEM.keySet()) {
+            Item item = BuiltInRegistries.ITEM.get(rl);
+            String displayName = new ItemStack(item).getHoverName().getString();
+            String rlStr = rl.toString();
+            if (displayName.toLowerCase(java.util.Locale.ROOT).contains(q) || rlStr.contains(q)) {
+                results.add(new ItemSearchResult(rlStr, displayName));
+                if (results.size() >= 6) break;
+            }
+        }
+        return results;
+    }
+
+    private static final SimpleDateFormat DATE_FMT = new SimpleDateFormat("MM/dd HH:mm");
+
+    private UIComponent buildHistory(Font font) {
+        VStack v = new VStack().gap(4);
+        v.addChild(TextWidget.centered("ORDER HISTORY", ACCENT));
+        v.addChild(new Divider(PANEL_BORDER));
+
+        ScrollList list = new ScrollList(
+            () -> Math.max(1, cachedHistory.size()),
+            28,
+            (g, fnt, idx, rx, ry, rw, mx, my, hover) -> {
+                if (cachedHistory.isEmpty()) {
+                    String msg = "No trades recorded yet";
+                    g.drawString(fnt, msg, rx + (rw - fnt.width(msg)) / 2, ry + 8, TEXT_MUTED);
+                    return;
+                }
+                if (idx >= cachedHistory.size()) return;
+                MarketNetwork.HistoryEntry e = cachedHistory.get(idx);
+
+                if (hover) g.fill(rx, ry, rx + rw, ry + 27, CARD_HOVER);
+                g.fill(rx, ry + 27, rx + rw, ry + 28, PANEL_BORDER);
+
+                // Item icon centered vertically
+                ItemStack icon = itemIconCache.computeIfAbsent(e.itemId, id -> {
+                    Item it = BuiltInRegistries.ITEM.get(new ResourceLocation(id));
+                    return new ItemStack(it);
+                });
+                g.renderItem(icon, rx + 4, ry + 6);
+
+                // Top row (y + 4): Type badge + Item name + Timestamp
+                String typeTag = e.wasSell ? "SELL" : "BUY";
+                int typeColor = e.wasSell ? RED : GREEN;
+                g.drawString(fnt, typeTag, rx + 24, ry + 4, typeColor);
+
+                int nameX = rx + 24 + fnt.width(typeTag) + 6;
+                String nameText = fnt.plainSubstrByWidth(e.displayName, rw - nameX - 65 - rx);
+                g.drawString(fnt, nameText, nameX, ry + 4, TEXT_PRIMARY);
+
+                String dateStr = DATE_FMT.format(new Date(e.timestamp));
+                int dateW = fnt.width(dateStr);
+                g.drawString(fnt, dateStr, rx + rw - dateW - 4, ry + 4, TEXT_MUTED);
+
+                // Bottom row (y + 16): Coin icon + Price x qty + Counterparty
+                renderSmallCoin(g, rx + 24, ry + 17);
+                String pqText = e.price + " x" + e.quantity;
+                g.drawString(fnt, pqText, rx + 35, ry + 16, ACCENT);
+
+                String cpText = (e.wasSell ? "to " : "from ") + e.counterparty;
+                int cpW = fnt.width(cpText);
+                g.drawString(fnt, cpText, rx + rw - cpW - 4, ry + 16, TEXT_MUTED);
+            },
+            (idx, btn) -> { /* read-only list */ },
+            PANEL, ACCENT_DIM);
+
+        v.addChild(list);
+        return v;
+    }
+
     private void drawLine(GuiGraphics g, int x0, int y0, int x1, int y1, int color) {
         int dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0);
         int sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
@@ -697,6 +995,7 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
     @Override
     public void render(GuiGraphics g, int mx, int my, float pt) {
         pendingTooltip = null;
+        pendingDropdown = null;
         this.renderBackground(g);
         int sx = left(), sy = top();
         if (root != null) {
@@ -708,14 +1007,75 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
             root.preRender(mx, my);
             root.render(g, this.font, mx, my, pt);
         }
+        // ── Late-pass: item search dropdown (drawn on top of everything) ──
+        if (pendingDropdown != null && viewMode == 2) {
+            renderItemDropdown(g, mx, my, pendingDropdown);
+        }
         if (pendingTooltip != null) {
             g.renderTooltip(this.font, Component.literal(pendingTooltip), mx, my);
+        }
+    }
+
+    private static final int DROP_ROW_H = 16;
+    private static final int DROP_BG     = 0xFF1A1A2E;
+    private static final int DROP_BORDER = 0xFF00D4AA;
+    private static final int DROP_HOVER  = 0xFF252540;
+
+    private void renderItemDropdown(GuiGraphics g, int mx, int my, ItemDropdownData d) {
+        int rows = d.results.size();
+        int totalH = rows * DROP_ROW_H;
+
+        // Background + border
+        g.fill(d.x, d.y, d.x + d.w, d.y + totalH, DROP_BG);
+        g.fill(d.x, d.y, d.x + d.w, d.y + 1, DROP_BORDER);
+        g.fill(d.x, d.y + totalH - 1, d.x + d.w, d.y + totalH, DROP_BORDER);
+        g.fill(d.x, d.y, d.x + 1, d.y + totalH, DROP_BORDER);
+        g.fill(d.x + d.w - 1, d.y, d.x + d.w, d.y + totalH, DROP_BORDER);
+
+        for (int i = 0; i < rows; i++) {
+            ItemSearchResult r = d.results.get(i);
+            int ry = d.y + i * DROP_ROW_H;
+            boolean rowHover = mx >= d.x && mx < d.x + d.w && my >= ry && my < ry + DROP_ROW_H;
+            if (rowHover) g.fill(d.x + 1, ry, d.x + d.w - 1, ry + DROP_ROW_H, DROP_HOVER);
+
+            // Row divider (skip first)
+            if (i > 0) g.fill(d.x + 1, ry, d.x + d.w - 1, ry + 1, PANEL_BORDER);
+
+            // Item icon
+            ItemStack icon = itemIconCache.computeIfAbsent(r.itemId, id -> {
+                Item it = BuiltInRegistries.ITEM.get(new ResourceLocation(id));
+                return new ItemStack(it);
+            });
+            g.renderItem(icon, d.x + 2, ry);
+
+            // Display name
+            int nameX = d.x + 20;
+            int nameMaxW = d.w - 22;
+            String nameStr = this.font.plainSubstrByWidth(r.displayName, nameMaxW);
+            g.drawString(this.font, nameStr, nameX, ry + 4, TEXT_PRIMARY);
         }
     }
 
     @Override
     public boolean mouseClicked(double mx, double my, int btn) {
         com.nstut.Economy.LOGGER.info("[MarketScreen] mouseClicked mx={}, my={}, btn={}, viewMode={}", mx, my, btn, viewMode);
+        // ── Item search dropdown click interception ──
+        if (viewMode == 2 && pendingDropdown != null) {
+            ItemDropdownData d = pendingDropdown;
+            if (mx >= d.x && mx < d.x + d.w && my >= d.y && my < d.y + d.results.size() * DROP_ROW_H) {
+                int idx = ((int) my - d.y) / DROP_ROW_H;
+                if (idx >= 0 && idx < d.results.size()) {
+                    String chosen = d.results.get(idx).itemId;
+                    itemSearchAutoFilled = chosen;
+                    if (itemIdField != null) {
+                        itemIdField.setValue(chosen);
+                        itemIdField.getEditBox().setFocused(false);
+                    }
+                    pendingDropdown = null;
+                    return true;
+                }
+            }
+        }
         if (root != null && root.mouseClicked(mx, my, btn)) {
             com.nstut.Economy.LOGGER.info("[MarketScreen] Click handled by root UI component");
             return true;
@@ -757,7 +1117,12 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
             searchQuery = searchField.getValue();
         }
         if (viewMode == 2) {
-            if (itemIdField != null && itemIdField.isFocused() && itemIdField.keyPressed(key, scan, mod)) return true;
+            if (itemIdField != null && itemIdField.isFocused() && itemIdField.keyPressed(key, scan, mod)) {
+                // Any keystroke in the item id field resets the auto-fill guard
+                // so the dropdown shows again when the text changes.
+                itemSearchAutoFilled = null;
+                return true;
+            }
             if (qtyField != null && qtyField.isFocused() && qtyField.keyPressed(key, scan, mod)) return true;
             if (priceField != null && priceField.isFocused() && priceField.keyPressed(key, scan, mod)) return true;
         }

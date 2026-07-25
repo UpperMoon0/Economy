@@ -3,11 +3,10 @@ package com.nstut.economy.trading;
 import com.nstut.economy.api.IAccountManager;
 import com.nstut.economy.api.IBankAccount;
 import com.nstut.economy.api.ICommodity;
-import com.nstut.economy.api.IOffer;
-import com.nstut.economy.blocks.VaultBlockEntity;
+import com.nstut.economy.api.IOrder;
 import com.nstut.economy.blocks.VaultManager;
 import com.nstut.economy.core.TransactionContext;
-import com.nstut.economy.data.EconomyOfferData;
+import com.nstut.economy.data.EconomyOrderData;
 import com.nstut.economy.data.TradeLedger;
 import net.minecraft.core.NonNullList;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -20,29 +19,29 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
 
-public class Offer implements IOffer {
+public class Order implements IOrder {
 
-    private final UUID offerId;
+    private final UUID orderId;
     private final UUID owner;
     private final ICommodity commodity;
     private int quantity;
     private final BigDecimal pricePerUnit;
-    private final OfferType type;
+    private final OrderType type;
     private final Instant createdAt;
     private final Instant expiresAt;
     private boolean cancelled;
     private boolean serverOrder;
     private final NonNullList<ItemStack> reservedItems;
 
-    public Offer(UUID owner, ICommodity commodity, int quantity,
-                 BigDecimal pricePerUnit, OfferType type, Instant expiresAt) {
+    public Order(UUID owner, ICommodity commodity, int quantity,
+                 BigDecimal pricePerUnit, OrderType type, Instant expiresAt) {
         this(owner, commodity, quantity, pricePerUnit, type, expiresAt, NonNullList.create());
     }
 
-    public Offer(UUID owner, ICommodity commodity, int quantity,
-                 BigDecimal pricePerUnit, OfferType type, Instant expiresAt,
+    public Order(UUID owner, ICommodity commodity, int quantity,
+                 BigDecimal pricePerUnit, OrderType type, Instant expiresAt,
                  NonNullList<ItemStack> reservedItems) {
-        this.offerId = UUID.randomUUID();
+        this.orderId = UUID.randomUUID();
         this.owner = owner;
         this.commodity = commodity;
         this.quantity = quantity;
@@ -54,35 +53,35 @@ public class Offer implements IOffer {
         this.reservedItems = reservedItems;
     }
 
-    public static Offer fromSnapshot(EconomyOfferData.OfferSnapshot snap) {
+    public static Order fromSnapshot(EconomyOrderData.OrderSnapshot snap) {
         ResourceLocation rl = new ResourceLocation(snap.itemId);
         Item item = BuiltInRegistries.ITEM.get(rl);
         ItemCommodity commodity = new ItemCommodity(rl, item, BigDecimal.ZERO);
         Instant expires = snap.hasExpiry ? Instant.ofEpochMilli(snap.expiresAt) : null;
-        Offer offer = new Offer(snap.owner, commodity, snap.quantity,
+        Order order = new Order(snap.owner, commodity, snap.quantity,
             new BigDecimal(snap.pricePerUnit),
-            snap.type.equals("SELL") ? OfferType.SELL : OfferType.BUY,
+            snap.type.equals("SELL") ? OrderType.SELL : OrderType.BUY,
             expires, snap.reservedItems);
-        setField(offer, "offerId", snap.offerId);
-        setField(offer, "createdAt", Instant.ofEpochMilli(snap.createdAt));
+        setField(order, "orderId", snap.orderId);
+        setField(order, "createdAt", Instant.ofEpochMilli(snap.createdAt));
         if (snap.isServerOrder) {
-            offer.serverOrder = true;
+            order.serverOrder = true;
         }
-        return offer;
+        return order;
     }
 
     private static void setField(Object target, String fieldName, Object value) {
         try {
-            java.lang.reflect.Field f = Offer.class.getDeclaredField(fieldName);
+            java.lang.reflect.Field f = Order.class.getDeclaredField(fieldName);
             f.setAccessible(true);
             f.set(target, value);
         } catch (Exception ignored) {
         }
     }
 
-    public EconomyOfferData.OfferSnapshot toSnapshot() {
-        return new EconomyOfferData.OfferSnapshot(
-            offerId, owner, commodity.getId().toString(),
+    public EconomyOrderData.OrderSnapshot toSnapshot() {
+        return new EconomyOrderData.OrderSnapshot(
+            orderId, owner, commodity.getId().toString(),
             quantity, pricePerUnit.toPlainString(),
             type.name(), createdAt.toEpochMilli(),
             expiresAt != null ? expiresAt.toEpochMilli() : 0,
@@ -99,8 +98,8 @@ public class Offer implements IOffer {
     }
 
     @Override
-    public UUID getOfferId() {
-        return offerId;
+    public UUID getOrderId() {
+        return orderId;
     }
 
     @Override
@@ -124,7 +123,7 @@ public class Offer implements IOffer {
     }
 
     @Override
-    public OfferType getType() {
+    public OrderType getType() {
         return type;
     }
 
@@ -164,7 +163,7 @@ public class Offer implements IOffer {
         IAccountManager accounts = IAccountManager.getInstance();
         IBankAccount traderAccount = accounts.getOrCreatePlayerAccount(trader);
 
-        if (type == OfferType.SELL) {
+        if (type == OrderType.SELL) {
             return traderAccount.hasSufficientFunds(getTotalPrice());
         } else {
             if (serverOrder) return true;
@@ -181,7 +180,7 @@ public class Offer implements IOffer {
     @Override
     public TransactionResult execute(UUID trader, ServerLevel level) {
         if (!canExecute(trader)) {
-            return TransactionResult.failure("Cannot execute this offer");
+            return TransactionResult.failure("Cannot execute this order");
         }
 
         IAccountManager accounts = IAccountManager.getInstance();
@@ -190,7 +189,7 @@ public class Offer implements IOffer {
             item = ic.getItem();
         }
 
-        if (type == OfferType.SELL) {
+        if (type == OrderType.SELL) {
             return executeSell(trader, accounts, item, level);
         } else {
             return executeBuy(trader, accounts, item, level);
@@ -226,6 +225,8 @@ public class Offer implements IOffer {
         int tradedQty = this.quantity;
         this.quantity = 0;
         TradeLedger.recordTrade(commodity.getId().toString(), pricePerUnit, tradedQty, buyer, owner);
+        playMoneySound(level, buyer);
+        playMoneySound(level, owner);
         return TransactionResult.success("Purchase successful", totalPrice, tradedQty);
     }
 
@@ -263,6 +264,8 @@ public class Offer implements IOffer {
         int tradedQty = this.quantity;
         this.quantity = 0;
         TradeLedger.recordTrade(commodity.getId().toString(), pricePerUnit, tradedQty, owner, seller);
+        playMoneySound(level, owner);
+        playMoneySound(level, seller);
         return TransactionResult.success("Sale successful", totalPrice, tradedQty);
     }
 
@@ -276,15 +279,30 @@ public class Offer implements IOffer {
         IAccountManager accounts = IAccountManager.getInstance();
         Item item = (commodity instanceof ItemCommodity ic) ? ic.getItem() : null;
 
-        if (type == OfferType.SELL) {
-            boolean isServerBuyer = OfferManager.SERVER_ID.equals(trader);
+        if (type == OrderType.SELL) {
+            boolean isServerBuyer = OrderManager.SERVER_ID.equals(trader);
             IBankAccount sellerAccount = accounts.getOrCreatePlayerAccount(owner);
             IBankAccount buyerAccount = isServerBuyer ? accounts.getServerAccount() : accounts.getOrCreatePlayerAccount(trader);
+
+            if (!isServerBuyer) {
+                tradeQty = capByFunds(tradeQty, buyerAccount);
+                if (tradeQty <= 0) return TransactionResult.failure("Buyer has insufficient funds");
+            }
+            if (!isServerBuyer && level != null && item != null) {
+                ItemStack sampleStack = new ItemStack(item);
+                int vaultSpace = VaultManager.hasVault(trader)
+                        ? VaultManager.countAvailableSpaceInVaults(level, trader, sampleStack)
+                        : 0;
+                if (vaultSpace < tradeQty) {
+                    if (vaultSpace <= 0) {
+                        return TransactionResult.failure("Buyer has no Vault block");
+                    }
+                    tradeQty = vaultSpace;
+                }
+            }
+
             BigDecimal totalPrice = pricePerUnit.multiply(BigDecimal.valueOf(tradeQty));
 
-            if (!isServerBuyer && !buyerAccount.hasSufficientFunds(totalPrice)) {
-                return TransactionResult.failure("Buyer has insufficient funds");
-            }
             if (!buyerAccount.transferTo(sellerAccount, totalPrice,
                     TransactionContext.transfer("Purchase of " + commodity.getDisplayName().getString(), trader))) {
                 return TransactionResult.failure("Payment failed");
@@ -307,23 +325,13 @@ public class Offer implements IOffer {
                 } else if (serverOrder) {
                     itemsToDeliver = generateItemStacks(item, tradeQty);
                 }
-                if (!itemsToDeliver.isEmpty()) {
-                    if (!VaultManager.hasVault(trader)) {
-                        sellerAccount.transferTo(buyerAccount, totalPrice,
-                                TransactionContext.transfer("Refund - buyer has no vault", trader));
-                        if (!reservedItems.isEmpty() && !itemsToDeliver.isEmpty()) {
-                            for (ItemStack s : itemsToDeliver) reservedItems.add(s);
-                        }
-                        return TransactionResult.failure("Buyer has no Vault block");
+                if (!itemsToDeliver.isEmpty() && !VaultManager.insertItemStacksToVaults(level, trader, itemsToDeliver)) {
+                    sellerAccount.transferTo(buyerAccount, totalPrice,
+                            TransactionContext.transfer("Refund - buyer vault full", trader));
+                    if (!reservedItems.isEmpty()) {
+                        for (ItemStack s : itemsToDeliver) reservedItems.add(s);
                     }
-                    if (!VaultManager.insertItemStacksToVaults(level, trader, itemsToDeliver)) {
-                        sellerAccount.transferTo(buyerAccount, totalPrice,
-                                TransactionContext.transfer("Refund - buyer vault full", trader));
-                        if (!reservedItems.isEmpty()) {
-                            for (ItemStack s : itemsToDeliver) reservedItems.add(s);
-                        }
-                        return TransactionResult.failure("Buyer's vault is full");
-                    }
+                    return TransactionResult.failure("Buyer's vault is full");
                 }
             } else if (isServerBuyer && !reservedItems.isEmpty()) {
                 int itemsNeeded = tradeQty;
@@ -340,23 +348,29 @@ public class Offer implements IOffer {
 
             this.quantity -= tradeQty;
             TradeLedger.recordTrade(commodity.getId().toString(), pricePerUnit, tradeQty, trader, owner);
+            playMoneySound(level, trader);
+            playMoneySound(level, owner);
             return TransactionResult.success("Purchase successful", totalPrice, tradeQty);
         } else {
             IBankAccount buyerAccount = serverOrder ? accounts.getServerAccount() : accounts.getOrCreatePlayerAccount(owner);
             IBankAccount sellerAccount = accounts.getOrCreatePlayerAccount(trader);
-            BigDecimal totalPrice = pricePerUnit.multiply(BigDecimal.valueOf(tradeQty));
-
-            if (!serverOrder && !buyerAccount.hasSufficientFunds(totalPrice)) {
-                return TransactionResult.failure("Buyer has insufficient funds");
-            }
 
             if (level != null && item != null) {
-                if (!VaultManager.hasVault(trader)) {
-                    return TransactionResult.failure("Seller has no Vault block");
+                int availableInVault = VaultManager.countItemInVaults(level, trader, item);
+                if (availableInVault <= 0) {
+                    return TransactionResult.failure("No items in seller vault(s)");
                 }
-                if (VaultManager.countItemInVaults(level, trader, item) < tradeQty) {
-                    return TransactionResult.failure("Not enough items in seller vault(s)");
-                }
+                tradeQty = Math.min(tradeQty, availableInVault);
+            }
+
+            if (!serverOrder && !buyerAccount.hasSufficientFunds(pricePerUnit.multiply(BigDecimal.valueOf(tradeQty)))) {
+                tradeQty = capByFunds(tradeQty, buyerAccount);
+                if (tradeQty <= 0) return TransactionResult.failure("Buyer has insufficient funds");
+            }
+
+            BigDecimal totalPrice = pricePerUnit.multiply(BigDecimal.valueOf(tradeQty));
+
+            if (level != null && item != null) {
                 NonNullList<ItemStack> extracted = NonNullList.create();
                 if (!VaultManager.extractItemFromVaults(level, trader, item, tradeQty, extracted)) {
                     return TransactionResult.failure("Failed to extract items from seller vault(s)");
@@ -376,8 +390,26 @@ public class Offer implements IOffer {
 
             this.quantity -= tradeQty;
             TradeLedger.recordTrade(commodity.getId().toString(), pricePerUnit, tradeQty, owner, trader);
+            playMoneySound(level, owner);
+            playMoneySound(level, trader);
             return TransactionResult.success("Sale successful", totalPrice, tradeQty);
         }
+    }
+
+    private static void playMoneySound(ServerLevel level, UUID playerUUID) {
+        if (level == null || playerUUID == null) return;
+        net.minecraft.server.level.ServerPlayer p = level.getServer().getPlayerList().getPlayer(playerUUID);
+        if (p != null) {
+            level.playSound(null, p.getX(), p.getY(), p.getZ(),
+                com.nstut.economy.sound.SoundRegistries.MONEY.get(),
+                net.minecraft.sounds.SoundSource.PLAYERS, 0.8F, 1.0F);
+        }
+    }
+
+    private int capByFunds(int tradeQty, IBankAccount account) {
+        BigDecimal balance = account.getBalance();
+        BigDecimal affordable = balance.divide(pricePerUnit, 0, java.math.RoundingMode.DOWN);
+        return Math.min(tradeQty, Math.max(0, affordable.intValue()));
     }
 
     private static NonNullList<ItemStack> copyStacks(NonNullList<ItemStack> original) {

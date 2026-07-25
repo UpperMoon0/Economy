@@ -9,13 +9,13 @@ public final class Economy {
     public static final Logger LOGGER = LogManager.getLogger(MOD_ID);
 
     private static AccountManager accountManager;
-    private static com.nstut.economy.trading.OfferManager offerManager;
+    private static com.nstut.economy.trading.OrderManager orderManager;
 
     public static void init() {
         LOGGER.info("Initializing Economy Mod");
 
         accountManager = new AccountManager();
-        offerManager = new com.nstut.economy.trading.OfferManager();
+        orderManager = new com.nstut.economy.trading.OrderManager();
 
         LOGGER.info("Economy Mod initialized successfully");
     }
@@ -24,7 +24,7 @@ public final class Economy {
         return accountManager;
     }
 
-    public static com.nstut.economy.trading.OfferManager getOfferManager() {
-        return offerManager;
+    public static com.nstut.economy.trading.OrderManager getOrderManager() {
+        return orderManager;
     }
 }

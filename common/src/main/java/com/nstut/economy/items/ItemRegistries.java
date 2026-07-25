@@ -22,11 +22,15 @@ public class ItemRegistries {
     public static final RegistryObject<Item> VAULT = ITEMS.register("vault",
         () -> new BlockItem(BlockRegistries.VAULT.get(), new Item.Properties()));
 
+    public static final RegistryObject<Item> COIN = ITEMS.register("coin",
+        () -> new Item(new Item.Properties()));
+
     public static final RegistryObject<CreativeModeTab> TAB = CREATIVE_TABS.register("tab", () ->
         CreativeModeTab.builder()
             .title(Component.translatable("itemGroup.economy"))
-            .icon(() -> new ItemStack(VAULT.get()))
+            .icon(() -> new ItemStack(COIN.get()))
             .displayItems((params, output) -> {
+                output.accept(COIN.get());
                 output.accept(MARKET.get());
                 output.accept(VAULT.get());
             })

@@ -18,6 +18,7 @@ public final class EconomyForge {
         BlockRegistries.MENUS.register(modEventBus);
         ItemRegistries.ITEMS.register(modEventBus);
         ItemRegistries.CREATIVE_TABS.register(modEventBus);
+        com.nstut.economy.sound.SoundRegistries.SOUND_EVENTS.register(modEventBus);
 
         MarketNetwork.init();
 

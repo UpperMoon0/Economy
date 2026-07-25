@@ -101,6 +101,19 @@ public class VaultBlockEntity extends BlockEntity implements Container {
         return count;
     }
 
+    public int countAvailableSpace(ItemStack stack) {
+        int space = 0;
+        int maxStack = stack.getMaxStackSize();
+        for (ItemStack slot : items) {
+            if (slot.isEmpty()) {
+                space += maxStack;
+            } else if (ItemStack.isSameItemSameTags(slot, stack)) {
+                space += maxStack - slot.getCount();
+            }
+        }
+        return space;
+    }
+
     public boolean extractItem(net.minecraft.world.item.Item item, int amount, NonNullList<ItemStack> destination) {
         if (countItem(item) < amount) return false;
         int remaining = amount;

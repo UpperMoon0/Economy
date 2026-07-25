@@ -1,0 +1,8 @@
+{
+  "money": {
+    "subtitle": "subtitles.economy.money",
+    "sounds": [
+      "economy:money"
+    ]
+  }
+}

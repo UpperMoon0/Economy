@@ -106,6 +106,14 @@ public class VaultManager {
         return count;
     }
 
+    public static int countAvailableSpaceInVaults(Level level, UUID owner, ItemStack stack) {
+        int space = 0;
+        for (VaultBlockEntity v : getVaults(level, owner)) {
+            space += v.countAvailableSpace(stack);
+        }
+        return space;
+    }
+
     public static boolean extractItemFromVaults(Level level, UUID owner, Item item, int amount, NonNullList<ItemStack> destination) {
         if (countItemInVaults(level, owner, item) < amount) return false;
         int remaining = amount;

@@ -5,18 +5,18 @@ import java.time.Instant;
 import java.util.UUID;
 
 /**
- * Represents a buy or sell offer in the market.
+ * Represents a buy or sell order in the market.
  */
-public interface IOffer {
+public interface IOrder {
     
     /**
-     * Gets the unique offer ID.
-     * @return The offer UUID
+     * Gets the unique order ID.
+     * @return The order UUID
      */
-    UUID getOfferId();
+    UUID getOrderId();
     
     /**
-     * Gets the UUID of the player who created this offer.
+     * Gets the UUID of the player who created this order.
      * @return The owner's UUID
      */
     UUID getOwner();
@@ -28,7 +28,7 @@ public interface IOffer {
     ICommodity getCommodity();
     
     /**
-     * Gets the quantity being offered.
+     * Gets the quantity being ordered.
      * @return The quantity
      */
     int getQuantity();
@@ -40,7 +40,7 @@ public interface IOffer {
     BigDecimal getPricePerUnit();
     
     /**
-     * Gets the total price for the entire offer.
+     * Gets the total price for the entire order.
      * @return The total price
      */
     default BigDecimal getTotalPrice() {
@@ -48,61 +48,61 @@ public interface IOffer {
     }
     
     /**
-     * Gets the type of offer.
+     * Gets the type of order.
      * @return BUY or SELL
      */
-    OfferType getType();
+    OrderType getType();
     
     /**
-     * Gets when this offer was created.
+     * Gets when this order was created.
      * @return The creation timestamp
      */
     Instant getCreatedAt();
     
     /**
-     * Gets when this offer expires (null for no expiration).
+     * Gets when this order expires (null for no expiration).
      * @return The expiration timestamp, or null
      */
     Instant getExpiresAt();
     
     /**
-     * Checks if this offer is still valid.
+     * Checks if this order is still valid.
      * @return true if valid and not expired
      */
     boolean isValid();
     
     /**
-     * Checks if this offer can be executed by the given buyer/seller.
+     * Checks if this order can be executed by the given buyer/seller.
      * @param trader The UUID of the trader
      * @return true if execution is possible
      */
     boolean canExecute(UUID trader);
     
     /**
-     * Executes this offer with the given trader, including item transfer via vaults.
-     * @param trader The UUID of the trader executing the offer
+     * Executes this order with the given trader, including item transfer via vaults.
+     * @param trader The UUID of the trader executing the order
      * @param level The server level for vault lookups
      * @return The result of the transaction
      */
     TransactionResult execute(UUID trader, net.minecraft.server.level.ServerLevel level);
 
     /**
-     * Executes this offer with the given trader (no item transfer).
-     * @param trader The UUID of the trader executing the offer
+     * Executes this order with the given trader (no item transfer).
+     * @param trader The UUID of the trader executing the order
      * @return The result of the transaction
      */
     TransactionResult execute(UUID trader);
     
     /**
-     * Cancels this offer.
+     * Cancels this order.
      * @return true if successfully cancelled
      */
     boolean cancel();
     
     /**
-     * Enum representing offer types.
+     * Enum representing order types.
      */
-    enum OfferType {
+    enum OrderType {
         BUY,
         SELL
     }

@@ -79,7 +79,6 @@ public class VaultBlock extends DirectionalBlock implements EntityBlock {
         if (!state.is(newState.getBlock())) {
             if (level.getBlockEntity(pos) instanceof VaultBlockEntity vault) {
                 net.minecraft.world.Containers.dropContents(level, pos, vault);
-                VaultManager.unregister(vault.getOwner());
             }
             super.onRemove(state, level, pos, newState, moved);
         }

@@ -9,14 +9,14 @@ import com.nstut.Economy;
 import com.nstut.economy.api.IAccountManager;
 import com.nstut.economy.api.IBankAccount;
 import com.nstut.economy.api.ICommodity;
-import com.nstut.economy.api.IOffer;
+import com.nstut.economy.api.IOrder;
 import com.nstut.economy.blocks.VaultBlockEntity;
 import com.nstut.economy.blocks.VaultManager;
 import com.nstut.economy.config.EconomyConfig;
 import com.nstut.economy.core.TransactionContext;
 import com.nstut.economy.trading.ItemCommodity;
-import com.nstut.economy.trading.Offer;
-import com.nstut.economy.trading.OfferManager;
+import com.nstut.economy.trading.Order;
+import com.nstut.economy.trading.OrderManager;
 import net.minecraft.commands.CommandBuildContext;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -305,11 +305,11 @@ public class EconomyCommands {
         if (id == null) id = new ResourceLocation("minecraft", itemInput.getItem().toString().toLowerCase().replace(':', '_'));
         ItemCommodity commodity = new ItemCommodity(id, itemInput.getItem(), BigDecimal.ZERO);
 
-        OfferManager offerManager = Economy.getOfferManager();
-        Offer offer = offerManager.createServerBuyOrder(commodity, quantity, pricePerUnit);
+        OrderManager orderManager = Economy.getOrderManager();
+        Order order = orderManager.createServerBuyOrder(commodity, quantity, pricePerUnit);
 
         EconomyConfig config = EconomyConfig.getInstance();
-        String priceStr = offer.getTotalPrice().setScale(2, RoundingMode.HALF_UP).toPlainString();
+        String priceStr = order.getTotalPrice().setScale(2, RoundingMode.HALF_UP).toPlainString();
         context.getSource().sendSuccess(() ->
             Component.literal("Server buy order created: " + quantity + "x " +
                 commodity.getDisplayName().getString() + " @ " + config.getCurrencySymbol() +
@@ -333,11 +333,11 @@ public class EconomyCommands {
         if (id == null) id = new ResourceLocation("minecraft", itemInput.getItem().toString().toLowerCase().replace(':', '_'));
         ItemCommodity commodity = new ItemCommodity(id, itemInput.getItem(), BigDecimal.ZERO);
 
-        OfferManager offerManager = Economy.getOfferManager();
-        Offer offer = offerManager.createServerSellOrder(commodity, quantity, pricePerUnit);
+        OrderManager orderManager = Economy.getOrderManager();
+        Order order = orderManager.createServerSellOrder(commodity, quantity, pricePerUnit);
 
         EconomyConfig config = EconomyConfig.getInstance();
-        String priceStr = offer.getTotalPrice().setScale(2, RoundingMode.HALF_UP).toPlainString();
+        String priceStr = order.getTotalPrice().setScale(2, RoundingMode.HALF_UP).toPlainString();
         context.getSource().sendSuccess(() ->
             Component.literal("Server sell order created: " + quantity + "x " +
                 commodity.getDisplayName().getString() + " @ " + config.getCurrencySymbol() +
@@ -380,11 +380,11 @@ public class EconomyCommands {
         if (id == null) id = new ResourceLocation("minecraft", itemInput.getItem().toString().toLowerCase().replace(':', '_'));
         ItemCommodity commodity = new ItemCommodity(id, itemInput.getItem(), BigDecimal.ZERO);
 
-        OfferManager offerManager = Economy.getOfferManager();
-        Offer offer = offerManager.createSellOffer(player.getUUID(), commodity, quantity, pricePerUnit, reserved, level);
+        OrderManager orderManager = Economy.getOrderManager();
+        Order order = orderManager.createSellOrder(player.getUUID(), commodity, quantity, pricePerUnit, reserved, level);
 
         EconomyConfig config = EconomyConfig.getInstance();
-        String priceStr = offer != null ? offer.getTotalPrice().setScale(2, RoundingMode.HALF_UP).toPlainString() : pricePerUnit.multiply(BigDecimal.valueOf(quantity)).setScale(2, RoundingMode.HALF_UP).toPlainString();
+        String priceStr = order != null ? order.getTotalPrice().setScale(2, RoundingMode.HALF_UP).toPlainString() : pricePerUnit.multiply(BigDecimal.valueOf(quantity)).setScale(2, RoundingMode.HALF_UP).toPlainString();
         context.getSource().sendSuccess(() ->
             Component.literal("Sell order created/matched: " + quantity + "x " +
                 commodity.getDisplayName().getString() + " @ " + config.getCurrencySymbol() +
@@ -414,11 +414,11 @@ public class EconomyCommands {
         if (id == null) id = new ResourceLocation("minecraft", itemInput.getItem().toString().toLowerCase().replace(':', '_'));
         ItemCommodity commodity = new ItemCommodity(id, itemInput.getItem(), BigDecimal.ZERO);
 
-        OfferManager offerManager = Economy.getOfferManager();
-        Offer offer = offerManager.createBuyOffer(player.getUUID(), commodity, quantity, pricePerUnit, level);
+        OrderManager orderManager = Economy.getOrderManager();
+        Order order = orderManager.createBuyOrder(player.getUUID(), commodity, quantity, pricePerUnit, level);
 
         EconomyConfig config = EconomyConfig.getInstance();
-        String priceStr = offer != null ? offer.getTotalPrice().setScale(2, RoundingMode.HALF_UP).toPlainString() : pricePerUnit.multiply(BigDecimal.valueOf(quantity)).setScale(2, RoundingMode.HALF_UP).toPlainString();
+        String priceStr = order != null ? order.getTotalPrice().setScale(2, RoundingMode.HALF_UP).toPlainString() : pricePerUnit.multiply(BigDecimal.valueOf(quantity)).setScale(2, RoundingMode.HALF_UP).toPlainString();
         context.getSource().sendSuccess(() ->
             Component.literal("Buy order created/matched: " + quantity + "x " +
                 commodity.getDisplayName().getString() + " @ " + config.getCurrencySymbol() +
@@ -430,16 +430,16 @@ public class EconomyCommands {
     }
 
     private static int listOrders(CommandContext<CommandSourceStack> context, Item filter, String rootName) {
-        OfferManager offerManager = Economy.getOfferManager();
-        List<Offer> allOffers = offerManager.getAllOffers();
+        OrderManager orderManager = Economy.getOrderManager();
+        List<Order> allOrders = orderManager.getAllOrders();
         EconomyConfig config = EconomyConfig.getInstance();
 
-        List<Offer> filtered = new ArrayList<>();
-        for (Offer offer : allOffers) {
-            if (filter != null && offer.getCommodity() instanceof ItemCommodity ic && ic.getItem() != filter) {
+        List<Order> filtered = new ArrayList<>();
+        for (Order order : allOrders) {
+            if (filter != null && order.getCommodity() instanceof ItemCommodity ic && ic.getItem() != filter) {
                 continue;
             }
-            filtered.add(offer);
+            filtered.add(order);
         }
 
         if (filtered.isEmpty()) {
@@ -449,19 +449,19 @@ public class EconomyCommands {
 
         context.getSource().sendSuccess(() -> Component.literal("=== Active Orders ==="), false);
         for (int i = 0; i < filtered.size(); i++) {
-            Offer offer = filtered.get(i);
-            ICommodity commodity = offer.getCommodity();
-            String typeStr = offer.getType() == IOffer.OfferType.SELL ? "[SELL]" : "[BUY]";
-            String priceStr = offer.getPricePerUnit().setScale(2, RoundingMode.HALF_UP).toPlainString();
-            String totalStr = offer.getTotalPrice().setScale(2, RoundingMode.HALF_UP).toPlainString();
-            String sellerName = offer.isServerOrder() ? "SERVER" : "?";
-            if (!offer.isServerOrder() && context.getSource().getServer() != null) {
-                var profile = context.getSource().getServer().getProfileCache().get(offer.getOwner());
+            Order order = filtered.get(i);
+            ICommodity commodity = order.getCommodity();
+            String typeStr = order.getType() == IOrder.OrderType.SELL ? "[SELL]" : "[BUY]";
+            String priceStr = order.getPricePerUnit().setScale(2, RoundingMode.HALF_UP).toPlainString();
+            String totalStr = order.getTotalPrice().setScale(2, RoundingMode.HALF_UP).toPlainString();
+            String sellerName = order.isServerOrder() ? "SERVER" : "?";
+            if (!order.isServerOrder() && context.getSource().getServer() != null) {
+                var profile = context.getSource().getServer().getProfileCache().get(order.getOwner());
                 if (profile.isPresent()) sellerName = profile.get().getName();
             }
 
             String msg = String.format("#%d %s %dx %s @ %s%s each (total: %s%s) - %s",
-                i + 1, typeStr, offer.getQuantity(),
+                i + 1, typeStr, order.getQuantity(),
                 commodity.getDisplayName().getString(),
                 config.getCurrencySymbol(), priceStr,
                 config.getCurrencySymbol(), totalStr, sellerName);
@@ -484,32 +484,32 @@ public class EconomyCommands {
             context.getSource().sendFailure(Component.literal("Only players can use this command"));
             return 0;
         }
-        OfferManager offerManager = Economy.getOfferManager();
-        List<Offer> myOffers = offerManager.getPlayerOffers(player.getUUID());
+        OrderManager orderManager = Economy.getOrderManager();
+        List<Order> myOrders = orderManager.getPlayerOrders(player.getUUID());
         EconomyConfig config = EconomyConfig.getInstance();
 
-        if (myOffers.isEmpty()) {
+        if (myOrders.isEmpty()) {
             context.getSource().sendSuccess(() -> Component.literal("You have no active orders."), false);
             return 1;
         }
 
         context.getSource().sendSuccess(() -> Component.literal("=== Your Orders ==="), false);
-        for (int i = 0; i < myOffers.size(); i++) {
-            Offer offer = myOffers.get(i);
-            ICommodity commodity = offer.getCommodity();
-            String typeStr = offer.getType() == IOffer.OfferType.SELL ? "[SELL]" : "[BUY]";
-            String priceStr = offer.getPricePerUnit().setScale(2, RoundingMode.HALF_UP).toPlainString();
+        for (int i = 0; i < myOrders.size(); i++) {
+            Order order = myOrders.get(i);
+            ICommodity commodity = order.getCommodity();
+            String typeStr = order.getType() == IOrder.OrderType.SELL ? "[SELL]" : "[BUY]";
+            String priceStr = order.getPricePerUnit().setScale(2, RoundingMode.HALF_UP).toPlainString();
             final int idx = i + 1;
 
             context.getSource().sendSuccess(() ->
                 Component.literal(String.format("  #%d %s %dx %s @ %s%s each",
-                    idx, typeStr, offer.getQuantity(),
+                    idx, typeStr, order.getQuantity(),
                     commodity.getDisplayName().getString(),
                     config.getCurrencySymbol(), priceStr)),
                 false
             );
         }
-        return myOffers.size();
+        return myOrders.size();
     }
 
     private static int cancelOrder(CommandContext<CommandSourceStack> context) {
@@ -518,19 +518,19 @@ public class EconomyCommands {
             return 0;
         }
         int index = IntegerArgumentType.getInteger(context, "index") - 1;
-        OfferManager offerManager = Economy.getOfferManager();
-        List<Offer> myOffers = offerManager.getPlayerOffers(player.getUUID());
+        OrderManager orderManager = Economy.getOrderManager();
+        List<Order> myOrders = orderManager.getPlayerOrders(player.getUUID());
 
-        if (index < 0 || index >= myOffers.size()) {
+        if (index < 0 || index >= myOrders.size()) {
             context.getSource().sendFailure(Component.literal("Invalid order index. Use /economy myorders to list your orders."));
             return 0;
         }
 
-        Offer offer = myOffers.get(index);
-        if (offerManager.cancelOffer(offer.getOfferId(), player.getUUID())) {
+        Order order = myOrders.get(index);
+        if (orderManager.cancelOrder(order.getOrderId(), player.getUUID())) {
             context.getSource().sendSuccess(() ->
                 Component.literal("Cancelled order #" + (index + 1) + " (" +
-                    offer.getCommodity().getDisplayName().getString() + ")"),
+                    order.getCommodity().getDisplayName().getString() + ")"),
                 false
             );
             return 1;
@@ -546,17 +546,17 @@ public class EconomyCommands {
             return 0;
         }
         int index = IntegerArgumentType.getInteger(context, "index") - 1;
-        OfferManager offerManager = Economy.getOfferManager();
-        List<Offer> allOffers = offerManager.getAllOffers();
+        OrderManager orderManager = Economy.getOrderManager();
+        List<Order> allOrders = orderManager.getAllOrders();
 
-        if (index < 0 || index >= allOffers.size()) {
+        if (index < 0 || index >= allOrders.size()) {
             context.getSource().sendFailure(Component.literal("Invalid order index. Use /economy orders to list active orders."));
             return 0;
         }
 
-        Offer offer = allOffers.get(index);
+        Order order = allOrders.get(index);
         ServerLevel level = player.serverLevel();
-        IOffer.TransactionResult result = offer.execute(player.getUUID(), level);
+        IOrder.TransactionResult result = order.execute(player.getUUID(), level);
 
         if (result.success) {
             EconomyConfig config = EconomyConfig.getInstance();

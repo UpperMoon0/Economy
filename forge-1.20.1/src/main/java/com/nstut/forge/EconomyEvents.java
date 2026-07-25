@@ -3,10 +3,10 @@ package com.nstut.forge;
 import com.nstut.Economy;
 import com.nstut.economy.blocks.VaultManager;
 import com.nstut.economy.data.EconomyAccountData;
-import com.nstut.economy.data.EconomyOfferData;
+import com.nstut.economy.data.EconomyOrderData;
 import com.nstut.economy.data.EconomyTradeData;
 import com.nstut.economy.data.TradeLedger;
-import com.nstut.economy.trading.OfferManager;
+import com.nstut.economy.trading.OrderManager;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.Level;
 import net.minecraftforge.event.level.LevelEvent;
@@ -22,14 +22,14 @@ public class EconomyEvents {
             if (serverLevel.dimension() != Level.OVERWORLD) return;
 
             EconomyAccountData accountData = EconomyAccountData.get(serverLevel);
-            EconomyOfferData offerData = EconomyOfferData.get(serverLevel);
+            EconomyOrderData orderData = EconomyOrderData.get(serverLevel);
             EconomyTradeData tradeData = EconomyTradeData.get(serverLevel);
 
             Economy.getAccountManager().loadFrom(accountData);
 
-            OfferManager offerManager = Economy.getOfferManager();
-            offerManager.setOfferData(offerData);
-            offerManager.loadFrom(offerData);
+            OrderManager orderManager = Economy.getOrderManager();
+            orderManager.setOrderData(orderData);
+            orderManager.loadFrom(orderData);
 
             TradeLedger.setTradeData(tradeData);
             VaultManager.setAccountData(accountData);
@@ -45,7 +45,7 @@ public class EconomyEvents {
         if (event.phase == net.minecraftforge.event.TickEvent.Phase.END && event.level instanceof ServerLevel serverLevel) {
             if (serverLevel.dimension() != Level.OVERWORLD) return;
             if (++tickCounter % 20 == 0) {
-                Economy.getOfferManager().matchAllPendingOrders(serverLevel);
+                Economy.getOrderManager().matchAllPendingOrders(serverLevel);
             }
         }
     }
@@ -56,7 +56,7 @@ public class EconomyEvents {
             if (serverLevel.dimension() != Level.OVERWORLD) return;
 
             Economy.getAccountManager().saveAll();
-            Economy.getOfferManager().saveAll();
+            Economy.getOrderManager().saveAll();
             Economy.LOGGER.debug("Economy data saved for dimension {}", serverLevel.dimension().location());
         }
     }
