@@ -16,6 +16,10 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.Level;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.fml.DistExecutor;
 import net.minecraftforge.network.NetworkEvent;
 import net.minecraftforge.network.NetworkRegistry;
 import net.minecraftforge.network.PacketDistributor;
@@ -150,7 +154,7 @@ public class MarketNetwork {
         }
 
         public static void handle(SyncItemListPacket pkt, Supplier<NetworkEvent.Context> ctx) {
-            ctx.get().enqueueWork(() -> com.nstut.forge.client.MarketScreen.handleSyncItemList(pkt));
+            ctx.get().enqueueWork(() -> DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () -> com.nstut.forge.client.MarketScreen.handleSyncItemList(pkt)));
             ctx.get().setPacketHandled(true);
         }
     }
@@ -214,7 +218,7 @@ public class MarketNetwork {
         }
 
         public static void handle(SyncItemDetailPacket pkt, Supplier<NetworkEvent.Context> ctx) {
-            ctx.get().enqueueWork(() -> com.nstut.forge.client.MarketScreen.handleSyncItemDetail(pkt));
+            ctx.get().enqueueWork(() -> DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () -> com.nstut.forge.client.MarketScreen.handleSyncItemDetail(pkt)));
             ctx.get().setPacketHandled(true);
         }
     }
@@ -515,7 +519,7 @@ public class MarketNetwork {
         }
 
         public static void handle(SyncOrderHistoryPacket pkt, Supplier<NetworkEvent.Context> ctx) {
-            ctx.get().enqueueWork(() -> com.nstut.forge.client.MarketScreen.handleSyncOrderHistory(pkt));
+            ctx.get().enqueueWork(() -> DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () -> com.nstut.forge.client.MarketScreen.handleSyncOrderHistory(pkt)));
             ctx.get().setPacketHandled(true);
         }
     }
@@ -614,7 +618,7 @@ public class MarketNetwork {
         }
 
         public static void handle(SyncVaultInfoPacket pkt, Supplier<NetworkEvent.Context> ctx) {
-            ctx.get().enqueueWork(() -> com.nstut.forge.client.MarketScreen.handleSyncVaultInfo(pkt));
+            ctx.get().enqueueWork(() -> DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () -> com.nstut.forge.client.MarketScreen.handleSyncVaultInfo(pkt)));
             ctx.get().setPacketHandled(true);
         }
     }
