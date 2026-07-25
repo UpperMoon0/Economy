@@ -979,6 +979,7 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
             }
         }
         pendingConfirmation = new PendingOrderExecution(itemId, qty, price.toPlainString(), createSellMode, actionStr, dispName, totStr);
+        switchView(viewMode);
     }
 
     private void showCreateError(String msg) {
@@ -1023,36 +1024,24 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
             orderHistoryBtn.setActive(mode == 3);
         }
         if (searchField != null) {
-            searchField.setVisible(mode == 0);
-            if (mode != 0) searchField.getEditBox().setFocused(false);
+            searchField.setVisible(mode == 0 && pendingConfirmation == null);
+            if (mode != 0 || pendingConfirmation != null) searchField.getEditBox().setFocused(false);
         }
         if (historySearchField != null) {
-            historySearchField.setVisible(mode == 3);
-            if (mode != 3) historySearchField.getEditBox().setFocused(false);
+            historySearchField.setVisible(mode == 3 && pendingConfirmation == null);
+            if (mode != 3 || pendingConfirmation != null) historySearchField.getEditBox().setFocused(false);
         }
         if (itemIdField != null) {
-            com.nstut.Economy.LOGGER.info("[MarketScreen] switchView itemIdField.getValue()='{}' BEFORE setVisible({})", itemIdField.getValue(), mode == 2);
-            itemIdField.setVisible(mode == 2);
-            if (mode != 2) itemIdField.getEditBox().setFocused(false);
-            com.nstut.Economy.LOGGER.info("[MarketScreen] switchView itemIdField.getValue()='{}' AFTER setVisible", itemIdField.getValue());
-        } else {
-            com.nstut.Economy.LOGGER.warn("[MarketScreen] switchView itemIdField is NULL!");
+            itemIdField.setVisible(mode == 2 && pendingConfirmation == null);
+            if (mode != 2 || pendingConfirmation != null) itemIdField.getEditBox().setFocused(false);
         }
         if (qtyField != null) {
-            com.nstut.Economy.LOGGER.info("[MarketScreen] switchView qtyField.getValue()='{}' BEFORE setVisible({})", qtyField.getValue(), mode == 2);
-            qtyField.setVisible(mode == 2);
-            if (mode != 2) qtyField.getEditBox().setFocused(false);
-            com.nstut.Economy.LOGGER.info("[MarketScreen] switchView qtyField.getValue()='{}' AFTER setVisible", qtyField.getValue());
-        } else {
-            com.nstut.Economy.LOGGER.warn("[MarketScreen] switchView qtyField is NULL!");
+            qtyField.setVisible(mode == 2 && pendingConfirmation == null);
+            if (mode != 2 || pendingConfirmation != null) qtyField.getEditBox().setFocused(false);
         }
         if (priceField != null) {
-            com.nstut.Economy.LOGGER.info("[MarketScreen] switchView priceField.getValue()='{}' BEFORE setVisible({})", priceField.getValue(), mode == 2);
-            priceField.setVisible(mode == 2);
-            if (mode != 2) priceField.getEditBox().setFocused(false);
-            com.nstut.Economy.LOGGER.info("[MarketScreen] switchView priceField.getValue()='{}' AFTER setVisible", priceField.getValue());
-        } else {
-            com.nstut.Economy.LOGGER.warn("[MarketScreen] switchView priceField is NULL!");
+            priceField.setVisible(mode == 2 && pendingConfirmation == null);
+            if (mode != 2 || pendingConfirmation != null) priceField.getEditBox().setFocused(false);
         }
 
         if (root != null) {
@@ -1243,9 +1232,8 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         v.addChild(TextWidget.centered("VAULT OVERVIEW", ACCENT));
         v.addChild(new Divider(PANEL_BORDER));
 
-        // Summary Stats Row
-        HStack statsRow = new HStack().gap(4);
-        statsRow.addChild(new UIComponent() {
+        // Summary Stats Row (fixed 24px height, full width)
+        UIComponent statsRow = new UIComponent() {
             @Override public int preferredWidth(Font f) { return 0; }
             @Override public int preferredHeight(Font f) { return 24; }
             @Override
@@ -1260,19 +1248,21 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
                     totalItems += e.totalItems;
                 }
 
-                // Stat Box 1: Vault Count
                 int boxW = (width - 8) / 3;
-                g.fill(x, y, x + boxW, y + height, CARD_BG);
-                g.fill(x, y, x + boxW, y + 1, PANEL_BORDER);
-                g.fill(x, y + height - 1, x + boxW, y + height, PANEL_BORDER);
-                g.fill(x, y, x + 1, y + height, PANEL_BORDER);
-                g.fill(x + boxW - 1, y, x + boxW, y + height, PANEL_BORDER);
-                g.drawString(fnt, "VAULTS", x + (boxW - fnt.width("VAULTS")) / 2, y + 3, TEXT_MUTED);
+
+                // Stat Box 1: Vault Count
+                int b1X = x;
+                g.fill(b1X, y, b1X + boxW, y + height, CARD_BG);
+                g.fill(b1X, y, b1X + boxW, y + 1, PANEL_BORDER);
+                g.fill(b1X, y + height - 1, b1X + boxW, y + height, PANEL_BORDER);
+                g.fill(b1X, y, b1X + 1, y + height, PANEL_BORDER);
+                g.fill(b1X + boxW - 1, y, b1X + boxW, y + height, PANEL_BORDER);
+                g.drawString(fnt, "VAULTS", b1X + (boxW - fnt.width("VAULTS")) / 2, y + 3, TEXT_MUTED);
                 String vVal = String.valueOf(totalV);
-                g.drawString(fnt, vVal, x + (boxW - fnt.width(vVal)) / 2, y + 13, ACCENT);
+                g.drawString(fnt, vVal, b1X + (boxW - fnt.width(vVal)) / 2, y + 13, ACCENT);
 
                 // Stat Box 2: Storage Slots
-                int b2X = x + boxW + 4;
+                int b2X = b1X + boxW + 4;
                 g.fill(b2X, y, b2X + boxW, y + height, CARD_BG);
                 g.fill(b2X, y, b2X + boxW, y + 1, PANEL_BORDER);
                 g.fill(b2X, y + height - 1, b2X + boxW, y + height, PANEL_BORDER);
@@ -1293,7 +1283,7 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
                 String iVal = String.valueOf(totalItems);
                 g.drawString(fnt, iVal, b3X + (boxW - fnt.width(iVal)) / 2, y + 13, ACCENT);
             }
-        });
+        };
         v.addChild(statsRow);
         v.addChild(new Divider(PANEL_BORDER));
 
@@ -1332,26 +1322,36 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
                 g.fill(badgeX + badgeW - 1, ry + 3, badgeX + badgeW, ry + 14, badgeBorder);
                 g.drawString(fnt, badge, badgeX + 3, ry + 4, badgeText);
 
-                // Location String
+                // Location String (Left, line 2)
                 String dimClean = e.dimension.replace("minecraft:", "");
                 String locStr = dimClean + " (" + e.x + ", " + e.y + ", " + e.z + ")";
                 g.drawString(fnt, locStr, rx + 4, ry + 14, TEXT_MUTED);
 
-                // Storage Progress Bar
+                // Slots Used String (Right, line 2)
+                String slotsStr = e.usedSlots + "/" + e.totalSlots + " Slots";
+                int slotsW = fnt.width(slotsStr);
+                g.drawString(fnt, slotsStr, rx + rw - slotsW - 4, ry + 14, TEXT_PRIMARY);
+
+                // Storage Progress Bar (Left, line 3)
                 int barX = rx + 4;
-                int barY = ry + 24;
-                int barW = rw - 80;
+                int barY = ry + 25;
+                int barW = rw - 90;
                 int barH = 5;
                 g.fill(barX, barY, barX + barW, barY + barH, 0xFF1A1A2E);
                 int pct = e.totalSlots > 0 ? (e.usedSlots * barW) / e.totalSlots : 0;
                 int fillClr = isFull ? RED : GREEN;
                 g.fill(barX, barY, barX + pct, barY + barH, fillClr);
 
-                String usageStr = e.usedSlots + "/" + e.totalSlots + " Slots (" + e.totalItems + " items)";
-                g.drawString(fnt, usageStr, barX + barW + 6, ry + 22, TEXT_PRIMARY);
+                // Items Count String (Right, line 3 - below slots text)
+                String itemsStr = "(" + e.totalItems + " items)";
+                int itemsW = fnt.width(itemsStr);
+                g.drawString(fnt, itemsStr, rx + rw - itemsW - 4, ry + 24, TEXT_MUTED);
             },
             (idx, btn) -> { /* read only */ },
             PANEL, ACCENT_DIM);
+
+        list.flex();
+        v.addChild(list);
 
         v.addChild(list);
         return v;
@@ -1454,20 +1454,23 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
 
     private void renderConfirmationModal(GuiGraphics g, int mx, int my) {
         if (pendingConfirmation == null) return;
+        g.pose().pushPose();
+        g.pose().translate(0, 0, 400);
+
         int modalW = 200;
         int modalH = 95;
         int modalX = left() + (SCREEN_W - modalW) / 2;
         int modalY = top() + (SCREEN_H - modalH) / 2;
 
         // Dark dim backdrop over whole screen
-        g.fill(left(), top(), left() + SCREEN_W, top() + SCREEN_H, 0xAA000000);
+        g.fill(left(), top(), left() + SCREEN_W, top() + SCREEN_H, 0xEE000000);
 
         // Modal container background & border
         g.fill(modalX, modalY, modalX + modalW, modalY + modalH, 0xFF0F1524);
         g.fill(modalX, modalY, modalX + modalW, modalY + 1, ACCENT);
         g.fill(modalX, modalY + modalH - 1, modalX + modalW, modalY + modalH, ACCENT);
         g.fill(modalX, modalY, modalX + 1, modalY + modalH, ACCENT);
-        g.fill(modalX + modalW - 1, modalX + modalW, modalY, modalY + modalH, ACCENT);
+        g.fill(modalX + modalW - 1, modalY, modalX + modalW, modalY + modalH, ACCENT);
 
         // Title
         String title = "CONFIRM TRANSACTION";
@@ -1495,7 +1498,7 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         g.fill(confirmX, confirmY, confirmX + btnW, confirmY + 1, ACCENT);
         g.fill(confirmX, confirmY + btnH - 1, confirmX + btnW, confirmY + btnH, ACCENT);
         g.fill(confirmX, confirmY, confirmX + 1, confirmY + btnH, ACCENT);
-        g.fill(confirmX + btnW - 1, confirmX + btnW, confirmY, confirmY + btnH, ACCENT);
+        g.fill(confirmX + btnW - 1, confirmY, confirmX + btnW, confirmY + btnH, ACCENT);
         g.drawString(font, "Confirm", confirmX + (btnW - font.width("Confirm")) / 2, confirmY + 4, ACCENT);
 
         // Cancel Button
@@ -1507,8 +1510,10 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         g.fill(cancelX, cancelY, cancelX + btnW, cancelY + 1, RED);
         g.fill(cancelX, cancelY + btnH - 1, cancelX + btnW, cancelY + btnH, RED);
         g.fill(cancelX, cancelY, cancelX + 1, cancelY + btnH, RED);
-        g.fill(cancelX + btnW - 1, cancelX + btnW, cancelY, cancelY + btnH, RED);
+        g.fill(cancelX + btnW - 1, cancelY, cancelX + btnW, cancelY + btnH, RED);
         g.drawString(font, "Cancel", cancelX + (btnW - font.width("Cancel")) / 2, cancelY + 4, 0xFFFFFFFF);
+
+        g.pose().popPose();
     }
 
     @Override
@@ -1539,10 +1544,12 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
             int cancelY = modalY + 66;
             if (mx >= cancelX && mx <= cancelX + btnW && my >= cancelY && my <= cancelY + btnH) {
                 pendingConfirmation = null;
+                switchView(viewMode);
                 return true;
             }
 
             pendingConfirmation = null;
+            switchView(viewMode);
             return true;
         }
         // ── Item search dropdown click interception ──
