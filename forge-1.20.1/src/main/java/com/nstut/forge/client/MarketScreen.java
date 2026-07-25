@@ -1289,24 +1289,24 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
 
         ScrollList list = new ScrollList(
             () -> Math.max(1, cachedVaultEntries.size()),
-            34,
+            40,
             (g, fnt, idx, rx, ry, rw, mx, my, hover) -> {
                 if (cachedVaultEntries.isEmpty()) {
                     String msg = "No Vault blocks registered yet";
-                    g.drawString(fnt, msg, rx + (rw - fnt.width(msg)) / 2, ry + 12, TEXT_MUTED);
+                    g.drawString(fnt, msg, rx + (rw - fnt.width(msg)) / 2, ry + 15, TEXT_MUTED);
                     return;
                 }
                 if (idx >= cachedVaultEntries.size()) return;
                 MarketNetwork.VaultDetailEntry e = cachedVaultEntries.get(idx);
 
-                if (hover) g.fill(rx, ry, rx + rw, ry + 33, CARD_HOVER);
-                g.fill(rx, ry + 33, rx + rw, ry + 34, PANEL_BORDER);
+                if (hover) g.fill(rx, ry, rx + rw, ry + 39, CARD_HOVER);
+                g.fill(rx, ry + 39, rx + rw, ry + 40, PANEL_BORDER);
 
-                // Vault Index Title
+                // Vault Index Title (Line 1)
                 String vTitle = "Vault #" + (idx + 1);
                 g.drawString(fnt, vTitle, rx + 4, ry + 3, ACCENT);
 
-                // Status Badge (ACTIVE or FULL)
+                // Status Badge (ACTIVE or FULL) (Line 1 right)
                 boolean isFull = e.usedSlots >= e.totalSlots;
                 String badge = isFull ? "FULL" : "ACTIVE";
                 int badgeW = fnt.width(badge) + 6;
@@ -1315,26 +1315,26 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
                 int badgeBorder = isFull ? 0xFFFF4444 : 0xFF20A050;
                 int badgeText = isFull ? 0xFFFF6666 : 0xFF66FF66;
 
-                g.fill(badgeX, ry + 3, badgeX + badgeW, ry + 14, badgeBg);
-                g.fill(badgeX, ry + 3, badgeX + badgeW, ry + 4, badgeBorder);
-                g.fill(badgeX, ry + 13, badgeX + badgeW, ry + 14, badgeBorder);
-                g.fill(badgeX, ry + 3, badgeX + 1, ry + 14, badgeBorder);
-                g.fill(badgeX + badgeW - 1, ry + 3, badgeX + badgeW, ry + 14, badgeBorder);
-                g.drawString(fnt, badge, badgeX + 3, ry + 4, badgeText);
+                g.fill(badgeX, ry + 2, badgeX + badgeW, ry + 13, badgeBg);
+                g.fill(badgeX, ry + 2, badgeX + badgeW, ry + 3, badgeBorder);
+                g.fill(badgeX, ry + 12, badgeX + badgeW, ry + 13, badgeBorder);
+                g.fill(badgeX, ry + 2, badgeX + 1, ry + 13, badgeBorder);
+                g.fill(badgeX + badgeW - 1, ry + 2, badgeX + badgeW, ry + 13, badgeBorder);
+                g.drawString(fnt, badge, badgeX + 3, ry + 3, badgeText);
 
-                // Location String (Left, line 2)
+                // Location String (Left, Line 2 - ry + 17)
                 String dimClean = e.dimension.replace("minecraft:", "");
                 String locStr = dimClean + " (" + e.x + ", " + e.y + ", " + e.z + ")";
-                g.drawString(fnt, locStr, rx + 4, ry + 14, TEXT_MUTED);
+                g.drawString(fnt, locStr, rx + 4, ry + 17, TEXT_MUTED);
 
-                // Slots Used String (Right, line 2)
+                // Slots Used String (Right, Line 2 - ry + 17)
                 String slotsStr = e.usedSlots + "/" + e.totalSlots + " Slots";
                 int slotsW = fnt.width(slotsStr);
-                g.drawString(fnt, slotsStr, rx + rw - slotsW - 4, ry + 14, TEXT_PRIMARY);
+                g.drawString(fnt, slotsStr, rx + rw - slotsW - 4, ry + 17, TEXT_PRIMARY);
 
-                // Storage Progress Bar (Left, line 3)
+                // Storage Progress Bar (Left, Line 3 - ry + 29)
                 int barX = rx + 4;
-                int barY = ry + 25;
+                int barY = ry + 29;
                 int barW = rw - 90;
                 int barH = 5;
                 g.fill(barX, barY, barX + barW, barY + barH, 0xFF1A1A2E);
@@ -1342,17 +1342,15 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
                 int fillClr = isFull ? RED : GREEN;
                 g.fill(barX, barY, barX + pct, barY + barH, fillClr);
 
-                // Items Count String (Right, line 3 - below slots text)
+                // Items Count String (Right, Line 3 - ry + 28)
                 String itemsStr = "(" + e.totalItems + " items)";
                 int itemsW = fnt.width(itemsStr);
-                g.drawString(fnt, itemsStr, rx + rw - itemsW - 4, ry + 24, TEXT_MUTED);
+                g.drawString(fnt, itemsStr, rx + rw - itemsW - 4, ry + 28, TEXT_MUTED);
             },
             (idx, btn) -> { /* read only */ },
             PANEL, ACCENT_DIM);
 
         list.flex();
-        v.addChild(list);
-
         v.addChild(list);
         return v;
     }
