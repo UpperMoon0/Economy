@@ -27,12 +27,13 @@ public class EconomyOrderData extends SavedData {
         public final long expiresAt;
         public final boolean hasExpiry;
         public final NonNullList<ItemStack> reservedItems;
+        public final boolean isInfinite;
         public final boolean isServerOrder;
 
         public OrderSnapshot(UUID orderId, UUID owner, String itemId, int quantity, int initialQuantity,
                              String pricePerUnit, String type, long createdAt,
                              long expiresAt, boolean hasExpiry,
-                             NonNullList<ItemStack> reservedItems, boolean isServerOrder) {
+                             NonNullList<ItemStack> reservedItems, boolean isServerOrder, boolean isInfinite) {
             this.orderId = orderId;
             this.owner = owner;
             this.itemId = itemId;
@@ -45,13 +46,21 @@ public class EconomyOrderData extends SavedData {
             this.hasExpiry = hasExpiry;
             this.reservedItems = reservedItems != null ? reservedItems : NonNullList.create();
             this.isServerOrder = isServerOrder;
+            this.isInfinite = isInfinite;
+        }
+
+        public OrderSnapshot(UUID orderId, UUID owner, String itemId, int quantity, int initialQuantity,
+                             String pricePerUnit, String type, long createdAt,
+                             long expiresAt, boolean hasExpiry,
+                             NonNullList<ItemStack> reservedItems, boolean isServerOrder) {
+            this(orderId, owner, itemId, quantity, initialQuantity, pricePerUnit, type, createdAt, expiresAt, hasExpiry, reservedItems, isServerOrder, false);
         }
 
         public OrderSnapshot(UUID orderId, UUID owner, String itemId, int quantity,
                              String pricePerUnit, String type, long createdAt,
                              long expiresAt, boolean hasExpiry,
                              NonNullList<ItemStack> reservedItems, boolean isServerOrder) {
-            this(orderId, owner, itemId, quantity, quantity, pricePerUnit, type, createdAt, expiresAt, hasExpiry, reservedItems, isServerOrder);
+            this(orderId, owner, itemId, quantity, quantity, pricePerUnit, type, createdAt, expiresAt, hasExpiry, reservedItems, isServerOrder, false);
         }
     }
 
@@ -96,6 +105,7 @@ public class EconomyOrderData extends SavedData {
                     }
                 }
                 boolean serverOrd = t.getBoolean("ServerOrder");
+                boolean infOrd = t.getBoolean("IsInfinite");
                 UUID id = t.getUUID("OrderId");
                 UUID owner = t.hasUUID("Owner") ? t.getUUID("Owner") : null;
                 int qty = t.getInt("Quantity");
@@ -112,7 +122,8 @@ public class EconomyOrderData extends SavedData {
                     t.getLong("ExpiresAt"),
                     t.getBoolean("HasExpiry"),
                     reserved,
-                    serverOrd
+                    serverOrd,
+                    infOrd
                 ));
             } catch (Exception e) {
             }
@@ -136,6 +147,7 @@ public class EconomyOrderData extends SavedData {
             sTag.putLong("ExpiresAt", s.expiresAt);
             sTag.putBoolean("HasExpiry", s.hasExpiry);
             sTag.putBoolean("ServerOrder", s.isServerOrder);
+            sTag.putBoolean("IsInfinite", s.isInfinite);
 
             if (!s.reservedItems.isEmpty()) {
                 ListTag resList = new ListTag();

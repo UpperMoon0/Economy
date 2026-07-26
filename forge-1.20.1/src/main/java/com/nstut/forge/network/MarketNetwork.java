@@ -60,6 +60,9 @@ public class MarketNetwork {
         CHANNEL.registerMessage(packetId++, ToggleVaultModePacket.class, ToggleVaultModePacket::encode, ToggleVaultModePacket::decode, ToggleVaultModePacket::handle);
         CHANNEL.registerMessage(packetId++, RequestPortfolioPacket.class, RequestPortfolioPacket::encode, RequestPortfolioPacket::decode, RequestPortfolioPacket::handle);
         CHANNEL.registerMessage(packetId++, SyncPortfolioPacket.class, SyncPortfolioPacket::encode, SyncPortfolioPacket::decode, SyncPortfolioPacket::handle);
+        CHANNEL.registerMessage(packetId++, EditOrderPacket.class, EditOrderPacket::encode, EditOrderPacket::decode, EditOrderPacket::handle);
+        CHANNEL.registerMessage(packetId++, RequestActiveOrdersPacket.class, RequestActiveOrdersPacket::encode, RequestActiveOrdersPacket::decode, RequestActiveOrdersPacket::handle);
+        CHANNEL.registerMessage(packetId++, SyncActiveOrdersPacket.class, SyncActiveOrdersPacket::encode, SyncActiveOrdersPacket::decode, SyncActiveOrdersPacket::handle);
     }
 
     public static class ItemCardData {
@@ -96,11 +99,16 @@ public class MarketNetwork {
         public final int initialQuantity;
         public final boolean isPlayerOwned;
         public final boolean isServerOrder;
+        public final boolean isInfinite;
 
-        public OrderEntry(UUID orderId, UUID ownerId, String sellerName, String price, int quantity, int initialQuantity, boolean isPlayerOwned, boolean isServerOrder) {
+        public OrderEntry(UUID orderId, UUID ownerId, String sellerName, String price, int quantity, int initialQuantity, boolean isPlayerOwned, boolean isServerOrder, boolean isInfinite) {
             this.orderId = orderId; this.ownerId = ownerId; this.sellerName = sellerName; this.price = price;
             this.quantity = quantity; this.initialQuantity = initialQuantity > 0 ? initialQuantity : quantity;
-            this.isPlayerOwned = isPlayerOwned; this.isServerOrder = isServerOrder;
+            this.isPlayerOwned = isPlayerOwned; this.isServerOrder = isServerOrder; this.isInfinite = isInfinite;
+        }
+
+        public OrderEntry(UUID orderId, UUID ownerId, String sellerName, String price, int quantity, int initialQuantity, boolean isPlayerOwned, boolean isServerOrder) {
+            this(orderId, ownerId, sellerName, price, quantity, initialQuantity, isPlayerOwned, isServerOrder, false);
         }
 
         public void write(FriendlyByteBuf buf) {
@@ -112,28 +120,35 @@ public class MarketNetwork {
             buf.writeInt(initialQuantity);
             buf.writeBoolean(isPlayerOwned);
             buf.writeBoolean(isServerOrder);
+            buf.writeBoolean(isInfinite);
         }
 
         public static OrderEntry read(FriendlyByteBuf buf) {
-            return new OrderEntry(buf.readUUID(), buf.readUUID(), buf.readUtf(), buf.readUtf(), buf.readInt(), buf.readInt(), buf.readBoolean(), buf.readBoolean());
+            return new OrderEntry(buf.readUUID(), buf.readUUID(), buf.readUtf(), buf.readUtf(), buf.readInt(), buf.readInt(), buf.readBoolean(), buf.readBoolean(), buf.readBoolean());
         }
     }
 
     public static class ChartPoint {
         public final int price;
         public final int quantity;
+        public final long timestamp;
+
+        public ChartPoint(int price, int quantity, long timestamp) {
+            this.price = price; this.quantity = quantity; this.timestamp = timestamp;
+        }
 
         public ChartPoint(int price, int quantity) {
-            this.price = price; this.quantity = quantity;
+            this(price, quantity, System.currentTimeMillis());
         }
 
         public void write(FriendlyByteBuf buf) {
             buf.writeInt(price);
             buf.writeInt(quantity);
+            buf.writeLong(timestamp);
         }
 
         public static ChartPoint read(FriendlyByteBuf buf) {
-            return new ChartPoint(buf.readInt(), buf.readInt());
+            return new ChartPoint(buf.readInt(), buf.readInt(), buf.readLong());
         }
     }
 
@@ -237,17 +252,22 @@ public class MarketNetwork {
         public final int quantity;
         public final String pricePerUnit;
         public final boolean isSell;
+        public final boolean isInfinite;
+
+        public CreateOrderPacket(String itemId, int quantity, String pricePerUnit, boolean isSell, boolean isInfinite) {
+            this.itemId = itemId; this.quantity = quantity; this.pricePerUnit = pricePerUnit; this.isSell = isSell; this.isInfinite = isInfinite;
+        }
 
         public CreateOrderPacket(String itemId, int quantity, String pricePerUnit, boolean isSell) {
-            this.itemId = itemId; this.quantity = quantity; this.pricePerUnit = pricePerUnit; this.isSell = isSell;
+            this(itemId, quantity, pricePerUnit, isSell, false);
         }
 
         public static void encode(CreateOrderPacket pkt, FriendlyByteBuf buf) {
-            buf.writeUtf(pkt.itemId); buf.writeInt(pkt.quantity); buf.writeUtf(pkt.pricePerUnit); buf.writeBoolean(pkt.isSell);
+            buf.writeUtf(pkt.itemId); buf.writeInt(pkt.quantity); buf.writeUtf(pkt.pricePerUnit); buf.writeBoolean(pkt.isSell); buf.writeBoolean(pkt.isInfinite);
         }
 
         public static CreateOrderPacket decode(FriendlyByteBuf buf) {
-            return new CreateOrderPacket(buf.readUtf(), buf.readInt(), buf.readUtf(), buf.readBoolean());
+            return new CreateOrderPacket(buf.readUtf(), buf.readInt(), buf.readUtf(), buf.readBoolean(), buf.readBoolean());
         }
 
         public static void handle(CreateOrderPacket pkt, Supplier<NetworkEvent.Context> ctx) {
@@ -268,7 +288,7 @@ public class MarketNetwork {
                     if (!VaultManager.extractItemFromVaults(level, player.getUUID(), item, pkt.quantity, reserved)) { sendItemDetail(player, pkt.itemId); return; }
                     orderManager.createSellOrder(player.getUUID(), commodity, pkt.quantity, price, reserved, level);
                 } else {
-                    orderManager.createBuyOrder(player.getUUID(), commodity, pkt.quantity, price, level);
+                    orderManager.createBuyOrder(player.getUUID(), commodity, pkt.quantity, price, pkt.isInfinite, level);
                 }
                 orderManager.matchAllPendingOrders(level);
                 sendItemDetail(player, pkt.itemId);
@@ -328,6 +348,7 @@ public class MarketNetwork {
                     order.cancel();
                     orderManager.cleanupOrders();
                 }
+                sendActiveOrders(player);
                 if (opt.isPresent() && opt.get().getCommodity() instanceof ItemCommodity ic) {
                     sendItemDetail(player, ic.getId().toString());
                 } else {
@@ -336,6 +357,132 @@ public class MarketNetwork {
             });
             ctx.get().setPacketHandled(true);
         }
+    }
+
+    public static class EditOrderPacket {
+        public final UUID orderId;
+        public final int quantity;
+        public final String pricePerUnit;
+        public final boolean isInfinite;
+
+        public EditOrderPacket(UUID orderId, int quantity, String pricePerUnit, boolean isInfinite) {
+            this.orderId = orderId; this.quantity = quantity; this.pricePerUnit = pricePerUnit; this.isInfinite = isInfinite;
+        }
+
+        public static void encode(EditOrderPacket pkt, FriendlyByteBuf buf) {
+            buf.writeUUID(pkt.orderId); buf.writeInt(pkt.quantity); buf.writeUtf(pkt.pricePerUnit); buf.writeBoolean(pkt.isInfinite);
+        }
+
+        public static EditOrderPacket decode(FriendlyByteBuf buf) {
+            return new EditOrderPacket(buf.readUUID(), buf.readInt(), buf.readUtf(), buf.readBoolean());
+        }
+
+        public static void handle(EditOrderPacket pkt, Supplier<NetworkEvent.Context> ctx) {
+            ctx.get().enqueueWork(() -> {
+                ServerPlayer player = ctx.get().getSender();
+                if (player == null) return;
+                ServerLevel level = player.serverLevel();
+                OrderManager orderManager = Economy.getOrderManager();
+                BigDecimal price = new BigDecimal(pkt.pricePerUnit);
+                orderManager.editOrder(pkt.orderId, player.getUUID(), pkt.quantity, price, pkt.isInfinite, level);
+                sendActiveOrders(player);
+                sendItemList(player);
+            });
+            ctx.get().setPacketHandled(true);
+        }
+    }
+
+    public static class ActiveOrderEntry {
+        public final UUID orderId;
+        public final String itemId;
+        public final String displayName;
+        public final String price;
+        public final int quantity;
+        public final int initialQuantity;
+        public final boolean isSell;
+        public final boolean isInfinite;
+        public final long createdAt;
+
+        public ActiveOrderEntry(UUID orderId, String itemId, String displayName, String price, int quantity, int initialQuantity, boolean isSell, boolean isInfinite, long createdAt) {
+            this.orderId = orderId; this.itemId = itemId; this.displayName = displayName; this.price = price;
+            this.quantity = quantity; this.initialQuantity = initialQuantity > 0 ? initialQuantity : quantity;
+            this.isSell = isSell; this.isInfinite = isInfinite; this.createdAt = createdAt;
+        }
+
+        public void write(FriendlyByteBuf buf) {
+            buf.writeUUID(orderId);
+            buf.writeUtf(itemId);
+            buf.writeUtf(displayName);
+            buf.writeUtf(price);
+            buf.writeInt(quantity);
+            buf.writeInt(initialQuantity);
+            buf.writeBoolean(isSell);
+            buf.writeBoolean(isInfinite);
+            buf.writeLong(createdAt);
+        }
+
+        public static ActiveOrderEntry read(FriendlyByteBuf buf) {
+            return new ActiveOrderEntry(buf.readUUID(), buf.readUtf(), buf.readUtf(), buf.readUtf(), buf.readInt(), buf.readInt(), buf.readBoolean(), buf.readBoolean(), buf.readLong());
+        }
+    }
+
+    public static class RequestActiveOrdersPacket {
+        public RequestActiveOrdersPacket() {}
+        public static void encode(RequestActiveOrdersPacket pkt, FriendlyByteBuf buf) {}
+        public static RequestActiveOrdersPacket decode(FriendlyByteBuf buf) { return new RequestActiveOrdersPacket(); }
+
+        public static void handle(RequestActiveOrdersPacket pkt, Supplier<NetworkEvent.Context> ctx) {
+            ctx.get().enqueueWork(() -> {
+                ServerPlayer player = ctx.get().getSender();
+                if (player != null) sendActiveOrders(player);
+            });
+            ctx.get().setPacketHandled(true);
+        }
+    }
+
+    public static class SyncActiveOrdersPacket {
+        public final List<ActiveOrderEntry> entries;
+
+        public SyncActiveOrdersPacket(List<ActiveOrderEntry> entries) { this.entries = entries; }
+
+        public static void encode(SyncActiveOrdersPacket pkt, FriendlyByteBuf buf) {
+            buf.writeInt(pkt.entries.size());
+            for (ActiveOrderEntry e : pkt.entries) e.write(buf);
+        }
+
+        public static SyncActiveOrdersPacket decode(FriendlyByteBuf buf) {
+            int count = buf.readInt();
+            List<ActiveOrderEntry> entries = new ArrayList<>();
+            for (int i = 0; i < count; i++) entries.add(ActiveOrderEntry.read(buf));
+            return new SyncActiveOrdersPacket(entries);
+        }
+
+        public static void handle(SyncActiveOrdersPacket pkt, Supplier<NetworkEvent.Context> ctx) {
+            ctx.get().enqueueWork(() -> DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () -> com.nstut.forge.client.MarketScreen.handleSyncActiveOrders(pkt)));
+            ctx.get().setPacketHandled(true);
+        }
+    }
+
+    public static void sendActiveOrders(ServerPlayer player) {
+        OrderManager orderManager = Economy.getOrderManager();
+        UUID playerId = player.getUUID();
+        List<Order> playerOrders = orderManager.getPlayerOrders(playerId);
+
+        List<ActiveOrderEntry> entries = new ArrayList<>();
+        for (Order o : playerOrders) {
+            if (!(o.getCommodity() instanceof ItemCommodity ic)) continue;
+            String itemId = ic.getItem().builtInRegistryHolder().key().location().toString();
+            String displayName = new ItemStack(ic.getItem()).getHoverName().getString();
+            String priceStr = o.getPricePerUnit().setScale(0, RoundingMode.HALF_UP).toPlainString();
+            boolean isSell = o.getType() == IOrder.OrderType.SELL;
+
+            entries.add(new ActiveOrderEntry(
+                o.getOrderId(), itemId, displayName, priceStr, o.getQuantity(), o.getInitialQuantity(),
+                isSell, o.isInfinite(), o.getCreatedAt().toEpochMilli()
+            ));
+        }
+
+        CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), new SyncActiveOrdersPacket(entries));
     }
 
     public static class RequestRefreshPacket {
@@ -506,7 +653,7 @@ public class MarketNetwork {
             OrderEntry entry = new OrderEntry(
                 order.getOrderId(), order.getOwner(), sellerName,
                 order.getPricePerUnit().setScale(0, RoundingMode.HALF_UP).toPlainString(),
-                order.getQuantity(), order.getInitialQuantity(), order.getOwner().equals(playerId), order.isServerOrder());
+                order.getQuantity(), order.getInitialQuantity(), order.getOwner().equals(playerId), order.isServerOrder(), order.isInfinite());
 
             if (order.getType() == IOrder.OrderType.SELL) {
                 asks.add(entry);
@@ -527,15 +674,15 @@ public class MarketNetwork {
         });
 
         List<ChartPoint> chart = new ArrayList<>();
-        List<EconomyTradeData.TradeSnapshot> trades = TradeLedger.getRecentTrades(itemId, 20);
+        List<EconomyTradeData.TradeSnapshot> trades = TradeLedger.getRecentTrades(itemId, 50);
         for (int i = trades.size() - 1; i >= 0; i--) {
             EconomyTradeData.TradeSnapshot t = trades.get(i);
-            chart.add(new ChartPoint(new BigDecimal(t.price).intValue(), t.quantity));
+            chart.add(new ChartPoint(new BigDecimal(t.price).intValue(), t.quantity, t.timestamp));
         }
 
         BigDecimal globalPrice = getGlobalPrice(orderManager, itemId);
         if (globalPrice != null) {
-            chart.add(new ChartPoint(globalPrice.intValue(), 1));
+            chart.add(new ChartPoint(globalPrice.intValue(), 1, System.currentTimeMillis()));
         }
 
         CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), new SyncItemDetailPacket(itemId, displayName, vaultCount, asks, bids, chart));

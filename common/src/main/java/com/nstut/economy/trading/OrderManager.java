@@ -96,12 +96,17 @@ public class OrderManager {
 
     public Order createBuyOrder(UUID owner, ICommodity commodity, int quantity,
                                  java.math.BigDecimal pricePerUnit) {
-        return createBuyOrder(owner, commodity, quantity, pricePerUnit, null);
+        return createBuyOrder(owner, commodity, quantity, pricePerUnit, false, null);
     }
 
     public Order createBuyOrder(UUID owner, ICommodity commodity, int quantity,
                                  java.math.BigDecimal pricePerUnit, net.minecraft.server.level.ServerLevel level) {
-        Order order = new Order(owner, commodity, quantity, pricePerUnit, IOrder.OrderType.BUY, null);
+        return createBuyOrder(owner, commodity, quantity, pricePerUnit, false, level);
+    }
+
+    public Order createBuyOrder(UUID owner, ICommodity commodity, int quantity,
+                                 java.math.BigDecimal pricePerUnit, boolean isInfinite, net.minecraft.server.level.ServerLevel level) {
+        Order order = new Order(owner, commodity, quantity, quantity, pricePerUnit, IOrder.OrderType.BUY, null, NonNullList.create(), isInfinite);
 
         List<Order> matchingSellOrders = getSellOrders(commodity).stream()
                 .filter(s -> s.getPricePerUnit().compareTo(pricePerUnit) <= 0 && !s.getOwner().equals(owner))
@@ -109,11 +114,13 @@ public class OrderManager {
                 .collect(Collectors.toList());
 
         for (Order sellOrder : matchingSellOrders) {
-            if (order.getQuantity() <= 0) break;
-            int matchQty = Math.min(order.getQuantity(), sellOrder.getQuantity());
+            if (!order.isInfinite() && order.getQuantity() <= 0) break;
+            int matchQty = order.isInfinite() ? sellOrder.getQuantity() : Math.min(order.getQuantity(), sellOrder.getQuantity());
             IOrder.TransactionResult result = sellOrder.executePartial(owner, matchQty, level);
             if (result.success) {
-                order.reduceQuantity(matchQty);
+                if (!order.isInfinite()) {
+                    order.reduceQuantity(result.quantityTransferred);
+                }
                 if (backingData != null) {
                     if (sellOrder.getQuantity() == 0) backingData.removeOrder(sellOrder.getOrderId());
                     else backingData.putOrder(sellOrder.toSnapshot());
@@ -122,13 +129,68 @@ public class OrderManager {
         }
         cleanupOrders();
 
-        if (order.getQuantity() > 0) {
+        if (order.isValid()) {
             registerOrder(order);
             return order;
         } else if (backingData != null) {
             backingData.removeOrder(order.getOrderId());
         }
         return null;
+    }
+
+    public boolean editOrder(UUID orderId, UUID requester, int newQuantity, java.math.BigDecimal newPrice, boolean isInfinite, net.minecraft.server.level.ServerLevel level) {
+        Order order = orders.get(orderId);
+        if (order == null || !order.getOwner().equals(requester) || !order.isValid()) {
+            return false;
+        }
+
+        if (order.getType() == IOrder.OrderType.SELL) {
+            if (order.getCommodity() instanceof ItemCommodity ic && level != null) {
+                net.minecraft.world.item.Item item = ic.getItem();
+                int currentQty = order.getQuantity();
+                if (newQuantity > currentQty) {
+                    int needed = newQuantity - currentQty;
+                    int available = com.nstut.economy.blocks.VaultManager.countItemInVaults(level, requester, item);
+                    if (available < needed) {
+                        return false;
+                    }
+                    com.nstut.economy.blocks.VaultManager.extractItemFromVaults(level, requester, item, needed, order.getReservedItems());
+                } else if (newQuantity < currentQty) {
+                    int excess = currentQty - newQuantity;
+                    NonNullList<ItemStack> returnItems = NonNullList.create();
+                    int countToReturn = excess;
+                    var it = order.getReservedItems().iterator();
+                    while (it.hasNext() && countToReturn > 0) {
+                        ItemStack stack = it.next();
+                        if (stack.isEmpty()) continue;
+                        int take = Math.min(countToReturn, stack.getCount());
+                        ItemStack split = stack.split(take);
+                        returnItems.add(split);
+                        countToReturn -= take;
+                        if (stack.isEmpty()) it.remove();
+                    }
+                    if (!returnItems.isEmpty()) {
+                        com.nstut.economy.blocks.VaultManager.insertItemStacksToVaults(level, requester, returnItems);
+                    }
+                }
+            }
+            order.setQuantity(newQuantity);
+            order.setPricePerUnit(newPrice);
+            order.setInfinite(false);
+        } else {
+            order.setPricePerUnit(newPrice);
+            order.setInfinite(isInfinite);
+            if (!isInfinite) {
+                order.setQuantity(newQuantity);
+            }
+        }
+
+        if (backingData != null) {
+            backingData.putOrder(order.toSnapshot());
+        }
+
+        matchAllPendingOrders(level);
+        return true;
     }
 
     private static NonNullList<ItemStack> copyStacks(NonNullList<ItemStack> original) {
@@ -292,14 +354,16 @@ public class OrderManager {
 
             for (Order buyOrder : matchingBuyOrders) {
                 if (!sellOrder.isValid()) break;
-                int matchQty = Math.min(sellOrder.getQuantity(), buyOrder.getQuantity());
+                int matchQty = buyOrder.isInfinite() ? sellOrder.getQuantity() : Math.min(sellOrder.getQuantity(), buyOrder.getQuantity());
                 if (matchQty <= 0) continue;
 
                 IOrder.TransactionResult result = sellOrder.executePartial(buyOrder.getOwner(), matchQty, level);
                 if (result.success) {
-                    buyOrder.reduceQuantity(matchQty);
+                    if (!buyOrder.isInfinite()) {
+                        buyOrder.reduceQuantity(result.quantityTransferred);
+                    }
                     if (backingData != null) {
-                        if (buyOrder.getQuantity() == 0) backingData.removeOrder(buyOrder.getOrderId());
+                        if (!buyOrder.isInfinite() && buyOrder.getQuantity() == 0) backingData.removeOrder(buyOrder.getOrderId());
                         else backingData.putOrder(buyOrder.toSnapshot());
                         if (sellOrder.getQuantity() == 0) backingData.removeOrder(sellOrder.getOrderId());
                         else backingData.putOrder(sellOrder.toSnapshot());

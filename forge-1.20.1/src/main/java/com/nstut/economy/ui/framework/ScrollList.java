@@ -54,37 +54,50 @@ public class ScrollList extends UIComponent {
         int maxScroll = Math.max(0, total - maxVisible);
         scrollOffset = Math.max(0, Math.min(scrollOffset, maxScroll));
 
-        for (int i = 0; i < maxVisible; i++) {
+        int renderCount = Math.min(maxVisible + 1, total - scrollOffset);
+        for (int i = 0; i < renderCount; i++) {
             int idx = scrollOffset + i;
             if (idx >= total) break;
             int iy = y + i * itemHeight;
-            boolean itemHovered = mx >= x && mx < x + width - 4 && my >= iy && my < iy + itemHeight;
-            itemRenderer.render(g, font, idx, x, iy, width - 4, mx, my, itemHovered);
+            if (iy + itemHeight > y + height && i >= maxVisible) break;
+            boolean itemHovered = mx >= x && mx < x + width - 8 && my >= iy && my < iy + itemHeight && my < y + height;
+            itemRenderer.render(g, font, idx, x, iy, width - 8, mx, my, itemHovered);
         }
 
         if (maxScroll > 0) {
-            int trackX = x + width - 4;
-            int trackH = maxVisible * itemHeight;
-            int thumbH = Math.max(6, trackH * maxVisible / total);
+            int trackX = x + width - 6;
+            int trackH = height;
+            int thumbH = Math.max(10, trackH * maxVisible / total);
             int thumbY = scrollOffset * (trackH - thumbH) / maxScroll;
-            g.fill(trackX, y, trackX + 3, y + trackH, trackColor);
-            g.fill(trackX, y + thumbY, trackX + 3, y + thumbY + thumbH, thumbColor);
+            g.fill(trackX, y, trackX + 5, y + trackH, trackColor);
+            g.fill(trackX, y + thumbY, trackX + 5, y + thumbY + thumbH, thumbColor);
         }
     }
+
+    private double scrollAccumulator = 0.0;
+    private boolean isDraggingScrollbar = false;
 
     @Override
     public boolean mouseClicked(double mx, double my, int button) {
         if (!visible) return false;
+        if (mx < x || mx >= x + width || my < y || my >= y + height) return false;
+
         int total = itemCount.getAsInt();
-        boolean inside = mx >= x && mx < x + width - 4 && my >= y && my < y + height;
-        com.nstut.Economy.LOGGER.info("[ScrollList] mouseClicked mx={}, my={}, btn={}, bounds=[x={}, y={}, w={}, h={}], total={}, inside={}",
-            mx, my, button, x, y, width, height, total, inside);
-        if (inside) {
+        int maxVisible = Math.max(1, height / itemHeight);
+        int maxScroll = Math.max(0, total - maxVisible);
+
+        // Scrollbar track or thumb click (rightmost 12 pixels hit area)
+        if (maxScroll > 0 && mx >= x + width - 12 && mx <= x + width) {
+            isDraggingScrollbar = true;
+            updateScrollFromMouseY(my, total, maxVisible, maxScroll);
+            return true;
+        }
+
+        // Item click inside item region
+        if (mx >= x && mx < x + width - 12) {
             int idx = scrollOffset + ((int) my - y) / itemHeight;
-            com.nstut.Economy.LOGGER.info("[ScrollList] Calculated item index={}", idx);
             if (idx >= 0 && idx < total) {
                 if (onItemClick != null) {
-                    com.nstut.Economy.LOGGER.info("[ScrollList] Invoking onItemClick for index={}", idx);
                     onItemClick.onClick(idx, button, (int) mx, (int) my);
                 }
                 return true;
@@ -94,12 +107,59 @@ public class ScrollList extends UIComponent {
     }
 
     @Override
-    public boolean mouseScrolled(double mx, double my, double delta) {
-        if (!visible) return false;
-        scrollOffset -= (int) delta;
+    public boolean mouseDragged(double mx, double my, int button, double dragX, double dragY) {
+        if (!visible || !isDraggingScrollbar) return false;
+        int total = itemCount.getAsInt();
+        int maxVisible = Math.max(1, height / itemHeight);
+        int maxScroll = Math.max(0, total - maxVisible);
+        if (maxScroll > 0) {
+            updateScrollFromMouseY(my, total, maxVisible, maxScroll);
+        }
         return true;
     }
 
-    public void resetScroll() { scrollOffset = 0; }
+    @Override
+    public boolean mouseReleased(double mx, double my, int button) {
+        if (isDraggingScrollbar) {
+            isDraggingScrollbar = false;
+            return true;
+        }
+        return false;
+    }
+
+    private void updateScrollFromMouseY(double my, int total, int maxVisible, int maxScroll) {
+        int trackH = height;
+        int thumbH = Math.max(10, trackH * maxVisible / total);
+        if (trackH - thumbH <= 0) return;
+        double relY = Math.max(0, Math.min(trackH - thumbH, my - y - thumbH / 2.0));
+        scrollOffset = (int) Math.round((relY / (double) (trackH - thumbH)) * maxScroll);
+        scrollOffset = Math.max(0, Math.min(scrollOffset, maxScroll));
+    }
+
+    @Override
+    public boolean mouseScrolled(double mx, double my, double delta) {
+        if (!visible) return false;
+        if (mx < x || mx >= x + width || my < y || my >= y + height) return false;
+
+        int total = itemCount.getAsInt();
+        int maxVisible = Math.max(1, height / itemHeight);
+        int maxScroll = Math.max(0, total - maxVisible);
+        if (maxScroll <= 0) return false;
+
+        scrollAccumulator += delta;
+        if (Math.abs(scrollAccumulator) >= 0.5) {
+            int steps = (int) Math.signum(scrollAccumulator);
+            scrollOffset -= steps;
+            scrollAccumulator -= steps;
+            scrollOffset = Math.max(0, Math.min(scrollOffset, maxScroll));
+        }
+        return true;
+    }
+
+    public void resetScroll() {
+        scrollOffset = 0;
+        scrollAccumulator = 0.0;
+        isDraggingScrollbar = false;
+    }
 }
 

@@ -26,28 +26,35 @@ public class Order implements IOrder {
     private final ICommodity commodity;
     private int quantity;
     private final int initialQuantity;
-    private final BigDecimal pricePerUnit;
+    private BigDecimal pricePerUnit;
     private final OrderType type;
     private final Instant createdAt;
     private final Instant expiresAt;
     private boolean cancelled;
     private boolean serverOrder;
+    private boolean isInfinite;
     private final NonNullList<ItemStack> reservedItems;
 
     public Order(UUID owner, ICommodity commodity, int quantity,
                  BigDecimal pricePerUnit, OrderType type, Instant expiresAt) {
-        this(owner, commodity, quantity, quantity, pricePerUnit, type, expiresAt, NonNullList.create());
+        this(owner, commodity, quantity, quantity, pricePerUnit, type, expiresAt, NonNullList.create(), false);
     }
 
     public Order(UUID owner, ICommodity commodity, int quantity,
                  BigDecimal pricePerUnit, OrderType type, Instant expiresAt,
                  NonNullList<ItemStack> reservedItems) {
-        this(owner, commodity, quantity, quantity, pricePerUnit, type, expiresAt, reservedItems);
+        this(owner, commodity, quantity, quantity, pricePerUnit, type, expiresAt, reservedItems, false);
     }
 
     public Order(UUID owner, ICommodity commodity, int quantity, int initialQuantity,
                  BigDecimal pricePerUnit, OrderType type, Instant expiresAt,
                  NonNullList<ItemStack> reservedItems) {
+        this(owner, commodity, quantity, initialQuantity, pricePerUnit, type, expiresAt, reservedItems, false);
+    }
+
+    public Order(UUID owner, ICommodity commodity, int quantity, int initialQuantity,
+                 BigDecimal pricePerUnit, OrderType type, Instant expiresAt,
+                 NonNullList<ItemStack> reservedItems, boolean isInfinite) {
         this.orderId = UUID.randomUUID();
         this.owner = owner;
         this.commodity = commodity;
@@ -59,6 +66,7 @@ public class Order implements IOrder {
         this.expiresAt = expiresAt;
         this.cancelled = false;
         this.reservedItems = reservedItems;
+        this.isInfinite = isInfinite;
     }
 
     public static Order fromSnapshot(EconomyOrderData.OrderSnapshot snap) {
@@ -69,7 +77,7 @@ public class Order implements IOrder {
         Order order = new Order(snap.owner, commodity, snap.quantity, snap.initialQuantity,
             new BigDecimal(snap.pricePerUnit),
             snap.type.equals("SELL") ? OrderType.SELL : OrderType.BUY,
-            expires, snap.reservedItems);
+            expires, snap.reservedItems, snap.isInfinite);
         setField(order, "orderId", snap.orderId);
         setField(order, "createdAt", Instant.ofEpochMilli(snap.createdAt));
         if (snap.isServerOrder) {
@@ -93,7 +101,7 @@ public class Order implements IOrder {
             quantity, initialQuantity, pricePerUnit.toPlainString(),
             type.name(), createdAt.toEpochMilli(),
             expiresAt != null ? expiresAt.toEpochMilli() : 0,
-            expiresAt != null, reservedItems, serverOrder
+            expiresAt != null, reservedItems, serverOrder, isInfinite
         );
     }
 
@@ -149,9 +157,28 @@ public class Order implements IOrder {
         return expiresAt;
     }
 
+    public boolean isInfinite() {
+        return isInfinite;
+    }
+
+    public void setInfinite(boolean isInfinite) {
+        this.isInfinite = isInfinite;
+    }
+
+    public void setPricePerUnit(BigDecimal pricePerUnit) {
+        this.pricePerUnit = pricePerUnit;
+    }
+
+    public void setQuantity(int quantity) {
+        this.quantity = quantity;
+    }
+
     @Override
     public boolean isValid() {
-        if (cancelled || quantity <= 0) {
+        if (cancelled) {
+            return false;
+        }
+        if (!isInfinite && quantity <= 0) {
             return false;
         }
         if (expiresAt != null && Instant.now().isAfter(expiresAt)) {
@@ -237,8 +264,8 @@ public class Order implements IOrder {
         int tradedQty = this.quantity;
         this.quantity = 0;
         TradeLedger.recordTrade(commodity.getId().toString(), pricePerUnit, tradedQty, buyer, owner);
-        notifyPlayerTrade(level, buyer, true, commodity.getDisplayName().getString(), tradedQty, totalPrice);
-        notifyPlayerTrade(level, owner, false, commodity.getDisplayName().getString(), tradedQty, totalPrice);
+        notifyPlayerTrade(level, buyer, owner, true, commodity.getDisplayName().getString(), tradedQty, pricePerUnit, totalPrice);
+        notifyPlayerTrade(level, owner, buyer, false, commodity.getDisplayName().getString(), tradedQty, pricePerUnit, totalPrice);
         return TransactionResult.success("Purchase successful", totalPrice, tradedQty);
     }
 
@@ -276,8 +303,8 @@ public class Order implements IOrder {
         int tradedQty = this.quantity;
         this.quantity = 0;
         TradeLedger.recordTrade(commodity.getId().toString(), pricePerUnit, tradedQty, owner, seller);
-        notifyPlayerTrade(level, owner, true, commodity.getDisplayName().getString(), tradedQty, totalPrice);
-        notifyPlayerTrade(level, seller, false, commodity.getDisplayName().getString(), tradedQty, totalPrice);
+        notifyPlayerTrade(level, owner, seller, true, commodity.getDisplayName().getString(), tradedQty, pricePerUnit, totalPrice);
+        notifyPlayerTrade(level, seller, owner, false, commodity.getDisplayName().getString(), tradedQty, pricePerUnit, totalPrice);
         return TransactionResult.success("Sale successful", totalPrice, tradedQty);
     }
 
@@ -360,8 +387,8 @@ public class Order implements IOrder {
 
             this.quantity -= tradeQty;
             TradeLedger.recordTrade(commodity.getId().toString(), pricePerUnit, tradeQty, trader, owner);
-            notifyPlayerTrade(level, trader, true, commodity.getDisplayName().getString(), tradeQty, totalPrice);
-            notifyPlayerTrade(level, owner, false, commodity.getDisplayName().getString(), tradeQty, totalPrice);
+            notifyPlayerTrade(level, trader, owner, true, commodity.getDisplayName().getString(), tradeQty, pricePerUnit, totalPrice);
+            notifyPlayerTrade(level, owner, trader, false, commodity.getDisplayName().getString(), tradeQty, pricePerUnit, totalPrice);
             if (level != null) {
                 com.nstut.economy.data.EconomyAccountData.recordSnapshot(trader, level);
                 com.nstut.economy.data.EconomyAccountData.recordSnapshot(owner, level);
@@ -404,10 +431,12 @@ public class Order implements IOrder {
                 return TransactionResult.failure("Payment failed");
             }
 
-            this.quantity -= tradeQty;
+            if (!isInfinite) {
+                this.quantity -= tradeQty;
+            }
             TradeLedger.recordTrade(commodity.getId().toString(), pricePerUnit, tradeQty, owner, trader);
-            notifyPlayerTrade(level, owner, true, commodity.getDisplayName().getString(), tradeQty, totalPrice);
-            notifyPlayerTrade(level, trader, false, commodity.getDisplayName().getString(), tradeQty, totalPrice);
+            notifyPlayerTrade(level, owner, trader, true, commodity.getDisplayName().getString(), tradeQty, pricePerUnit, totalPrice);
+            notifyPlayerTrade(level, trader, owner, false, commodity.getDisplayName().getString(), tradeQty, pricePerUnit, totalPrice);
             if (level != null) {
                 com.nstut.economy.data.EconomyAccountData.recordSnapshot(owner, level);
                 com.nstut.economy.data.EconomyAccountData.recordSnapshot(trader, level);
@@ -416,7 +445,7 @@ public class Order implements IOrder {
         }
     }
 
-    private static void notifyPlayerTrade(ServerLevel level, UUID playerUUID, boolean isBuy, String itemName, int qty, BigDecimal totalPrice) {
+    private static void notifyPlayerTrade(ServerLevel level, UUID playerUUID, UUID counterpartyUUID, boolean isBuy, String itemName, int qty, BigDecimal pricePerUnit, BigDecimal totalPrice) {
         if (level == null || playerUUID == null) return;
         net.minecraft.server.level.ServerPlayer p = level.getServer().getPlayerList().getPlayer(playerUUID);
         if (p != null) {
@@ -424,13 +453,38 @@ public class Order implements IOrder {
                 com.nstut.economy.sound.SoundRegistries.MONEY.get(),
                 net.minecraft.sounds.SoundSource.PLAYERS, 0.8F, 1.0F);
 
+            String counterpartyName = getPlayerName(level, counterpartyUUID);
             String action = isBuy ? "Bought" : "Sold";
-            String formattedPrice = com.nstut.economy.util.EconomyFormatUtil.formatCompact(totalPrice);
+            String prep = isBuy ? "from" : "to";
+            String formattedTotal = com.nstut.economy.util.EconomyFormatUtil.formatCompact(totalPrice);
+            String formattedUnit = com.nstut.economy.util.EconomyFormatUtil.formatCompact(pricePerUnit);
+
+            String costDetails = (qty > 1) 
+                ? ("§e" + formattedUnit + " §fcoins each (Total: §e" + formattedTotal + " §fcoins)")
+                : ("§e" + formattedTotal + " §fcoins");
+
             net.minecraft.network.chat.Component msg = net.minecraft.network.chat.Component.literal(
-                "§2[Market] §aOrder Matched! §f" + action + " §e" + qty + "x " + itemName + " §ffor §e" + formattedPrice + " §fcoins."
+                "§2[Market] §aOrder Matched! §f" + action + " §e" + qty + "x " + itemName + " §ffor " + costDetails + " " + prep + " §b" + counterpartyName + "§f."
             );
             p.sendSystemMessage(msg);
         }
+    }
+
+    private static String getPlayerName(ServerLevel level, UUID uuid) {
+        if (uuid == null || OrderManager.SERVER_ID.equals(uuid)) {
+            return "Server";
+        }
+        net.minecraft.server.level.ServerPlayer p = level.getServer().getPlayerList().getPlayer(uuid);
+        if (p != null) {
+            return p.getName().getString();
+        }
+        if (level.getServer() != null && level.getServer().getProfileCache() != null) {
+            var profileOpt = level.getServer().getProfileCache().get(uuid);
+            if (profileOpt != null && profileOpt.isPresent()) {
+                return profileOpt.get().getName();
+            }
+        }
+        return "Server";
     }
 
     private int capByFunds(int tradeQty, IBankAccount account) {

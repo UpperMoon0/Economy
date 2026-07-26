@@ -37,4 +37,16 @@ public class SizedBox extends UIComponent {
         for (UIComponent c : children) if (c.isVisible() && c.mouseScrolled(mx, my, delta)) return true;
         return false;
     }
+
+    @Override
+    public boolean mouseDragged(double mx, double my, int button, double dragX, double dragY) {
+        for (UIComponent c : children) if (c.isVisible() && c.mouseDragged(mx, my, button, dragX, dragY)) return true;
+        return false;
+    }
+
+    @Override
+    public boolean mouseReleased(double mx, double my, int button) {
+        for (UIComponent c : children) if (c.isVisible() && c.mouseReleased(mx, my, button)) return true;
+        return false;
+    }
 }

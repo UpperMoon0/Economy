@@ -49,6 +49,8 @@ public abstract class UIComponent {
 
     public boolean mouseClicked(double mx, double my, int button) { return false; }
     public boolean mouseScrolled(double mx, double my, double delta) { return false; }
+    public boolean mouseDragged(double mx, double my, int button, double dragX, double dragY) { return false; }
+    public boolean mouseReleased(double mx, double my, int button) { return false; }
 
     public UIComponent hitTest(int mx, int my) {
         if (!visible) return null;
@@ -68,7 +70,7 @@ public abstract class UIComponent {
         for (UIComponent c : children) c.preRender(mx, my);
     }
 
-    protected boolean isHovered() { return hovered; }
+    public boolean isHovered() { return hovered; }
 
     public void dispose() {
         for (UIComponent c : children) c.dispose();

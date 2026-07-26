@@ -26,7 +26,7 @@ import java.util.Map;
 public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
 
     private static final int SCREEN_W = 320;
-    private static final int SCREEN_H = 220;
+    private static final int SCREEN_H = 240;
 
     private static final int BG_DARK = 0xFF141424;
     private static final int PANEL = 0xFF1E1E30;
@@ -99,6 +99,24 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
             }
             return false;
         }
+
+        @Override
+        public boolean mouseDragged(double mx, double my, int button, double dragX, double dragY) {
+            if (!visible) return false;
+            for (UIComponent c : children) {
+                if (c.isVisible() && c.mouseDragged(mx, my, button, dragX, dragY)) return true;
+            }
+            return false;
+        }
+
+        @Override
+        public boolean mouseReleased(double mx, double my, int button) {
+            if (!visible) return false;
+            for (UIComponent c : children) {
+                if (c.isVisible() && c.mouseReleased(mx, my, button)) return true;
+            }
+            return false;
+        }
     }
 
     private static void renderSmallCoin(GuiGraphics g, int x, int y) {
@@ -134,19 +152,51 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
     private UIComponent browser, detail, createOffer;
     private EditBoxWrapper qtyField, priceField, itemIdField;
 
-    private String searchQuery = "";
-    private String historySearchQuery = "";
-    private int viewMode = 0;
+    private String selectedItemId = null;
     private int createOrderSourceMode = 0;
-    private String selectedItemId;
-    private boolean createSellMode = true;
+    private boolean createSellMode = false;
     private UIComponent historyView;
     private UIComponent vaultsView;
     private UIComponent portfolioView;
 
+    private static String savedSearchQuery = "";
+    private static String savedHistorySearchQuery = "";
+    private static int savedBrowseFilterMode = 0; // 0 = All, 1 = Active Only
+    private static int savedBrowseSortMode = 0;   // 0 = Price ▲, 1 = Price ▼, 2 = Name A-Z, 3 = Most Active
+    private static int savedHistoryFilterMode = 0; // 0 = All Trades, 1 = Sales Only, 2 = Purchases Only
+    private static int savedHistorySortMode = 0;   // 0 = Newest, 1 = Oldest, 2 = Highest Total
+    private static int savedViewMode = 0;
+
+    private String searchQuery = savedSearchQuery;
+    private String historySearchQuery = savedHistorySearchQuery;
+    private int viewMode = savedViewMode;
+    private static int savedOrdersSubTab = 0; // 0 = Active Orders, 1 = History
+    private int ordersSubTab = savedOrdersSubTab;
+    private UIComponent ordersView;
+    private UIComponent activeOrdersContainer;
+    private ButtonWidget ordersActiveTabBtn;
+    private ButtonWidget ordersHistoryTabBtn;
+
+    private boolean isCreateInfinite = false;
+    private ButtonWidget infiniteBuyBtn;
+
+    private MarketNetwork.ActiveOrderEntry editingOrder = null;
+    private EditBoxWrapper editQtyField = null;
+    private EditBoxWrapper editPriceField = null;
+    private boolean editIsInfinite = false;
+    private String editErrorMsg = null;
+
+    private static final int MAX_VISIBLE_CHART_STEPS = 15;
+    private static final java.text.SimpleDateFormat CHART_TIME_FMT = new java.text.SimpleDateFormat("MM/dd HH:mm:ss");
+    private int detailChartOffset = 0;
+    private int portfolioChartOffset = 0;
+    private int detailLiveBtnX, detailLiveBtnY, detailLiveBtnW, detailLiveBtnH;
+    private int portfolioLiveBtnX, portfolioLiveBtnY, portfolioLiveBtnW, portfolioLiveBtnH;
+
     private static List<MarketNetwork.VaultDetailEntry> cachedVaultEntries = new ArrayList<>();
     private static List<MarketNetwork.PortfolioPointData> cachedPortfolioPoints = new ArrayList<>();
     private static List<MarketNetwork.AssetHoldingData> cachedAssetHoldings = new ArrayList<>();
+    private static List<MarketNetwork.ActiveOrderEntry> cachedActiveOrders = new ArrayList<>();
 
     public static void handleSyncVaultInfo(MarketNetwork.SyncVaultInfoPacket pkt) {
         cachedVaultEntries = pkt.entries;
@@ -157,14 +207,18 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         cachedAssetHoldings = pkt.holdings;
     }
 
+    public static void handleSyncActiveOrders(MarketNetwork.SyncActiveOrdersPacket pkt) {
+        cachedActiveOrders = pkt.entries;
+    }
+
     private EditBoxWrapper historySearchField;
 
-    private int browseFilterMode = 0; // 0 = All, 1 = Active Only
-    private int browseSortMode = 0;   // 0 = Price ▲, 1 = Price ▼, 2 = Name A-Z, 3 = Most Active
+    private int browseFilterMode = savedBrowseFilterMode;
+    private int browseSortMode = savedBrowseSortMode;
     private ButtonWidget browseFilterBtn, browseSortBtn;
 
-    private int historyFilterMode = 0; // 0 = All Trades, 1 = Sales Only, 2 = Purchases Only
-    private int historySortMode = 0;   // 0 = Newest, 1 = Oldest, 2 = Highest Total
+    private int historyFilterMode = savedHistoryFilterMode;
+    private int historySortMode = savedHistorySortMode;
     private ButtonWidget historyFilterBtn, historySortBtn;
 
     private String getBrowseFilterLabel() {
@@ -206,24 +260,38 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         final int quantity;
         final String priceStr;
         final boolean isSell;
+        final boolean isInfinite;
         final String action;
         final String itemName;
         final String totalPrice;
 
-        PendingOrderExecution(String itemId, int quantity, String priceStr, boolean isSell, String action, String itemName, String totalPrice) {
+        PendingOrderExecution(String itemId, int quantity, String priceStr, boolean isSell, boolean isInfinite, String action, String itemName, String totalPrice) {
             this.itemId = itemId; this.quantity = quantity; this.priceStr = priceStr;
-            this.isSell = isSell; this.action = action; this.itemName = itemName;
+            this.isSell = isSell; this.isInfinite = isInfinite; this.action = action; this.itemName = itemName;
             this.totalPrice = totalPrice;
+        }
+
+        PendingOrderExecution(String itemId, int quantity, String priceStr, boolean isSell, String action, String itemName, String totalPrice) {
+            this(itemId, quantity, priceStr, isSell, false, action, itemName, totalPrice);
         }
     }
     private PendingOrderExecution pendingConfirmation = null;
 
     /** Lightweight struct used only for the late-render dropdown pass. */
     private static class ItemDropdownData {
-        final int x, y, w;
-        final List<ItemSearchResult> results;
-        ItemDropdownData(int x, int y, int w, List<ItemSearchResult> results) {
-            this.x = x; this.y = y; this.w = w; this.results = results;
+        int x, y, w;
+        String query;
+        List<ItemSearchResult> results;
+        int scrollOffset = 0;
+        boolean isDraggingScrollbar = false;
+        ItemDropdownData(int x, int y, int w, String query, List<ItemSearchResult> results) {
+            this.x = x; this.y = y; this.w = w; this.query = query; this.results = results;
+        }
+        void update(int x, int y, int w, List<ItemSearchResult> newResults) {
+            this.x = x; this.y = y; this.w = w; this.results = newResults;
+            int visibleRows = Math.min(results.size(), 6);
+            int maxScroll = Math.max(0, results.size() - visibleRows);
+            this.scrollOffset = Math.max(0, Math.min(scrollOffset, maxScroll));
         }
     }
 
@@ -258,12 +326,21 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
     @Override
     protected void init() {
         super.init();
+        editQtyField = new EditBoxWrapper(10, TEXT_PRIMARY, PANEL, this.font).setPlaceholder("Qty");
+        editPriceField = new EditBoxWrapper(20, TEXT_PRIMARY, PANEL, this.font).setPlaceholder("Price");
+        editQtyField.setVisible(false);
+        editPriceField.setVisible(false);
+
         buildTree();
         if (searchField != null) this.addRenderableWidget(searchField.getEditBox());
         if (historySearchField != null) this.addRenderableWidget(historySearchField.getEditBox());
         if (itemIdField != null) this.addRenderableWidget(itemIdField.getEditBox());
         if (qtyField != null) this.addRenderableWidget(qtyField.getEditBox());
         if (priceField != null) this.addRenderableWidget(priceField.getEditBox());
+        this.addRenderableWidget(editQtyField.getEditBox());
+        this.addRenderableWidget(editPriceField.getEditBox());
+
+        switchView(savedViewMode == 1 || savedViewMode == 2 ? 0 : savedViewMode);
         MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestRefreshPacket());
     }
 
@@ -297,6 +374,28 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
             priceField.getEditBox().setY(priceField.getY() + 3);
             priceField.getEditBox().setWidth(Math.max(10, priceField.getWidth() - 8));
             priceField.getEditBox().setHeight(12);
+        }
+        if (editingOrder != null && editQtyField != null && editPriceField != null) {
+            int modalW = 220;
+            int modalH = 140;
+            int modalX = left() + (SCREEN_W - modalW) / 2;
+            int modalY = top() + (SCREEN_H - modalH) / 2;
+            int qtyW = editingOrder.isSell ? 196 : 166;
+
+            editQtyField.getEditBox().setX(modalX + 16);
+            editQtyField.getEditBox().setY(modalY + 46);
+            editQtyField.getEditBox().setWidth(qtyW - 8);
+            editQtyField.getEditBox().setHeight(10);
+            editQtyField.getEditBox().visible = true;
+
+            editPriceField.getEditBox().setX(modalX + 16);
+            editPriceField.getEditBox().setY(modalY + 68);
+            editPriceField.getEditBox().setWidth(188);
+            editPriceField.getEditBox().setHeight(10);
+            editPriceField.getEditBox().visible = true;
+        } else {
+            if (editQtyField != null) editQtyField.getEditBox().visible = false;
+            if (editPriceField != null) editPriceField.getEditBox().visible = false;
         }
     }
 
@@ -362,9 +461,11 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         });
         sidebar.addChild(new PaddingBox(0, 4, 0, 4, newOrderBtn));
 
-        orderHistoryBtn = btn("History", PANEL, CARD_HOVER).onPress(() -> {
+        orderHistoryBtn = btn("Orders", PANEL, CARD_HOVER).onPress(() -> {
             cachedHistory = new ArrayList<>();
+            cachedActiveOrders = new ArrayList<>();
             switchView(3);
+            MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestActiveOrdersPacket());
             MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestOrderHistoryPacket());
         });
         sidebar.addChild(new PaddingBox(0, 4, 0, 4, orderHistoryBtn));
@@ -392,11 +493,11 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         createOffer.setVisible(false);
         contentArea.addChild(createOffer);
 
-        UIComponent history = buildHistory(font);
-        history.flex();
-        history.setVisible(false);
-        this.historyView = history;
-        contentArea.addChild(history);
+        UIComponent orders = buildOrdersView(font);
+        orders.flex();
+        orders.setVisible(false);
+        this.ordersView = orders;
+        contentArea.addChild(orders);
 
         UIComponent vaults = buildVaults(font);
         vaults.flex();
@@ -421,12 +522,17 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
 
     private UIComponent buildBrowser(Font font) {
         VStack v = new VStack().gap(4);
+        searchQuery = savedSearchQuery;
         searchField = new EditBoxWrapper(60, TEXT_PRIMARY, PANEL, font).setPlaceholder("Search products...");
+        if (savedSearchQuery != null && !savedSearchQuery.isEmpty()) {
+            searchField.setValue(savedSearchQuery);
+        }
         v.addChild(searchField);
 
         HStack bar = new HStack().gap(4);
         browseFilterBtn = btn("Filter: " + getBrowseFilterLabel(), PANEL, CARD_HOVER).onPress(() -> {
             browseFilterMode = (browseFilterMode + 1) % 2;
+            savedBrowseFilterMode = browseFilterMode;
             browseFilterBtn.setLabel("Filter: " + getBrowseFilterLabel());
         });
         browseFilterBtn.flex();
@@ -434,6 +540,7 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
 
         browseSortBtn = btn("Sort: " + getBrowseSortLabel(), PANEL, CARD_HOVER).onPress(() -> {
             browseSortMode = (browseSortMode + 1) % 4;
+            savedBrowseSortMode = browseSortMode;
             browseSortBtn.setLabel("Sort: " + getBrowseSortLabel());
         });
         browseSortBtn.flex();
@@ -570,8 +677,19 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
 
                 if (cachedDetail != null && cachedDetail.chart != null && !cachedDetail.chart.isEmpty()) {
                     List<MarketNetwork.ChartPoint> pts = cachedDetail.chart;
+                    int totalCount = pts.size();
+
+                    int maxOffset = Math.max(0, totalCount - MAX_VISIBLE_CHART_STEPS);
+                    if (detailChartOffset > maxOffset) detailChartOffset = maxOffset;
+                    if (detailChartOffset < 0) detailChartOffset = 0;
+
+                    int endIndex = Math.min(totalCount, Math.max(MAX_VISIBLE_CHART_STEPS, totalCount - detailChartOffset));
+                    int startIndex = Math.max(0, endIndex - MAX_VISIBLE_CHART_STEPS);
+
+                    List<MarketNetwork.ChartPoint> visiblePts = pts.subList(startIndex, endIndex);
+
                     int maxP = Integer.MIN_VALUE, minP = Integer.MAX_VALUE;
-                    for (MarketNetwork.ChartPoint cp : pts) {
+                    for (MarketNetwork.ChartPoint cp : visiblePts) {
                         if (cp.price > maxP) maxP = cp.price;
                         if (cp.price < minP) minP = cp.price;
                     }
@@ -582,8 +700,8 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
                     g.drawString(fnt, formatCompact((double)maxP), x + 3, y + 3, TEXT_MUTED);
                     g.drawString(fnt, formatCompact((double)minP), x + 3, y + height - 11, TEXT_MUTED);
 
-                    // Right current price badge dimensions
-                    int currentPrice = pts.get(pts.size() - 1).price;
+                    // Right side Live / Snap button & Price badge
+                    int currentPrice = visiblePts.get(visiblePts.size() - 1).price;
                     String currentPriceStr = formatCompact((double)currentPrice);
                     int currentPriceW = fnt.width(currentPriceStr);
                     int badgeW = currentPriceW + 8;
@@ -592,24 +710,49 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
                     int rawY = y + height - 6 - (int)((currentPrice - minP) / range * (height - 12));
                     int badgeY = Math.max(y + 2, Math.min(y + height - badgeH - 2, rawY - 5));
 
+                    // LIVE Snap Button
+                    String liveStr = detailChartOffset == 0 ? "LIVE" : "\u25B6 LIVE";
+                    int liveW = fnt.width(liveStr) + 6;
+                    int liveX = badgeX - liveW - 4;
+                    int liveY = y + 2;
+                    int liveH = 11;
+                    detailLiveBtnX = liveX;
+                    detailLiveBtnY = liveY;
+                    detailLiveBtnW = liveW;
+                    detailLiveBtnH = liveH;
+                    boolean liveHover = mx >= liveX && mx < liveX + liveW && my >= liveY && my < liveY + liveH;
+                    int liveBg = detailChartOffset > 0 ? (liveHover ? 0xFF047857 : 0xFF065F46) : (liveHover ? CARD_HOVER : 0xFF003024);
+                    int liveBorder = detailChartOffset > 0 ? GREEN : (liveHover ? ACCENT : PANEL_BORDER);
+                    g.fill(liveX, liveY, liveX + liveW, liveY + liveH, liveBg);
+                    g.fill(liveX, liveY, liveX + liveW, liveY + 1, liveBorder);
+                    g.fill(liveX, liveY + liveH - 1, liveX + liveW, liveY + liveH, liveBorder);
+                    g.fill(liveX, liveY, liveX + 1, liveY + liveH, liveBorder);
+                    g.fill(liveX + liveW - 1, liveY, liveX + liveW, liveY + liveH, liveBorder);
+                    g.drawString(fnt, liveStr, liveX + 3, liveY + 2, detailChartOffset > 0 ? 0xFFFFFFFF : ACCENT);
+                    if (liveHover && detailChartOffset > 0) {
+                        pendingTooltip = "Click to snap back to current live time";
+                    }
+
                     // Dotted line stops before reaching the right price badge
                     int lineY = rawY;
                     int chartLeft = x + 26;
-                    int chartRight = badgeX - 4;
+                    int chartRight = liveX - 4;
                     int dotStep = 4;
                     for (int lx = chartLeft; lx <= chartRight; lx += dotStep) {
                         g.fill(lx, lineY, Math.min(lx + 2, chartRight), lineY + 1, ACCENT_DIM);
                     }
 
                     // Line graph plot & interactive nodes
-                    int ptsCount = pts.size();
+                    int ptsCount = visiblePts.size();
                     for (int i = 0; i < ptsCount; i++) {
+                        MarketNetwork.ChartPoint cp = visiblePts.get(i);
                         int x0 = chartLeft + i * (chartRight - chartLeft) / Math.max(1, ptsCount - 1);
-                        int y0 = y + height - 6 - (int)((pts.get(i).price - minP) / range * (height - 12));
+                        int y0 = y + height - 6 - (int)((cp.price - minP) / range * (height - 12));
 
                         if (i > 0) {
+                            MarketNetwork.ChartPoint cpPrev = visiblePts.get(i - 1);
                             int xPrev = chartLeft + (i - 1) * (chartRight - chartLeft) / Math.max(1, ptsCount - 1);
-                            int yPrev = y + height - 6 - (int)((pts.get(i - 1).price - minP) / range * (height - 12));
+                            int yPrev = y + height - 6 - (int)((cpPrev.price - minP) / range * (height - 12));
                             drawLine(g, xPrev, yPrev, x0, y0, CHART_LINE);
                         }
 
@@ -618,11 +761,12 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
                         int dotClr = nodeHover ? 0xFFFFFFFF : ACCENT;
                         g.fill(x0 - 1, y0 - 1, x0 + 2, y0 + 2, dotClr);
                         if (nodeHover) {
-                            pendingTooltip = "Price: $" + pts.get(i).price + " | Volume: " + pts.get(i).quantity;
+                            String timeStr = cp.timestamp > 0 ? CHART_TIME_FMT.format(new java.util.Date(cp.timestamp)) : "Step " + (startIndex + i + 1);
+                            pendingTooltip = "Time: " + timeStr + "\nPrice: $" + cp.price + "\nVolume: " + cp.quantity;
                         }
                     }
 
-                    // Draw right current price badge pill container on top of chart background
+                    // Draw right current price badge pill container
                     g.fill(badgeX, badgeY, badgeX + badgeW, badgeY + badgeH, 0xFF003024);
                     g.fill(badgeX, badgeY, badgeX + badgeW, badgeY + 1, ACCENT);
                     g.fill(badgeX, badgeY + badgeH - 1, badgeX + badgeW, badgeY + badgeH, ACCENT);
@@ -971,7 +1115,11 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
                         int dx = itemIdField != null ? itemIdField.getX() : x;
                         int dy = itemIdField != null ? (itemIdField.getY() + itemIdField.getHeight() + 1) : y;
                         int dw = itemIdField != null ? itemIdField.getWidth() : width;
-                        pendingDropdown = new ItemDropdownData(dx, dy, dw, results);
+                        if (pendingDropdown == null || !query.equalsIgnoreCase(pendingDropdown.query)) {
+                            pendingDropdown = new ItemDropdownData(dx, dy, dw, query, results);
+                        } else {
+                            pendingDropdown.update(dx, dy, dw, results);
+                        }
                     } else {
                         pendingDropdown = null;
                     }
@@ -1010,6 +1158,17 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
             }
         });
         qtyRow.addChild(maxQtyBtn);
+
+        infiniteBuyBtn = btn("∞", PANEL, CARD_HOVER).onPress(() -> {
+            isCreateInfinite = !isCreateInfinite;
+            infiniteBuyBtn.setColors(isCreateInfinite ? 0xFF047857 : PANEL, isCreateInfinite ? 0xFF059669 : CARD_HOVER);
+            if (isCreateInfinite && qtyField != null) {
+                qtyField.setValue("∞");
+            } else if (!isCreateInfinite && qtyField != null && qtyField.getValue().equals("∞")) {
+                qtyField.setValue("");
+            }
+        });
+        qtyRow.addChild(infiniteBuyBtn);
         v.addChild(qtyRow);
 
         priceField = new EditBoxWrapper(20, TEXT_PRIMARY, PANEL, font).setPlaceholder("Price per unit (e.g. 150)");
@@ -1045,6 +1204,9 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         if (maxQtyBtn != null) {
             maxQtyBtn.setVisible(createSellMode);
         }
+        if (infiniteBuyBtn != null) {
+            infiniteBuyBtn.setVisible(!createSellMode);
+        }
     }
 
     private void submitOffer() {
@@ -1070,13 +1232,16 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
             showCreateError("Price must be a valid number.");
             return;
         }
-        int qty;
-        try {
-            qty = Integer.parseInt(qtyField.getValue().trim());
-            if (qty <= 0) { showCreateError("Quantity must be greater than 0."); return; }
-        } catch (NumberFormatException ignored) {
-            showCreateError("Quantity must be a valid number.");
-            return;
+        int qty = 1;
+        boolean inf = !createSellMode && isCreateInfinite;
+        if (!inf) {
+            try {
+                qty = Integer.parseInt(qtyField.getValue().trim());
+                if (qty <= 0) { showCreateError("Quantity must be greater than 0."); return; }
+            } catch (NumberFormatException ignored) {
+                showCreateError("Quantity must be a valid number.");
+                return;
+            }
         }
         if (createSellMode) {
             int stock = getVaultStockForItem(itemId);
@@ -1084,7 +1249,7 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
                 showCreateError("Not enough in vault. You have " + stock + ".");
                 return;
             }
-        } else {
+        } else if (!inf) {
             BigDecimal totalCost = price.multiply(BigDecimal.valueOf(qty));
             try {
                 BigDecimal balance = new BigDecimal(cachedBalance);
@@ -1099,7 +1264,7 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         }
         String actionStr = createSellMode ? "Sell" : "Buy";
         BigDecimal tot = price.multiply(BigDecimal.valueOf(qty));
-        String totStr = tot.setScale(0, java.math.RoundingMode.HALF_UP).toPlainString();
+        String totStr = inf ? "∞ (Per unit: " + price.toPlainString() + ")" : tot.setScale(0, java.math.RoundingMode.HALF_UP).toPlainString();
         String dispName = itemId;
         if (cachedDetail != null && cachedDetail.itemId.equalsIgnoreCase(itemId)) {
             dispName = cachedDetail.displayName;
@@ -1109,7 +1274,7 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
                 dispName = new ItemStack(it).getHoverName().getString();
             }
         }
-        pendingConfirmation = new PendingOrderExecution(itemId, qty, price.toPlainString(), createSellMode, actionStr, dispName, totStr);
+        pendingConfirmation = new PendingOrderExecution(itemId, qty, price.toPlainString(), createSellMode, inf, actionStr, dispName, totStr);
         switchView(viewMode);
     }
 
@@ -1125,17 +1290,20 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         com.nstut.Economy.LOGGER.info("[MarketScreen] switchView browser={}, detail={}, createOffer={}", browser, detail, createOffer);
         com.nstut.Economy.LOGGER.info("[MarketScreen] switchView itemIdField={}, qtyField={}, priceField={}", itemIdField, qtyField, priceField);
         viewMode = mode;
+        savedViewMode = mode;
         if (mode == 0) selectedItemId = null;
         if (browser != null) browser.setVisible(mode == 0);
         if (detail != null) detail.setVisible(mode == 1);
         if (createOffer != null) createOffer.setVisible(mode == 2);
-        if (historyView != null) historyView.setVisible(mode == 3);
+        if (ordersView != null) ordersView.setVisible(mode == 3);
         if (vaultsView != null) vaultsView.setVisible(mode == 4);
         if (portfolioView != null) portfolioView.setVisible(mode == 5);
         if (mode == 2) {
             updateCreateOfferLabels();
             // Reset dropdown guard whenever we (re-)enter the form
             itemSearchAutoFilled = selectedItemId; // pre-filled IDs shouldn't auto-open dropdown
+            pendingDropdown = null;
+        } else {
             pendingDropdown = null;
         }
 
@@ -1269,7 +1437,7 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
     }
 
     /** Searches the item registry for entries whose display name or registry id
-     *  contains the query (case-insensitive). Returns at most 6 results. */
+     *  contains the query (case-insensitive). Returns at most 50 results. */
     private List<ItemSearchResult> getItemSearchResults(String query) {
         if (query == null || query.length() < 2) return Collections.emptyList();
         String q = query.toLowerCase(java.util.Locale.ROOT);
@@ -1280,10 +1448,331 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
             String rlStr = rl.toString();
             if (displayName.toLowerCase(java.util.Locale.ROOT).contains(q) || rlStr.contains(q)) {
                 results.add(new ItemSearchResult(rlStr, displayName));
-                if (results.size() >= 6) break;
+                if (results.size() >= 50) break;
             }
         }
         return results;
+    }
+
+    private UIComponent buildOrdersView(Font font) {
+        VStack v = new VStack().gap(4);
+
+        HStack subTabs = new HStack().gap(4);
+        ordersActiveTabBtn = btn("Active Orders (" + cachedActiveOrders.size() + ")", ordersSubTab == 0 ? ACCENT_DIM : PANEL, CARD_HOVER).onPress(() -> {
+            ordersSubTab = 0;
+            savedOrdersSubTab = 0;
+            updateOrdersSubTabs();
+        });
+        ordersActiveTabBtn.flex();
+        subTabs.addChild(ordersActiveTabBtn);
+
+        ordersHistoryTabBtn = btn("Trade History (" + cachedHistory.size() + ")", ordersSubTab == 1 ? ACCENT_DIM : PANEL, CARD_HOVER).onPress(() -> {
+            ordersSubTab = 1;
+            savedOrdersSubTab = 1;
+            updateOrdersSubTabs();
+        });
+        ordersHistoryTabBtn.flex();
+        subTabs.addChild(ordersHistoryTabBtn);
+        v.addChild(subTabs);
+
+        v.addChild(new Divider(PANEL_BORDER));
+
+        activeOrdersContainer = buildActiveOrdersList(font);
+        activeOrdersContainer.flex();
+        activeOrdersContainer.setVisible(ordersSubTab == 0);
+        v.addChild(activeOrdersContainer);
+
+        UIComponent history = buildHistory(font);
+        history.flex();
+        history.setVisible(ordersSubTab == 1);
+        this.historyView = history;
+        v.addChild(history);
+
+        return v;
+    }
+
+    private void updateOrdersSubTabs() {
+        if (ordersActiveTabBtn != null) {
+            ordersActiveTabBtn.setColors(ordersSubTab == 0 ? ACCENT_DIM : PANEL, CARD_HOVER);
+            ordersActiveTabBtn.setLabel("Active Orders (" + cachedActiveOrders.size() + ")");
+        }
+        if (ordersHistoryTabBtn != null) {
+            ordersHistoryTabBtn.setColors(ordersSubTab == 1 ? ACCENT_DIM : PANEL, CARD_HOVER);
+            ordersHistoryTabBtn.setLabel("Trade History (" + cachedHistory.size() + ")");
+        }
+        if (activeOrdersContainer != null) {
+            activeOrdersContainer.setVisible(ordersSubTab == 0);
+        }
+        if (historyView != null) {
+            historyView.setVisible(ordersSubTab == 1);
+        }
+        if (historySearchField != null) {
+            historySearchField.setVisible(viewMode == 3 && ordersSubTab == 1 && pendingConfirmation == null && editingOrder == null);
+            if (viewMode != 3 || ordersSubTab != 1 || pendingConfirmation != null || editingOrder != null) {
+                historySearchField.getEditBox().setFocused(false);
+            }
+        }
+    }
+
+    private UIComponent buildActiveOrdersList(Font font) {
+        ScrollList list = new ScrollList(
+            () -> Math.max(1, cachedActiveOrders.size()),
+            36,
+            (g, fnt, idx, rx, ry, rw, mx, my, hover) -> {
+                if (cachedActiveOrders.isEmpty()) {
+                    String msg = "No active open orders";
+                    g.drawString(fnt, msg, rx + (rw - fnt.width(msg)) / 2, ry + 12, TEXT_MUTED);
+                    return;
+                }
+                if (idx >= cachedActiveOrders.size()) return;
+                MarketNetwork.ActiveOrderEntry e = cachedActiveOrders.get(idx);
+
+                if (hover) g.fill(rx, ry, rx + rw, ry + 35, CARD_HOVER);
+                g.fill(rx, ry + 35, rx + rw, ry + 36, PANEL_BORDER);
+
+                // Icon
+                ItemStack icon = itemIconCache.computeIfAbsent(e.itemId, id -> {
+                    Item it = BuiltInRegistries.ITEM.get(new ResourceLocation(id));
+                    return new ItemStack(it);
+                });
+                g.renderItem(icon, rx + 4, ry + 10);
+
+                // Type & Name
+                String typeTag = e.isSell ? "SELL" : "BUY";
+                int typeColor = e.isSell ? RED : GREEN;
+                g.drawString(fnt, typeTag, rx + 24, ry + 4, typeColor);
+
+                int nameX = rx + 24 + fnt.width(typeTag) + 6;
+                int cancelW = 38;
+                int cancelX = rx + rw - cancelW - 4;
+                int editW = 30;
+                int editX = cancelX - editW - 4;
+                int maxNameW = Math.max(30, editX - 4 - nameX);
+                String nameText = fnt.plainSubstrByWidth(e.displayName, maxNameW);
+                g.drawString(fnt, nameText, nameX, ry + 4, TEXT_PRIMARY);
+
+                // Price & Quantity
+                renderSmallCoin(g, rx + 24, ry + 19);
+                String qtyText = e.isInfinite ? "Qty: \u221E" : ("Qty: " + e.quantity + " / " + e.initialQuantity);
+                String priceQty = e.price + " | " + qtyText;
+                g.drawString(fnt, priceQty, rx + 35, ry + 18, ACCENT);
+
+                // Action buttons on right side
+                int btnY = ry + 8, btnH = 20;
+
+                boolean editHover = mx >= editX && mx < editX + editW && my >= btnY && my < btnY + btnH;
+                boolean cancelHover = mx >= cancelX && mx < cancelX + cancelW && my >= btnY && my < btnY + btnH;
+
+                int editBg = editHover ? CARD_HOVER : PANEL;
+                g.fill(editX, btnY, editX + editW, btnY + btnH, editBg);
+                g.fill(editX, btnY, editX + editW, btnY + 1, ACCENT);
+                g.fill(editX, btnY + btnH - 1, editX + editW, btnY + btnH, ACCENT);
+                g.fill(editX, btnY, editX + 1, btnY + btnH, ACCENT);
+                g.fill(editX + editW - 1, btnY, editX + editW, btnY + btnH, ACCENT);
+                g.drawString(fnt, "Edit", editX + (editW - fnt.width("Edit")) / 2, btnY + 6, ACCENT);
+
+                int cancelBg = cancelHover ? 0xFF991B1B : 0xFF7F1D1D;
+                g.fill(cancelX, btnY, cancelX + cancelW, btnY + btnH, cancelBg);
+                g.fill(cancelX, btnY, cancelX + cancelW, btnY + 1, RED);
+                g.fill(cancelX, btnY + btnH - 1, cancelX + cancelW, btnY + btnH, RED);
+                g.fill(cancelX, btnY, cancelX + 1, btnY + btnH, RED);
+                g.fill(cancelX + cancelW - 1, btnY, cancelX + cancelW, btnY + btnH, RED);
+                g.drawString(fnt, "Cancel", cancelX + (cancelW - fnt.width("Cancel")) / 2, btnY + 6, TEXT_PRIMARY);
+            },
+            (idx, btn, mx, my) -> {
+                if (cachedActiveOrders.isEmpty() || idx >= cachedActiveOrders.size()) return;
+                MarketNetwork.ActiveOrderEntry e = cachedActiveOrders.get(idx);
+                int listX = activeOrdersContainer != null ? activeOrdersContainer.getX() : left() + SIDEBAR_W + 16;
+                int listW = activeOrdersContainer != null ? activeOrdersContainer.getWidth() - 8 : (SCREEN_W - SIDEBAR_W - 32);
+                int rx = listX;
+                int rw = listW;
+                int cancelW = 38;
+                int cancelX = rx + rw - cancelW - 4;
+                int editW = 30;
+                int editX = cancelX - editW - 4;
+
+                if (mx >= cancelX && mx <= cancelX + cancelW) {
+                    MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.CancelOrderPacket(e.orderId));
+                } else if (mx >= editX && mx < cancelX) {
+                    openEditOrderModal(e);
+                }
+            },
+            PANEL, ACCENT_DIM
+        );
+        return list;
+    }
+
+    private void openEditOrderModal(MarketNetwork.ActiveOrderEntry e) {
+        this.editingOrder = e;
+        this.editIsInfinite = e.isInfinite;
+        this.editErrorMsg = null;
+        if (editQtyField != null) {
+            editQtyField.setValue(e.isInfinite ? "\u221E" : String.valueOf(e.quantity));
+            editQtyField.getEditBox().setFocused(true);
+            this.setFocused(editQtyField.getEditBox());
+        }
+        if (editPriceField != null) {
+            editPriceField.setValue(e.price);
+            editPriceField.getEditBox().setFocused(false);
+        }
+        if (historySearchField != null) {
+            historySearchField.setVisible(false);
+            historySearchField.getEditBox().setFocused(false);
+        }
+    }
+
+    private void renderEditOrderModal(GuiGraphics g, int mx, int my) {
+        if (editingOrder == null) return;
+        g.pose().pushPose();
+        g.pose().translate(0, 0, 400);
+
+        int modalW = 220;
+        int modalH = 140;
+        int modalX = left() + (SCREEN_W - modalW) / 2;
+        int modalY = top() + (SCREEN_H - modalH) / 2;
+
+        // Dark dim backdrop over whole screen
+        g.fill(left(), top(), left() + SCREEN_W, top() + SCREEN_H, 0xEE000000);
+
+        // Modal container background & border
+        g.fill(modalX, modalY, modalX + modalW, modalY + modalH, 0xFF0F1524);
+        g.fill(modalX, modalY, modalX + modalW, modalY + 1, ACCENT);
+        g.fill(modalX, modalY + modalH - 1, modalX + modalW, modalY + modalH, ACCENT);
+        g.fill(modalX, modalY, modalX + 1, modalY + modalH, ACCENT);
+        g.fill(modalX + modalW - 1, modalY, modalX + modalW, modalY + modalH, ACCENT);
+
+        // Title
+        String title = "EDIT ORDER";
+        int titleW = font.width(title);
+        g.drawString(font, title, modalX + (modalW - titleW) / 2, modalY + 8, ACCENT);
+        g.fill(modalX + 10, modalY + 20, modalX + modalW - 10, modalY + 21, PANEL_BORDER);
+
+        String typeTag = editingOrder.isSell ? "[SELL ORDER]" : "[BUY ORDER]";
+        int typeColor = editingOrder.isSell ? RED : GREEN;
+        g.drawString(font, typeTag, modalX + 12, modalY + 26, typeColor);
+
+        String itemStr = font.plainSubstrByWidth(editingOrder.displayName, modalW - 100);
+        g.drawString(font, itemStr, modalX + 12 + font.width(typeTag) + 6, modalY + 26, TEXT_PRIMARY);
+
+        if (!editingOrder.isSell) {
+            // Infinite toggle button
+            int infX = modalX + 184;
+            int infY = modalY + 42;
+            int infW = 24;
+            int infH = 18;
+            boolean infHover = mx >= infX && mx < infX + infW && my >= infY && my < infY + infH;
+            int infBg = editIsInfinite ? 0xFF047857 : (infHover ? CARD_HOVER : PANEL);
+            g.fill(infX, infY, infX + infW, infY + infH, infBg);
+            g.fill(infX, infY, infX + infW, infY + 1, ACCENT);
+            g.fill(infX, infY + infH - 1, infX + infW, infY + infH, ACCENT);
+            g.fill(infX, infY, infX + 1, infY + infH, ACCENT);
+            g.fill(infX + infW - 1, infY, infX + infW, infY + infH, ACCENT);
+            g.drawString(font, "\u221E", infX + (infW - font.width("\u221E")) / 2, infY + 5, TEXT_PRIMARY);
+            if (infHover) {
+                pendingTooltip = "Infinite Order: Buy order stays open continuously";
+            }
+        }
+
+        // Quantity field
+        if (editQtyField != null) {
+            int qtyW = editingOrder.isSell ? 196 : 166;
+            editQtyField.layout(modalX + 12, modalY + 42, qtyW, 18);
+            editQtyField.setVisible(true);
+            editQtyField.getEditBox().visible = true;
+            editQtyField.render(g, font, mx, my, 0);
+            editQtyField.getEditBox().setX(modalX + 16);
+            editQtyField.getEditBox().setY(modalY + 46);
+            editQtyField.getEditBox().setWidth(qtyW - 8);
+            editQtyField.getEditBox().setHeight(10);
+            editQtyField.getEditBox().render(g, mx, my, 0);
+        }
+
+        // Price field
+        if (editPriceField != null) {
+            int priceW = 196;
+            editPriceField.layout(modalX + 12, modalY + 64, priceW, 18);
+            editPriceField.setVisible(true);
+            editPriceField.getEditBox().visible = true;
+            editPriceField.render(g, font, mx, my, 0);
+            editPriceField.getEditBox().setX(modalX + 16);
+            editPriceField.getEditBox().setY(modalY + 68);
+            editPriceField.getEditBox().setWidth(188);
+            editPriceField.getEditBox().setHeight(10);
+            editPriceField.getEditBox().render(g, mx, my, 0);
+        }
+
+        // Save Button
+        int btnW = 85;
+        int btnH = 16;
+        int saveX = modalX + 18;
+        int saveY = modalY + 105;
+        boolean saveHover = mx >= saveX && mx <= saveX + btnW && my >= saveY && my <= saveY + btnH;
+        int saveBg = saveHover ? 0xFF004030 : 0xFF003024;
+        g.fill(saveX, saveY, saveX + btnW, saveY + btnH, saveBg);
+        g.fill(saveX, saveY, saveX + btnW, saveY + 1, ACCENT);
+        g.fill(saveX, saveY + btnH - 1, saveX + btnW, saveY + btnH, ACCENT);
+        g.fill(saveX, saveY, saveX + 1, saveY + btnH, ACCENT);
+        g.fill(saveX + btnW - 1, saveY, saveX + btnW, saveY + btnH, ACCENT);
+        g.drawString(font, "Save", saveX + (btnW - font.width("Save")) / 2, saveY + 4, ACCENT);
+
+        // Cancel Button
+        int cancelX = modalX + modalW - btnW - 18;
+        int cancelY = modalY + 105;
+        boolean cancelHover = mx >= cancelX && mx <= cancelX + btnW && my >= cancelY && my <= cancelY + btnH;
+        int cancelBg = cancelHover ? 0xFFC02020 : 0x80901818;
+        g.fill(cancelX, cancelY, cancelX + btnW, cancelY + btnH, cancelBg);
+        g.fill(cancelX, cancelY, cancelX + btnW, cancelY + 1, RED);
+        g.fill(cancelX, cancelY + btnH - 1, cancelX + btnW, cancelY + btnH, RED);
+        g.fill(cancelX, cancelY, cancelX + 1, cancelY + btnH, RED);
+        g.fill(cancelX + btnW - 1, cancelY, cancelX + btnW, cancelY + btnH, RED);
+        g.drawString(font, "Cancel", cancelX + (btnW - font.width("Cancel")) / 2, cancelY + 4, 0xFFFFFFFF);
+
+        if (editErrorMsg != null && !editErrorMsg.isEmpty()) {
+            int errW = font.width(editErrorMsg);
+            g.drawString(font, editErrorMsg, modalX + (modalW - errW) / 2, modalY + 86, RED);
+        }
+
+        g.pose().popPose();
+    }
+
+    private void submitEditOrder() {
+        if (editingOrder == null) return;
+        editErrorMsg = null;
+        String priceStr = editPriceField != null ? editPriceField.getValue().trim() : "";
+        if (priceStr.isEmpty()) { editErrorMsg = "Price required"; return; }
+        BigDecimal price;
+        try {
+            price = new BigDecimal(priceStr);
+            if (price.compareTo(BigDecimal.ZERO) <= 0) { editErrorMsg = "Price must be > 0"; return; }
+        } catch (Exception e) {
+            editErrorMsg = "Invalid price";
+            return;
+        }
+
+        int newQty = editingOrder.quantity;
+        if (!editIsInfinite) {
+            String qtyStr = editQtyField != null ? editQtyField.getValue().trim() : "";
+            try {
+                newQty = Integer.parseInt(qtyStr);
+                if (newQty <= 0) { editErrorMsg = "Qty must be > 0"; return; }
+            } catch (Exception e) {
+                editErrorMsg = "Invalid quantity";
+                return;
+            }
+        }
+
+        MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.EditOrderPacket(editingOrder.orderId, newQty, price.toPlainString(), editIsInfinite));
+        closeEditModal();
+    }
+
+    private void closeEditModal() {
+        editingOrder = null;
+        editErrorMsg = null;
+        if (editQtyField != null) editQtyField.setVisible(false);
+        if (editPriceField != null) editPriceField.setVisible(false);
+        if (historySearchField != null) {
+            historySearchField.setVisible(viewMode == 3 && ordersSubTab == 1 && pendingConfirmation == null);
+        }
     }
 
     private static final SimpleDateFormat DATE_FMT = new SimpleDateFormat("MM/dd HH:mm");
@@ -1292,12 +1781,17 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         VStack v = new VStack().gap(4);
         v.addChild(TextWidget.centered("ORDER HISTORY", ACCENT));
 
+        historySearchQuery = savedHistorySearchQuery;
         historySearchField = new EditBoxWrapper(60, TEXT_PRIMARY, PANEL, font).setPlaceholder("Search item or player...");
+        if (savedHistorySearchQuery != null && !savedHistorySearchQuery.isEmpty()) {
+            historySearchField.setValue(savedHistorySearchQuery);
+        }
         v.addChild(historySearchField);
 
         HStack bar = new HStack().gap(4);
         historyFilterBtn = btn("Filter: " + getHistoryFilterLabel(), PANEL, CARD_HOVER).onPress(() -> {
             historyFilterMode = (historyFilterMode + 1) % 3;
+            savedHistoryFilterMode = historyFilterMode;
             historyFilterBtn.setLabel("Filter: " + getHistoryFilterLabel());
         });
         historyFilterBtn.flex();
@@ -1305,6 +1799,7 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
 
         historySortBtn = btn("Sort: " + getHistorySortLabel(), PANEL, CARD_HOVER).onPress(() -> {
             historySortMode = (historySortMode + 1) % 3;
+            savedHistorySortMode = historySortMode;
             historySortBtn.setLabel("Sort: " + getHistorySortLabel());
         });
         historySortBtn.flex();
@@ -1341,12 +1836,14 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
                 int typeColor = e.wasSell ? RED : GREEN;
                 g.drawString(fnt, typeTag, rx + 24, ry + 4, typeColor);
 
-                int nameX = rx + 24 + fnt.width(typeTag) + 6;
-                String nameText = fnt.plainSubstrByWidth(e.displayName, rw - nameX - 65 - rx);
-                g.drawString(fnt, nameText, nameX, ry + 4, TEXT_PRIMARY);
-
                 String dateStr = DATE_FMT.format(new Date(e.timestamp));
                 int dateW = fnt.width(dateStr);
+
+                int nameX = rx + 24 + fnt.width(typeTag) + 6;
+                int maxNameW = Math.max(30, (rx + rw - dateW - 8) - nameX);
+                String nameText = fnt.plainSubstrByWidth(e.displayName, maxNameW);
+                g.drawString(fnt, nameText, nameX, ry + 4, TEXT_PRIMARY);
+
                 g.drawString(fnt, dateStr, rx + rw - dateW - 4, ry + 4, TEXT_MUTED);
 
                 // Bottom row (y + 16): Coin icon + Price x qty + Counterparty
@@ -1626,8 +2123,18 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
 
                 List<MarketNetwork.PortfolioPointData> pts = cachedPortfolioPoints;
                 if (pts.size() >= 2) {
+                    int totalCount = pts.size();
+                    int maxOffset = Math.max(0, totalCount - MAX_VISIBLE_CHART_STEPS);
+                    if (portfolioChartOffset > maxOffset) portfolioChartOffset = maxOffset;
+                    if (portfolioChartOffset < 0) portfolioChartOffset = 0;
+
+                    int endIndex = Math.min(totalCount, Math.max(MAX_VISIBLE_CHART_STEPS, totalCount - portfolioChartOffset));
+                    int startIndex = Math.max(0, endIndex - MAX_VISIBLE_CHART_STEPS);
+
+                    List<MarketNetwork.PortfolioPointData> visiblePts = pts.subList(startIndex, endIndex);
+
                     double maxP = Double.MIN_VALUE, minP = Double.MAX_VALUE;
-                    for (var cp : pts) {
+                    for (var cp : visiblePts) {
                         double nw = Double.parseDouble(cp.netWorth);
                         if (nw > maxP) maxP = nw;
                         if (nw < minP) minP = nw;
@@ -1638,7 +2145,7 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
                     g.drawString(fnt, formatCompact(maxP), x + 3, y + 3, TEXT_MUTED);
                     g.drawString(fnt, formatCompact(minP), x + 3, y + height - 11, TEXT_MUTED);
 
-                    double currentNW = Double.parseDouble(pts.get(pts.size() - 1).netWorth);
+                    double currentNW = Double.parseDouble(visiblePts.get(visiblePts.size() - 1).netWorth);
                     String currentPriceStr = formatCompact(currentNW);
                     int currentPriceW = fnt.width(currentPriceStr);
                     int badgeW = currentPriceW + 8;
@@ -1647,9 +2154,32 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
                     int rawY = y + height - 6 - (int)((currentNW - minP) / range * (height - 12));
                     int badgeY = Math.max(y + 2, Math.min(y + height - badgeH - 2, rawY - 5));
 
+                    // LIVE Snap Button
+                    String liveStr = portfolioChartOffset == 0 ? "LIVE" : "\u25B6 LIVE";
+                    int liveW = fnt.width(liveStr) + 6;
+                    int liveX = badgeX - liveW - 4;
+                    int liveY = y + 2;
+                    int liveH = 11;
+                    portfolioLiveBtnX = liveX;
+                    portfolioLiveBtnY = liveY;
+                    portfolioLiveBtnW = liveW;
+                    portfolioLiveBtnH = liveH;
+                    boolean liveHover = mx >= liveX && mx < liveX + liveW && my >= liveY && my < liveY + liveH;
+                    int liveBg = portfolioChartOffset > 0 ? (liveHover ? 0xFF047857 : 0xFF065F46) : (liveHover ? CARD_HOVER : 0xFF003024);
+                    int liveBorder = portfolioChartOffset > 0 ? GREEN : (liveHover ? ACCENT : PANEL_BORDER);
+                    g.fill(liveX, liveY, liveX + liveW, liveY + liveH, liveBg);
+                    g.fill(liveX, liveY, liveX + liveW, liveY + 1, liveBorder);
+                    g.fill(liveX, liveY + liveH - 1, liveX + liveW, liveY + liveH, liveBorder);
+                    g.fill(liveX, liveY, liveX + 1, liveY + liveH, liveBorder);
+                    g.fill(liveX + liveW - 1, liveY, liveX + liveW, liveY + liveH, liveBorder);
+                    g.drawString(fnt, liveStr, liveX + 3, liveY + 2, portfolioChartOffset > 0 ? 0xFFFFFFFF : ACCENT);
+                    if (liveHover && portfolioChartOffset > 0) {
+                        pendingTooltip = "Click to snap back to current live time";
+                    }
+
                     int lineY = rawY;
                     int chartLeft = x + 26;
-                    int chartRight = badgeX - 4;
+                    int chartRight = liveX - 4;
                     int dotStep = 4;
                     for (int lx = chartLeft; lx <= chartRight; lx += dotStep) {
                         g.fill(lx, lineY, Math.min(lx + 2, chartRight), lineY + 1, ACCENT_DIM);
@@ -1663,14 +2193,15 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
                     g.fill(badgeX + badgeW - 1, badgeY, badgeX + badgeW, badgeY + badgeH, ACCENT);
                     g.drawString(fnt, currentPriceStr, badgeX + 4, badgeY + 2, ACCENT);
 
-                    int ptsCount = pts.size();
+                    int ptsCount = visiblePts.size();
                     for (int i = 0; i < ptsCount; i++) {
-                        double nw = Double.parseDouble(pts.get(i).netWorth);
+                        var cp = visiblePts.get(i);
+                        double nw = Double.parseDouble(cp.netWorth);
                         int x0 = chartLeft + i * (chartRight - chartLeft) / Math.max(1, ptsCount - 1);
                         int y0 = y + height - 6 - (int)((nw - minP) / range * (height - 12));
 
                         if (i > 0) {
-                            double prevNW = Double.parseDouble(pts.get(i - 1).netWorth);
+                            double prevNW = Double.parseDouble(visiblePts.get(i - 1).netWorth);
                             int xPrev = chartLeft + (i - 1) * (chartRight - chartLeft) / Math.max(1, ptsCount - 1);
                             int yPrev = y + height - 6 - (int)((prevNW - minP) / range * (height - 12));
                             drawLine(g, xPrev, yPrev, x0, y0, CHART_LINE);
@@ -1680,8 +2211,8 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
                         int dotClr = nodeHover ? 0xFFFFFFFF : ACCENT;
                         g.fill(x0 - 1, y0 - 1, x0 + 2, y0 + 2, dotClr);
                         if (nodeHover) {
-                            var p = pts.get(i);
-                            pendingTooltip = "Net Worth: " + formatCompact(Double.parseDouble(p.netWorth)) + " (Cash: " + formatCompact(Double.parseDouble(p.balance)) + " | Assets: " + formatCompact(Double.parseDouble(p.assets)) + ")";
+                            String timeStr = cp.timestamp > 0 ? CHART_TIME_FMT.format(new java.util.Date(cp.timestamp)) : "Step " + (startIndex + i + 1);
+                            pendingTooltip = "Time: " + timeStr + "\nNet Worth: " + formatCompact(Double.parseDouble(cp.netWorth)) + "\nCash: " + formatCompact(Double.parseDouble(cp.balance)) + "  |  Assets: " + formatCompact(Double.parseDouble(cp.assets));
                         }
                     }
                 } else {
@@ -1764,7 +2295,9 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
     @Override
     public void render(GuiGraphics g, int mx, int my, float pt) {
         pendingTooltip = null;
-        pendingDropdown = null;
+        if (viewMode != 2) {
+            pendingDropdown = null;
+        }
         this.renderBackground(g);
         int sx = left(), sy = top();
         if (root != null) {
@@ -1775,6 +2308,9 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         if (root != null) {
             root.preRender(mx, my);
             root.render(g, this.font, mx, my, pt);
+            if (viewMode == 2 && infiniteBuyBtn != null && infiniteBuyBtn.isVisible() && infiniteBuyBtn.isHovered()) {
+                pendingTooltip = "Infinite Order: Buy order stays open continuously";
+            }
         }
         // ── Late-pass: item search dropdown (drawn on top of everything) ──
         if (pendingDropdown != null && viewMode == 2) {
@@ -1784,8 +2320,15 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         if (pendingConfirmation != null) {
             renderConfirmationModal(g, mx, my);
         }
+        // ── Late-pass: Edit Order modal overlay ──
+        if (editingOrder != null) {
+            renderEditOrderModal(g, mx, my);
+        }
         if (pendingTooltip != null) {
-            var lines = this.font.split(Component.literal(pendingTooltip), 180);
+            List<net.minecraft.util.FormattedCharSequence> lines = new ArrayList<>();
+            for (String line : pendingTooltip.split("\n")) {
+                lines.addAll(this.font.split(Component.literal(line), 150));
+            }
             g.renderTooltip(this.font, lines, mx, my);
         }
     }
@@ -1796,8 +2339,11 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
     private static final int DROP_HOVER  = 0xFF252540;
 
     private void renderItemDropdown(GuiGraphics g, int mx, int my, ItemDropdownData d) {
-        int rows = d.results.size();
-        int totalH = rows * DROP_ROW_H;
+        int totalResults = d.results.size();
+        int visibleRows = Math.min(totalResults, 6);
+        int totalH = visibleRows * DROP_ROW_H;
+        int maxScroll = Math.max(0, totalResults - visibleRows);
+        d.scrollOffset = Math.max(0, Math.min(d.scrollOffset, maxScroll));
 
         g.pose().pushPose();
         g.pose().translate(0, 0, 300);
@@ -1809,14 +2355,18 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         g.fill(d.x, d.y, d.x + 1, d.y + totalH, DROP_BORDER);
         g.fill(d.x + d.w - 1, d.y, d.x + d.w, d.y + totalH, DROP_BORDER);
 
-        for (int i = 0; i < rows; i++) {
-            ItemSearchResult r = d.results.get(i);
+        int itemWidth = maxScroll > 0 ? d.w - 6 : d.w;
+
+        for (int i = 0; i < visibleRows; i++) {
+            int idx = d.scrollOffset + i;
+            if (idx >= totalResults) break;
+            ItemSearchResult r = d.results.get(idx);
             int ry = d.y + i * DROP_ROW_H;
-            boolean rowHover = mx >= d.x && mx < d.x + d.w && my >= ry && my < ry + DROP_ROW_H;
-            if (rowHover) g.fill(d.x + 1, ry, d.x + d.w - 1, ry + DROP_ROW_H, DROP_HOVER);
+            boolean rowHover = mx >= d.x && mx < d.x + itemWidth && my >= ry && my < ry + DROP_ROW_H;
+            if (rowHover) g.fill(d.x + 1, ry, d.x + itemWidth, ry + DROP_ROW_H, DROP_HOVER);
 
             // Row divider (skip first)
-            if (i > 0) g.fill(d.x + 1, ry, d.x + d.w - 1, ry + 1, PANEL_BORDER);
+            if (i > 0) g.fill(d.x + 1, ry, d.x + itemWidth, ry + 1, PANEL_BORDER);
 
             // Item icon
             ItemStack icon = itemIconCache.computeIfAbsent(r.itemId, id -> {
@@ -1827,12 +2377,30 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
 
             // Display name
             int nameX = d.x + 20;
-            int nameMaxW = d.w - 22;
+            int nameMaxW = itemWidth - 22;
             String nameStr = this.font.plainSubstrByWidth(r.displayName, nameMaxW);
             g.drawString(this.font, nameStr, nameX, ry + 4, TEXT_PRIMARY, false);
         }
 
+        if (maxScroll > 0) {
+            int trackX = d.x + d.w - 6;
+            int trackH = totalH;
+            int thumbH = Math.max(10, trackH * visibleRows / totalResults);
+            int thumbY = d.scrollOffset * (trackH - thumbH) / maxScroll;
+            g.fill(trackX, d.y, trackX + 5, d.y + trackH, PANEL);
+            g.fill(trackX, d.y + thumbY, trackX + 5, d.y + thumbY + thumbH, ACCENT);
+        }
+
         g.pose().popPose();
+    }
+
+    private void updateDropdownScrollFromMouseY(ItemDropdownData d, double my, int visibleRows, int maxScroll) {
+        int trackH = visibleRows * DROP_ROW_H;
+        int thumbH = Math.max(10, trackH * visibleRows / d.results.size());
+        if (trackH - thumbH <= 0) return;
+        double relY = Math.max(0, Math.min(trackH - thumbH, my - d.y - thumbH / 2.0));
+        d.scrollOffset = (int) Math.round((relY / (double) (trackH - thumbH)) * maxScroll);
+        d.scrollOffset = Math.max(0, Math.min(d.scrollOffset, maxScroll));
     }
 
     private void renderConfirmationModal(GuiGraphics g, int mx, int my) {
@@ -1902,6 +2470,64 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
     @Override
     public boolean mouseClicked(double mx, double my, int btn) {
         com.nstut.Economy.LOGGER.info("[MarketScreen] mouseClicked mx={}, my={}, btn={}, viewMode={}", mx, my, btn, viewMode);
+        if (editingOrder != null) {
+            int modalW = 220;
+            int modalH = 140;
+            int modalX = left() + (SCREEN_W - modalW) / 2;
+            int modalY = top() + (SCREEN_H - modalH) / 2;
+            int btnW = 85;
+            int btnH = 16;
+
+            if (!editingOrder.isSell) {
+                int infX = modalX + 184;
+                int infY = modalY + 42;
+                int infW = 24;
+                int infH = 18;
+                if (mx >= infX && mx < infX + infW && my >= infY && my < infY + infH) {
+                    editIsInfinite = !editIsInfinite;
+                    if (editIsInfinite && editQtyField != null) editQtyField.setValue("\u221E");
+                    else if (!editIsInfinite && editQtyField != null && editQtyField.getValue().equals("\u221E")) editQtyField.setValue(String.valueOf(editingOrder.quantity));
+                    return true;
+                }
+            }
+
+            int qtyW = editingOrder.isSell ? 196 : 166;
+            int qtyX = modalX + 12, qtyY = modalY + 42, qtyH = 18;
+            int priceX = modalX + 12, priceY = modalY + 64, priceW = 196, priceH = 18;
+
+            if (mx >= qtyX && mx < qtyX + qtyW && my >= qtyY && my < qtyY + qtyH) {
+                if (editQtyField != null) {
+                    editQtyField.getEditBox().setFocused(true);
+                    this.setFocused(editQtyField.getEditBox());
+                }
+                if (editPriceField != null) editPriceField.getEditBox().setFocused(false);
+                return true;
+            }
+            if (mx >= priceX && mx < priceX + priceW && my >= priceY && my < priceY + priceH) {
+                if (editPriceField != null) {
+                    editPriceField.getEditBox().setFocused(true);
+                    this.setFocused(editPriceField.getEditBox());
+                }
+                if (editQtyField != null) editQtyField.getEditBox().setFocused(false);
+                return true;
+            }
+
+            int saveX = modalX + 18;
+            int saveY = modalY + 105;
+            if (mx >= saveX && mx <= saveX + btnW && my >= saveY && my <= saveY + btnH) {
+                submitEditOrder();
+                return true;
+            }
+
+            int cancelX = modalX + modalW - btnW - 18;
+            int cancelY = modalY + 105;
+            if (mx >= cancelX && mx <= cancelX + btnW && my >= cancelY && my <= cancelY + btnH) {
+                closeEditModal();
+                return true;
+            }
+            return true;
+        }
+
         if (pendingConfirmation != null) {
             int modalW = 200;
             int modalH = 95;
@@ -1914,7 +2540,7 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
             int confirmY = modalY + 66;
             if (mx >= confirmX && mx <= confirmX + btnW && my >= confirmY && my <= confirmY + btnH) {
                 MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.CreateOrderPacket(
-                    pendingConfirmation.itemId, pendingConfirmation.quantity, pendingConfirmation.priceStr, pendingConfirmation.isSell));
+                    pendingConfirmation.itemId, pendingConfirmation.quantity, pendingConfirmation.priceStr, pendingConfirmation.isSell, pendingConfirmation.isInfinite));
                 selectedItemId = pendingConfirmation.itemId;
                 cachedDetail = null;
                 pendingConfirmation = null;
@@ -1938,8 +2564,20 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         // ── Item search dropdown click interception ──
         if (viewMode == 2 && pendingDropdown != null) {
             ItemDropdownData d = pendingDropdown;
-            if (mx >= d.x && mx < d.x + d.w && my >= d.y && my < d.y + d.results.size() * DROP_ROW_H) {
-                int idx = ((int) my - d.y) / DROP_ROW_H;
+            int visibleRows = Math.min(d.results.size(), 6);
+            int totalH = visibleRows * DROP_ROW_H;
+            if (mx >= d.x && mx < d.x + d.w && my >= d.y && my < d.y + totalH) {
+                int maxScroll = Math.max(0, d.results.size() - visibleRows);
+                // Scrollbar click (rightmost 12 pixels)
+                if (maxScroll > 0 && mx >= d.x + d.w - 12) {
+                    d.isDraggingScrollbar = true;
+                    updateDropdownScrollFromMouseY(d, my, visibleRows, maxScroll);
+                    return true;
+                }
+                // Row item click
+                int relativeY = (int) my - d.y;
+                int rowIdx = relativeY / DROP_ROW_H;
+                int idx = d.scrollOffset + rowIdx;
                 if (idx >= 0 && idx < d.results.size()) {
                     String chosen = d.results.get(idx).itemId;
                     itemSearchAutoFilled = chosen;
@@ -1952,6 +2590,24 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
                 }
             }
         }
+        // Product Detail chart LIVE snap button check
+        if (viewMode == 1 && detailChartOffset > 0) {
+            if (mx >= detailLiveBtnX && mx < detailLiveBtnX + detailLiveBtnW && my >= detailLiveBtnY && my < detailLiveBtnY + detailLiveBtnH) {
+                com.nstut.Economy.LOGGER.info("[MarketScreen] Snap to Live clicked on Product Details chart!");
+                detailChartOffset = 0;
+                return true;
+            }
+        }
+
+        // Portfolio chart LIVE snap button check
+        if (viewMode == 5 && portfolioChartOffset > 0) {
+            if (mx >= portfolioLiveBtnX && mx < portfolioLiveBtnX + portfolioLiveBtnW && my >= portfolioLiveBtnY && my < portfolioLiveBtnY + portfolioLiveBtnH) {
+                com.nstut.Economy.LOGGER.info("[MarketScreen] Snap to Live clicked on Portfolio chart!");
+                portfolioChartOffset = 0;
+                return true;
+            }
+        }
+
         if (root != null && root.mouseClicked(mx, my, btn)) {
             com.nstut.Economy.LOGGER.info("[MarketScreen] Click handled by root UI component");
             return true;
@@ -1979,23 +2635,116 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
 
     @Override
     public boolean mouseScrolled(double mx, double my, double delta) {
+        if (viewMode == 1 && cachedDetail != null && cachedDetail.chart != null && !cachedDetail.chart.isEmpty()) {
+            int chartX = left() + SIDEBAR_W + 16;
+            int chartW = SCREEN_W - SIDEBAR_W - 32;
+            int chartY = top() + 24 + 18;
+            int chartH = 40;
+            if (mx >= chartX && mx < chartX + chartW && my >= chartY && my < chartY + chartH) {
+                int maxOffset = Math.max(0, cachedDetail.chart.size() - MAX_VISIBLE_CHART_STEPS);
+                if (delta < 0) detailChartOffset = Math.min(maxOffset, detailChartOffset + 1);
+                else if (delta > 0) detailChartOffset = Math.max(0, detailChartOffset - 1);
+                return true;
+            }
+        }
+        if (viewMode == 5 && cachedPortfolioPoints.size() >= 2) {
+            int chartX = left() + SIDEBAR_W + 16;
+            int chartW = SCREEN_W - SIDEBAR_W - 32;
+            int chartY = top() + 24 + 28 + 1;
+            int chartH = 48;
+            if (mx >= chartX && mx < chartX + chartW && my >= chartY && my < chartY + chartH) {
+                int maxOffset = Math.max(0, cachedPortfolioPoints.size() - MAX_VISIBLE_CHART_STEPS);
+                if (delta < 0) portfolioChartOffset = Math.min(maxOffset, portfolioChartOffset + 1);
+                else if (delta > 0) portfolioChartOffset = Math.max(0, portfolioChartOffset - 1);
+                return true;
+            }
+        }
+        if (viewMode == 2 && pendingDropdown != null) {
+            ItemDropdownData d = pendingDropdown;
+            int visibleRows = Math.min(d.results.size(), 6);
+            int totalH = visibleRows * DROP_ROW_H;
+            if (mx >= d.x && mx < d.x + d.w && my >= d.y - 24 && my < d.y + totalH) {
+                int maxScroll = Math.max(0, d.results.size() - visibleRows);
+                if (maxScroll > 0) {
+                    if (delta > 0) d.scrollOffset = Math.max(0, d.scrollOffset - 1);
+                    else if (delta < 0) d.scrollOffset = Math.min(maxScroll, d.scrollOffset + 1);
+                }
+                return true;
+            }
+        }
         if (root != null && root.mouseScrolled(mx, my, delta)) return true;
         return super.mouseScrolled(mx, my, delta);
     }
 
     @Override
+    public boolean mouseDragged(double mx, double my, int btn, double dragX, double dragY) {
+        if (viewMode == 2 && pendingDropdown != null && pendingDropdown.isDraggingScrollbar) {
+            ItemDropdownData d = pendingDropdown;
+            int visibleRows = Math.min(d.results.size(), 6);
+            int maxScroll = Math.max(0, d.results.size() - visibleRows);
+            if (maxScroll > 0) {
+                updateDropdownScrollFromMouseY(d, my, visibleRows, maxScroll);
+            }
+            return true;
+        }
+        if (root != null && root.mouseDragged(mx, my, btn, dragX, dragY)) return true;
+        return super.mouseDragged(mx, my, btn, dragX, dragY);
+    }
+
+    @Override
+    public boolean mouseReleased(double mx, double my, int btn) {
+        if (pendingDropdown != null && pendingDropdown.isDraggingScrollbar) {
+            pendingDropdown.isDraggingScrollbar = false;
+            return true;
+        }
+        if (root != null && root.mouseReleased(mx, my, btn)) return true;
+        return super.mouseReleased(mx, my, btn);
+    }
+
+    @Override
     public boolean keyPressed(int key, int scan, int mod) {
+        com.nstut.Economy.LOGGER.info("[MarketScreen] keyPressed key={}, scan={}, mod={}, editingOrder={}",
+            key, scan, mod, editingOrder != null ? editingOrder.orderId : "null");
+
+        if (editingOrder != null) {
+            if (editQtyField != null && editQtyField.isFocused() && editQtyField.keyPressed(key, scan, mod)) {
+                com.nstut.Economy.LOGGER.info("[MarketScreen] editQtyField handled keyPressed key={}, val='{}'", key, editQtyField.getValue());
+                return true;
+            }
+            if (editPriceField != null && editPriceField.isFocused() && editPriceField.keyPressed(key, scan, mod)) {
+                com.nstut.Economy.LOGGER.info("[MarketScreen] editPriceField handled keyPressed key={}, val='{}'", key, editPriceField.getValue());
+                return true;
+            }
+            if (key == 256) {
+                closeEditModal();
+                return true;
+            }
+            if (key >= 48 && key <= 57) {
+                // Digit keys: allow charTyped to process digit input
+                return false;
+            }
+            return true;
+        }
         if (viewMode == 0 && searchField != null && searchField.isFocused()) {
             if (searchField.keyPressed(key, scan, mod)) {
                 searchQuery = searchField.getValue();
+                savedSearchQuery = searchQuery;
                 return true;
             }
             searchQuery = searchField.getValue();
+            savedSearchQuery = searchQuery;
+        }
+        if (viewMode == 3 && historySearchField != null && historySearchField.isFocused()) {
+            if (historySearchField.keyPressed(key, scan, mod)) {
+                historySearchQuery = historySearchField.getValue();
+                savedHistorySearchQuery = historySearchQuery;
+                return true;
+            }
+            historySearchQuery = historySearchField.getValue();
+            savedHistorySearchQuery = historySearchQuery;
         }
         if (viewMode == 2) {
             if (itemIdField != null && itemIdField.isFocused() && itemIdField.keyPressed(key, scan, mod)) {
-                // Any keystroke in the item id field resets the auto-fill guard
-                // so the dropdown shows again when the text changes.
                 itemSearchAutoFilled = null;
                 return true;
             }
@@ -2016,10 +2765,62 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
     }
 
     @Override
+    public boolean charTyped(char codePoint, int modifiers) {
+        com.nstut.Economy.LOGGER.info("[MarketScreen] charTyped codePoint='{}' ({}), editingOrder={}, qtyFocused={}, priceFocused={}",
+            codePoint, (int)codePoint, editingOrder != null ? editingOrder.orderId : "null",
+            editQtyField != null && editQtyField.isFocused(), editPriceField != null && editPriceField.isFocused());
+
+        if (editingOrder != null) {
+            if (editQtyField != null && editQtyField.isFocused()) {
+                boolean handled = editQtyField.getEditBox().charTyped(codePoint, modifiers);
+                com.nstut.Economy.LOGGER.info("[MarketScreen] editQtyField.charTyped returned {}, val='{}'", handled, editQtyField.getValue());
+                if (handled) return true;
+            }
+            if (editPriceField != null && editPriceField.isFocused()) {
+                boolean handled = editPriceField.getEditBox().charTyped(codePoint, modifiers);
+                com.nstut.Economy.LOGGER.info("[MarketScreen] editPriceField.charTyped returned {}, val='{}'", handled, editPriceField.getValue());
+                if (handled) return true;
+            }
+            return true;
+        }
+        if (viewMode == 0 && searchField != null && searchField.isFocused()) {
+            if (searchField.getEditBox().charTyped(codePoint, modifiers)) {
+                searchQuery = searchField.getValue();
+                savedSearchQuery = searchQuery;
+                return true;
+            }
+        }
+        if (viewMode == 3 && historySearchField != null && historySearchField.isFocused()) {
+            if (historySearchField.getEditBox().charTyped(codePoint, modifiers)) {
+                historySearchQuery = historySearchField.getValue();
+                savedHistorySearchQuery = historySearchQuery;
+                return true;
+            }
+        }
+        if (viewMode == 2) {
+            if (itemIdField != null && itemIdField.isFocused()) {
+                if (itemIdField.getEditBox().charTyped(codePoint, modifiers)) {
+                    itemSearchAutoFilled = null;
+                    return true;
+                }
+            }
+            if (qtyField != null && qtyField.isFocused() && qtyField.getEditBox().charTyped(codePoint, modifiers)) return true;
+            if (priceField != null && priceField.isFocused() && priceField.getEditBox().charTyped(codePoint, modifiers)) return true;
+        }
+        return super.charTyped(codePoint, modifiers);
+    }
+
+    @Override
     public void containerTick() {
         super.containerTick();
-        if (searchField != null) searchQuery = searchField.getValue();
-        if (historySearchField != null) historySearchQuery = historySearchField.getValue();
+        if (searchField != null) {
+            searchQuery = searchField.getValue();
+            savedSearchQuery = searchQuery;
+        }
+        if (historySearchField != null) {
+            historySearchQuery = historySearchField.getValue();
+            savedHistorySearchQuery = historySearchQuery;
+        }
     }
 }
 

@@ -1,30 +1,26 @@
-# NsTut Economy
+# NsTut Economy (v0.0.4)
 
-Welcome to **NsTut Economy**, a Minecraft economy mod featuring an order-book market terminal UI, physical Vault storage integration, price trend charting, and sound-effect enabled transactions.
+Welcome to **NsTut Economy**, a Minecraft economy mod featuring an order-book market terminal UI, physical Vault storage integration, price trend & portfolio charting, and sound-effect enabled transactions.
 
 ---
 
-## Major Highlights
+## Major Highlights (v0.0.4)
 
-### Order Book Market Terminal
-- **Sleek Custom Dark UI**: Designed with a curated dark mode palette, dynamic hover animations, and a custom UI framework.
-- **Unified Global Price**: Uses shared price resolution so catalog cards, order books, and price trend charts always show the exact same global price (cheapest active sell offer).
-- **Interactive Price History Charts**: Price charts feature min/max scaling, dotted guide lines, interactive data nodes, and right-aligned current value badges.
-- **Price Change Percentage**: Highlights price movements from the last distinct price (+400.00% in Green, -15.50% in Red, or No Change in Gray).
-- **Human-Readable Compact Numbers**: Formats large currency amounts and item quantities with compact suffixes (k for thousands, m for millions, b for billions, t for trillions).
+### Order Book Market Terminal & Order Editing
+- **Interactive Order Editing (`EDIT ORDER`)**: Edit active orders on the fly with real-time text input fields for Quantity and Price, focused cursor support, and Infinite Buy Order toggle (`[ ∞ ]`).
+- **Interactive Line Charts & Snap-to-Live**: Charts feature 15-step windowing, mouse-wheel history scrolling, real timestamps (`MM/dd HH:mm:ss`), and an interactive green **`▶ LIVE`** button to snap back to current live time.
+- **Smart Portfolio History**: Tracks net worth, liquid cash, and vault assets with smart deduplication to prevent snapshot flooding.
+- **Unified Global Price**: Catalog cards, order books, and charts display the exact same global price across all views.
+- **Counterparty Trade Alerts**: In-chat trade notifications disclose counterparty player/server names and total cost (`Bought 10x Iron Ingot for 5 coins each (Total: 50 coins) from Steve.`).
+- **Compact Numbers & Bounded Tooltips**: Formats values with human-readable suffixes (`k`, `m`, `b`, `t`) and wraps tooltips within 150px max width with `\n` line breaks.
 
-### Vault Storage System & Mode Configuration
+### Vault Storage Logistics & Mode Configuration
 - **Physical Block Storage**: Craft Vault blocks (4 Diamonds, 4 Iron Ingots, 1 Chest) to serve as 54-slot item storage linked to market trading.
 - **Custom Wide Container UI**: Replaces vanilla chest screens with a wider 18x3 compact layout that eliminates text overlap and minimizes screen height.
 - **Vault Modes**:
   - `[ BOTH ]` *(Default)*: Used for both Sell Order item extraction and receiving bought items.
   - `[ INPUT ONLY ]`: Items stored inside are ONLY extracted for Sell Orders; bought items will NOT enter this Vault.
   - `[ OUTPUT ONLY ]`: Bought items are deposited here; items inside are NOT detected for Sell Orders.
-
-### Real-time Notifications & Auditory Feedback
-- **In-Chat Trade Notifications**: Immediate chat notifications when an order matches (`[Market] Order Matched! Bought 10x Iron Ingot for 100 coins.`).
-- **Payment Notifications**: System chat messages and custom "Ka-Ching" sound effects played for both payer and receiver during `/economy pay` transactions.
-- **Bounded Tooltips**: Tooltips wrap cleanly within a fixed maximum width to ensure clear descriptions without screen stretching.
 
 ---
 

@@ -39,9 +39,10 @@ public class EditBoxWrapper extends UIComponent {
     public void setValue(String v) {
         if (this.editBox != null) {
             String oldVal = this.editBox.getValue();
-            this.editBox.setValue(v != null ? v : "");
-            this.editBox.setCursorPosition(0);
-            this.editBox.setHighlightPos(0);
+            String newVal = v != null ? v : "";
+            this.editBox.setValue(newVal);
+            this.editBox.setCursorPosition(newVal.length());
+            this.editBox.setHighlightPos(newVal.length());
             com.nstut.Economy.LOGGER.info("[EditBoxWrapper] setValue oldVal='{}' -> newVal='{}', actualEditBoxVal='{}', cursor={}",
                 oldVal, v, this.editBox.getValue(), this.editBox.getCursorPosition());
         }

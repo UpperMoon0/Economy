@@ -53,6 +53,14 @@ public class EconomyAccountData extends SavedData {
         List<PortfolioPoint> list = portfolioHistory.computeIfAbsent(player, k -> new ArrayList<>());
         long now = System.currentTimeMillis();
         BigDecimal netWorth = balance.add(assets);
+        if (!list.isEmpty()) {
+            PortfolioPoint last = list.get(list.size() - 1);
+            if (last.netWorth.compareTo(netWorth) == 0 &&
+                last.balance.compareTo(balance) == 0 &&
+                last.assets.compareTo(assets) == 0) {
+                return; // Values haven't changed; ignore duplicate snapshot
+            }
+        }
         list.add(new PortfolioPoint(now, netWorth, balance, assets));
         while (list.size() > 40) {
             list.remove(0);
