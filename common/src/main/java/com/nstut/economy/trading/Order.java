@@ -25,7 +25,7 @@ public class Order implements IOrder {
     private final UUID owner;
     private final ICommodity commodity;
     private int quantity;
-    private final int initialQuantity;
+    private int initialQuantity;
     private BigDecimal pricePerUnit;
     private final OrderType type;
     private final Instant createdAt;
@@ -173,6 +173,10 @@ public class Order implements IOrder {
         this.quantity = quantity;
     }
 
+    public void setInitialQuantity(int initialQuantity) {
+        this.initialQuantity = initialQuantity;
+    }
+
     @Override
     public boolean isValid() {
         if (cancelled) {
@@ -301,7 +305,9 @@ public class Order implements IOrder {
         }
 
         int tradedQty = this.quantity;
-        this.quantity = 0;
+        if (!isInfinite) {
+            this.quantity = 0;
+        }
         TradeLedger.recordTrade(commodity.getId().toString(), pricePerUnit, tradedQty, owner, seller);
         notifyPlayerTrade(level, owner, seller, true, commodity.getDisplayName().getString(), tradedQty, pricePerUnit, totalPrice);
         notifyPlayerTrade(level, seller, owner, false, commodity.getDisplayName().getString(), tradedQty, pricePerUnit, totalPrice);
@@ -312,7 +318,7 @@ public class Order implements IOrder {
         if (!isValid() || owner.equals(trader) || amountToTrade <= 0) {
             return TransactionResult.failure("Invalid partial execution request");
         }
-        int tradeQty = Math.min(this.quantity, amountToTrade);
+        int tradeQty = isInfinite ? amountToTrade : Math.min(this.quantity, amountToTrade);
         if (tradeQty <= 0) return TransactionResult.failure("Nothing to trade");
 
         IAccountManager accounts = IAccountManager.getInstance();

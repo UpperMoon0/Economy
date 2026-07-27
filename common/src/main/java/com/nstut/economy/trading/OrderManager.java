@@ -182,6 +182,9 @@ public class OrderManager {
             order.setInfinite(isInfinite);
             if (!isInfinite) {
                 order.setQuantity(newQuantity);
+                order.setInitialQuantity(Math.max(newQuantity, order.getInitialQuantity()));
+            } else {
+                order.setQuantity(newQuantity > 0 ? newQuantity : 1);
             }
         }
 

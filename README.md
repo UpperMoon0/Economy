@@ -2,7 +2,7 @@
 
 ![Minecraft Version](https://img.shields.io/badge/Minecraft-1.20.1-brightgreen)
 ![Forge Version](https://img.shields.io/badge/Forge-47.1.0%2B-orange)
-![Version](https://img.shields.io/badge/Version-0.0.4-blue)
+![Version](https://img.shields.io/badge/Version-0.0.5-blue)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
 A modern, high-performance Minecraft economy and order-book market system for Minecraft 1.20.1 (Forge).
@@ -13,9 +13,11 @@ A modern, high-performance Minecraft economy and order-book market system for Mi
 
 ### Order Book Market Terminal UI
 - **Full-Featured Graphical GUI**: Accessible via the Market Block terminal or `/economy balance`.
+- **Reorganized Sidebar Navigation**: Clean tab layout ordered by user workflow (`Browse` ➔ `New Order` ➔ `Orders` ➔ `Portfolio` ➔ `Vaults`).
 - **Unified Global Pricing**: Shows the true global price (cheapest active sell offer, highest bid, or last trade price) across catalog cards and product detail views.
 - **Interactive Price & Portfolio Charts**: Line graphs with min/max scaling, dotted guide lines, timestamp tooltips, mouse-wheel history scrolling, and a **`▶ LIVE`** snap-to-realtime button.
-- **Interactive Order Editing Modal**: Edit active orders on the fly with text fields for Quantity/Price, cursor support, and Infinite Buy Order toggle (`[ ∞ ]`).
+- **Interactive Order Editing Modal**: Edit active orders on the fly with text fields for Quantity/Price, cursor support, auto-converting Infinite Buy Order toggle (`[ ∞ ]`), and digit key replacement.
+- **Active Orders Filtering & Sorting**: Filter active orders by type (`All`, `Sell Orders`, `Buy Orders`, `Infinite Orders`) and sort by `Newest`, `Oldest`, `Price ▲`, and `Price ▼` with state persistence.
 - **Compact Number Formatting**: Automatically formats large values with human-readable suffixes (k for thousands, m for millions, b for billions, t for trillions, e.g. `14.76 k`).
 - **Price Change Indicators**: Shows percentage price changes from the last distinct price (+400.00% in Green, -15.50% in Red, or No Change in Gray).
 - **Autocomplete Product Search**: Fast search box with live item icons and a solid, opaque dropdown overlay.

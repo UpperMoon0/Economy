@@ -383,10 +383,14 @@ public class MarketNetwork {
                 if (player == null) return;
                 ServerLevel level = player.serverLevel();
                 OrderManager orderManager = Economy.getOrderManager();
+                var opt = orderManager.getOrder(pkt.orderId);
                 BigDecimal price = new BigDecimal(pkt.pricePerUnit);
                 orderManager.editOrder(pkt.orderId, player.getUUID(), pkt.quantity, price, pkt.isInfinite, level);
                 sendActiveOrders(player);
                 sendItemList(player);
+                if (opt.isPresent() && opt.get().getCommodity() instanceof ItemCommodity ic) {
+                    sendItemDetail(player, ic.getId().toString());
+                }
             });
             ctx.get().setPacketHandled(true);
         }

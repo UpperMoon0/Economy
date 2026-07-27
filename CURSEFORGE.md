@@ -1,13 +1,15 @@
-# NsTut Economy (v0.0.4)
+# NsTut Economy (v0.0.5)
 
 Welcome to **NsTut Economy**, a Minecraft economy mod featuring an order-book market terminal UI, physical Vault storage integration, price trend & portfolio charting, and sound-effect enabled transactions.
 
 ---
 
-## Major Highlights (v0.0.4)
+## Major Highlights (v0.0.5)
 
-### Order Book Market Terminal & Order Editing
-- **Interactive Order Editing (`EDIT ORDER`)**: Edit active orders on the fly with real-time text input fields for Quantity and Price, focused cursor support, and Infinite Buy Order toggle (`[ ∞ ]`).
+### Order Book Market Terminal, Order Editing & Filtering
+- **Seamless Infinite Buy Order Editing**: Convert active infinite buy orders (`[ ∞ ]`) back to specific quantities seamlessly in `EDIT ORDER`. Typing a number directly into the quantity field automatically disables infinite mode and replaces the `∞` symbol.
+- **Active Orders Filtering & Sorting**: Filter active open orders by type (`All Orders`, `Sell Orders`, `Buy Orders`, `Infinite Orders`) and sort by `Newest`, `Oldest`, `Price ▲`, and `Price ▼` with state persistence.
+- **Reorganized Sidebar Navigation**: Clean tab layout ordered by user workflow: `Browse` ➔ `New Order` ➔ `Orders` ➔ `Portfolio` ➔ `Vaults`.
 - **Interactive Line Charts & Snap-to-Live**: Charts feature 15-step windowing, mouse-wheel history scrolling, real timestamps (`MM/dd HH:mm:ss`), and an interactive green **`▶ LIVE`** button to snap back to current live time.
 - **Smart Portfolio History**: Tracks net worth, liquid cash, and vault assets with smart deduplication to prevent snapshot flooding.
 - **Unified Global Price**: Catalog cards, order books, and charts display the exact same global price across all views.
