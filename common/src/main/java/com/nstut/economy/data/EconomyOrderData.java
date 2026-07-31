@@ -6,8 +6,11 @@ import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.saveddata.SavedData;
+import net.minecraftforge.fluids.FluidStack;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -27,13 +30,15 @@ public class EconomyOrderData extends SavedData {
         public final long expiresAt;
         public final boolean hasExpiry;
         public final NonNullList<ItemStack> reservedItems;
+        public final List<FluidStack> reservedFluids;
         public final boolean isInfinite;
         public final boolean isServerOrder;
+        public final String commodityType;
 
         public OrderSnapshot(UUID orderId, UUID owner, String itemId, int quantity, int initialQuantity,
                              String pricePerUnit, String type, long createdAt,
                              long expiresAt, boolean hasExpiry,
-                             NonNullList<ItemStack> reservedItems, boolean isServerOrder, boolean isInfinite) {
+                             NonNullList<ItemStack> reservedItems, List<FluidStack> reservedFluids, boolean isServerOrder, boolean isInfinite, String commodityType) {
             this.orderId = orderId;
             this.owner = owner;
             this.itemId = itemId;
@@ -45,22 +50,31 @@ public class EconomyOrderData extends SavedData {
             this.expiresAt = expiresAt;
             this.hasExpiry = hasExpiry;
             this.reservedItems = reservedItems != null ? reservedItems : NonNullList.create();
+            this.reservedFluids = reservedFluids != null ? reservedFluids : new ArrayList<>();
             this.isServerOrder = isServerOrder;
             this.isInfinite = isInfinite;
+            this.commodityType = commodityType != null ? commodityType : "ITEM";
+        }
+
+        public OrderSnapshot(UUID orderId, UUID owner, String itemId, int quantity, int initialQuantity,
+                             String pricePerUnit, String type, long createdAt,
+                             long expiresAt, boolean hasExpiry,
+                             NonNullList<ItemStack> reservedItems, boolean isServerOrder, boolean isInfinite) {
+            this(orderId, owner, itemId, quantity, initialQuantity, pricePerUnit, type, createdAt, expiresAt, hasExpiry, reservedItems, new ArrayList<>(), isServerOrder, isInfinite, "ITEM");
         }
 
         public OrderSnapshot(UUID orderId, UUID owner, String itemId, int quantity, int initialQuantity,
                              String pricePerUnit, String type, long createdAt,
                              long expiresAt, boolean hasExpiry,
                              NonNullList<ItemStack> reservedItems, boolean isServerOrder) {
-            this(orderId, owner, itemId, quantity, initialQuantity, pricePerUnit, type, createdAt, expiresAt, hasExpiry, reservedItems, isServerOrder, false);
+            this(orderId, owner, itemId, quantity, initialQuantity, pricePerUnit, type, createdAt, expiresAt, hasExpiry, reservedItems, new ArrayList<>(), isServerOrder, false, "ITEM");
         }
 
         public OrderSnapshot(UUID orderId, UUID owner, String itemId, int quantity,
                              String pricePerUnit, String type, long createdAt,
                              long expiresAt, boolean hasExpiry,
                              NonNullList<ItemStack> reservedItems, boolean isServerOrder) {
-            this(orderId, owner, itemId, quantity, quantity, pricePerUnit, type, createdAt, expiresAt, hasExpiry, reservedItems, isServerOrder, false);
+            this(orderId, owner, itemId, quantity, quantity, pricePerUnit, type, createdAt, expiresAt, hasExpiry, reservedItems, new ArrayList<>(), isServerOrder, false, "ITEM");
         }
     }
 
@@ -104,8 +118,17 @@ public class EconomyOrderData extends SavedData {
                         reserved.add(ItemStack.of(resList.getCompound(r)));
                     }
                 }
+                List<FluidStack> reservedFluids = new ArrayList<>();
+                if (t.contains("ReservedFluids", Tag.TAG_LIST)) {
+                    ListTag fluidList = t.getList("ReservedFluids", Tag.TAG_COMPOUND);
+                    for (int r = 0; r < fluidList.size(); r++) {
+                        FluidStack fs = FluidStack.loadFluidStackFromNBT(fluidList.getCompound(r));
+                        if (!fs.isEmpty()) reservedFluids.add(fs);
+                    }
+                }
                 boolean serverOrd = t.getBoolean("ServerOrder");
                 boolean infOrd = t.getBoolean("IsInfinite");
+                String commodityType = t.contains("CommodityType") ? t.getString("CommodityType") : "ITEM";
                 UUID id = t.getUUID("OrderId");
                 UUID owner = t.hasUUID("Owner") ? t.getUUID("Owner") : null;
                 int qty = t.getInt("Quantity");
@@ -122,8 +145,10 @@ public class EconomyOrderData extends SavedData {
                     t.getLong("ExpiresAt"),
                     t.getBoolean("HasExpiry"),
                     reserved,
+                    reservedFluids,
                     serverOrd,
-                    infOrd
+                    infOrd,
+                    commodityType
                 ));
             } catch (Exception e) {
             }
@@ -148,6 +173,7 @@ public class EconomyOrderData extends SavedData {
             sTag.putBoolean("HasExpiry", s.hasExpiry);
             sTag.putBoolean("ServerOrder", s.isServerOrder);
             sTag.putBoolean("IsInfinite", s.isInfinite);
+            sTag.putString("CommodityType", s.commodityType);
 
             if (!s.reservedItems.isEmpty()) {
                 ListTag resList = new ListTag();
@@ -159,6 +185,18 @@ public class EconomyOrderData extends SavedData {
                     }
                 }
                 sTag.put("Reserved", resList);
+            }
+
+            if (s.reservedFluids != null && !s.reservedFluids.isEmpty()) {
+                ListTag fluidList = new ListTag();
+                for (FluidStack fs : s.reservedFluids) {
+                    if (!fs.isEmpty()) {
+                        CompoundTag fluidTag = new CompoundTag();
+                        fs.writeToNBT(fluidTag);
+                        fluidList.add(fluidTag);
+                    }
+                }
+                sTag.put("ReservedFluids", fluidList);
             }
 
             list.add(sTag);

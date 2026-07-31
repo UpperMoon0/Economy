@@ -2,6 +2,7 @@
   "replace": false,
   "values": [
     "economy:market",
-    "economy:vault"
+    "economy:vault",
+    "economy:tank"
   ]
 }

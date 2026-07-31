@@ -50,6 +50,7 @@ dependencies {
 
 tasks.named('test', Test).configure {
     useJUnitPlatform()
+    systemProperty 'economy.repoRoot', rootProject.projectDir.absolutePath
 }
 
 def resourceTargets = ['META-INF/mods.toml']

@@ -33,4 +33,15 @@ public class VaultModeTest {
         assertEquals(VaultMode.BOTH, VaultMode.byId(-1));
         assertEquals(VaultMode.BOTH, VaultMode.byId(999));
     }
+
+    @Test
+    @DisplayName("Vault modes route market supply and purchased-item delivery correctly")
+    public void testVaultModeRouting() {
+        assertTrue(VaultMode.BOTH.canSupplyMarket());
+        assertTrue(VaultMode.BOTH.canReceiveMarket());
+        assertTrue(VaultMode.INPUT.canSupplyMarket());
+        assertFalse(VaultMode.INPUT.canReceiveMarket());
+        assertFalse(VaultMode.OUTPUT.canSupplyMarket());
+        assertTrue(VaultMode.OUTPUT.canReceiveMarket());
+    }
 }

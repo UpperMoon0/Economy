@@ -1,6 +1,7 @@
 package com.nstut.forge;
 
 import com.nstut.Economy;
+import com.nstut.economy.blocks.TankManager;
 import com.nstut.economy.blocks.VaultManager;
 import com.nstut.economy.data.EconomyAccountData;
 import com.nstut.economy.data.EconomyOrderData;
@@ -33,6 +34,7 @@ public class EconomyEvents {
 
             TradeLedger.setTradeData(tradeData);
             VaultManager.setAccountData(accountData);
+            TankManager.setAccountData(accountData);
 
             Economy.LOGGER.info("Economy data loaded for dimension {}", serverLevel.dimension().location());
         }

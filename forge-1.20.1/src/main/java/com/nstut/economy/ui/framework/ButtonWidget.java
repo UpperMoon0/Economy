@@ -28,9 +28,15 @@ public class ButtonWidget extends UIComponent {
     }
 
     @Override
-    public int preferredWidth(Font font) { return font != null ? font.width(label) + 8 : 40; }
+    public int preferredWidth(Font font) {
+        if (font == null) return 40;
+        String[] lines = label.split("\n", -1);
+        int maxWidth = 0;
+        for (String line : lines) maxWidth = Math.max(maxWidth, font.width(line));
+        return maxWidth + 8;
+    }
     @Override
-    public int preferredHeight(Font font) { return 14; }
+    public int preferredHeight(Font font) { return label.contains("\n") ? 22 : 14; }
 
     @Override
     public void render(GuiGraphics g, Font font, int mx, int my, float pt) {
@@ -41,9 +47,20 @@ public class ButtonWidget extends UIComponent {
             g.fill(x, y, x + width, y + 1, 0xFF00D4AA);
             g.fill(x, y + height - 1, x + width, y + height, 0xFF00D4AA);
         }
-        int tw = font.width(label);
-        int ty = y + (height - font.lineHeight) / 2;
-        g.drawString(font, label, x + (width - tw) / 2, ty, textColor);
+        String[] lines = label.split("\n", -1);
+        if (lines.length >= 2) {
+            int totalTextHeight = font.lineHeight * 2;
+            int firstY = y + (height - totalTextHeight) / 2;
+            int firstWidth = font.width(lines[0]);
+            int secondWidth = font.width(lines[1]);
+            g.drawString(font, lines[0], x + (width - firstWidth) / 2, firstY, 0xFF9E9EAE);
+            g.drawString(font, lines[1], x + (width - secondWidth) / 2,
+                    firstY + font.lineHeight, textColor);
+        } else {
+            int tw = font.width(label);
+            int ty = y + (height - font.lineHeight) / 2;
+            g.drawString(font, label, x + (width - tw) / 2, ty, textColor);
+        }
     }
 
     @Override

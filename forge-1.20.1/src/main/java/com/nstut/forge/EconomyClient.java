@@ -3,8 +3,10 @@ package com.nstut.forge;
 import com.nstut.Economy;
 import com.nstut.economy.blocks.BlockRegistries;
 import com.nstut.forge.client.MarketScreen;
+import com.nstut.forge.client.TankRenderer;
 import net.minecraft.client.gui.screens.MenuScreens;
 import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.client.event.EntityRenderersEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent;
@@ -17,6 +19,12 @@ public class EconomyClient {
         event.enqueueWork(() -> {
             MenuScreens.register(BlockRegistries.MARKET_MENU.get(), MarketScreen::new);
             MenuScreens.register(BlockRegistries.VAULT_MENU.get(), com.nstut.forge.client.VaultScreen::new);
+            MenuScreens.register(BlockRegistries.TANK_MENU.get(), com.nstut.forge.client.TankScreen::new);
         });
+    }
+
+    @SubscribeEvent
+    public static void registerRenderers(EntityRenderersEvent.RegisterRenderers event) {
+        event.registerBlockEntityRenderer(BlockRegistries.TANK_BE.get(), TankRenderer::new);
     }
 }

@@ -1,0 +1,10 @@
+{
+  "variants": {
+    "facing=down":  { "model": "economy:block/tank", "x": 90 },
+    "facing=up":    { "model": "economy:block/tank", "x": 270 },
+    "facing=north": { "model": "economy:block/tank" },
+    "facing=south": { "model": "economy:block/tank", "y": 180 },
+    "facing=west":  { "model": "economy:block/tank", "y": 270 },
+    "facing=east":  { "model": "economy:block/tank", "y": 90 }
+  }
+}

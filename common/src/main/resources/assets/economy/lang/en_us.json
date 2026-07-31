@@ -1,10 +1,13 @@
 {
   "block.economy.market": "Market",
   "block.economy.vault": "Vault",
+  "block.economy.tank": "Fluid Tank",
   "item.economy.market": "Market",
   "item.economy.vault": "Vault",
+  "item.economy.tank": "Fluid Tank",
   "item.economy.coin": "Coin",
   "itemGroup.economy": "Economy",
   "subtitles.economy.money": "Ka-Ching! Money transferred",
-  "message.economy.vault.not_owner": "This vault does not belong to you."
+  "message.economy.vault.not_owner": "This vault does not belong to you.",
+  "message.economy.tank.not_owner": "This tank does not belong to you."
 }

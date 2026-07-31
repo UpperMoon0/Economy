@@ -17,16 +17,16 @@ public class EconomyFormatUtil {
         String suffix;
         double divisor;
         if (abs >= 1_000_000_000_000.0) {
-            suffix = " t";
+            suffix = "t";
             divisor = 1_000_000_000_000.0;
         } else if (abs >= 1_000_000_000.0) {
-            suffix = " b";
+            suffix = "b";
             divisor = 1_000_000_000.0;
         } else if (abs >= 1_000_000.0) {
-            suffix = " m";
+            suffix = "m";
             divisor = 1_000_000.0;
         } else {
-            suffix = " k";
+            suffix = "k";
             divisor = 1_000.0;
         }
 
@@ -51,6 +51,32 @@ public class EconomyFormatUtil {
         } catch (Exception e) {
             return str;
         }
+    }
+
+    public static String formatFluidAmount(int milliBuckets) {
+        return formatCompact(milliBuckets) + " mB";
+    }
+
+    public static String formatFluidAmountDetailed(int milliBuckets) {
+        return formatFluidAmount(milliBuckets);
+    }
+
+    public static String formatCommodityQuantity(int quantity, boolean fluid) {
+        return fluid
+                ? formatFluidAmount(quantity)
+                : formatItemAmount(quantity);
+    }
+
+    public static String formatCommodityQuantityDetailed(int quantity, boolean fluid) {
+        return formatCommodityQuantity(quantity, fluid);
+    }
+
+    public static String formatItemAmount(int itemCount) {
+        return formatCompact(itemCount) + (itemCount == 1 ? " item" : " items");
+    }
+
+    public static String formatCount(int count, String singular, String plural) {
+        return formatCompact(count) + " " + (count == 1 ? singular : plural);
     }
 
     public static String formatPriceChange(double percent) {

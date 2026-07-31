@@ -22,6 +22,9 @@ public class ItemRegistries {
     public static final RegistryObject<Item> VAULT = ITEMS.register("vault",
         () -> new BlockItem(BlockRegistries.VAULT.get(), new Item.Properties()));
 
+    public static final RegistryObject<Item> TANK = ITEMS.register("tank",
+        () -> new BlockItem(BlockRegistries.TANK.get(), new Item.Properties()));
+
     public static final RegistryObject<Item> COIN = ITEMS.register("coin",
         () -> new Item(new Item.Properties()));
 
@@ -33,6 +36,7 @@ public class ItemRegistries {
                 output.accept(COIN.get());
                 output.accept(MARKET.get());
                 output.accept(VAULT.get());
+                output.accept(TANK.get());
             })
             .build());
 }

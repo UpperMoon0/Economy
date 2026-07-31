@@ -1,37 +1,67 @@
-# NsTut Economy (v0.0.5)
+# NsTut Economy (v0.0.6)
 
-Welcome to **NsTut Economy**, a Minecraft economy mod featuring an order-book market terminal UI, physical Vault storage integration, price trend & portfolio charting, and sound-effect enabled transactions.
+**NsTut Economy** is an order-book economy mod for Minecraft 1.20.1 (Forge). Trade items and fluids through a full market terminal backed by physical Vault and Tank storage, automated order matching, price history, portfolio tracking, and server-managed liquidity.
 
 ---
 
-## Major Highlights (v0.0.5)
+## Major Highlights in v0.0.6
 
-### Order Book Market Terminal, Order Editing & Filtering
-- **Seamless Infinite Buy Order Editing**: Convert active infinite buy orders (`[ ∞ ]`) back to specific quantities seamlessly in `EDIT ORDER`. Typing a number directly into the quantity field automatically disables infinite mode and replaces the `∞` symbol.
-- **Active Orders Filtering & Sorting**: Filter active open orders by type (`All Orders`, `Sell Orders`, `Buy Orders`, `Infinite Orders`) and sort by `Newest`, `Oldest`, `Price ▲`, and `Price ▼` with state persistence.
-- **Reorganized Sidebar Navigation**: Clean tab layout ordered by user workflow: `Browse` ➔ `New Order` ➔ `Orders` ➔ `Portfolio` ➔ `Vaults`.
-- **Interactive Line Charts & Snap-to-Live**: Charts feature 15-step windowing, mouse-wheel history scrolling, real timestamps (`MM/dd HH:mm:ss`), and an interactive green **`▶ LIVE`** button to snap back to current live time.
-- **Smart Portfolio History**: Tracks net worth, liquid cash, and vault assets with smart deduplication to prevent snapshot flooding.
-- **Unified Global Price**: Catalog cards, order books, and charts display the exact same global price across all views.
-- **Counterparty Trade Alerts**: In-chat trade notifications disclose counterparty player/server names and total cost (`Bought 10x Iron Ingot for 5 coins each (Total: 50 coins) from Steve.`).
-- **Compact Numbers & Bounded Tooltips**: Formats values with human-readable suffixes (`k`, `m`, `b`, `t`) and wraps tooltips within 150px max width with `\n` line breaks.
+### Fluid Trading and the New Fluid Tank
 
-### Vault Storage Logistics & Mode Configuration
-- **Physical Block Storage**: Craft Vault blocks (4 Diamonds, 4 Iron Ingots, 1 Chest) to serve as 54-slot item storage linked to market trading.
-- **Custom Wide Container UI**: Replaces vanilla chest screens with a wider 18x3 compact layout that eliminates text overlap and minimizes screen height.
-- **Vault Modes**:
-  - `[ BOTH ]` *(Default)*: Used for both Sell Order item extraction and receiving bought items.
-  - `[ INPUT ONLY ]`: Items stored inside are ONLY extracted for Sell Orders; bought items will NOT enter this Vault.
-  - `[ OUTPUT ONLY ]`: Bought items are deposited here; items inside are NOT detected for Sell Orders.
+- Items and fluids now use one unified commodity, order, history, and server-order system.
+- The new **Fluid Tank** stores `128,000 mB` and works with fluid containers such as buckets and cells.
+- Tanks support `BOTH`, `INPUT ONLY`, and `OUTPUT ONLY` market modes, matching Vault behavior.
+- Fluid sell orders reserve fluid from eligible Tanks. Purchases require enough compatible Tank space before matching.
+- Cancelling a fluid sell order restores its remaining reserved fluid.
+- Fluid orders persist across world reloads, including their commodity type and reserved fluid.
+- Only source/container-compatible fluids are shown; duplicate flowing variants are hidden.
+
+### Market Terminal Improvements
+
+- Browse now supports a persistent **Grid/Rows** view toggle, with Grid as the default.
+- Browse, Active Orders, and Trade History include product-type filters for Items and Fluids.
+- Compact two-line filter buttons use clear labels such as `Activity`, `Order`, `Trade`, `Product`, and `Sort`.
+- The Browse catalog only shows active or previously traded commodities instead of unused registry entries.
+- The former `Vaults` page is now **Containers**, combining Vault and Tank status in one dashboard.
+- Long order text is clipped inside its card and uses a left-to-right ping-pong marquee; the Coin icon moves with it.
+- Fluid icons, quantities, stock, chart volume, order details, history, and portfolio holdings are displayed correctly throughout the terminal.
+- Large money and commodity counts share compact suffixes without extra spacing, such as `1k`, `2.5m`, and `128k mB`.
+
+### Tank Rendering and Interaction Fixes
+
+- Fluid is rendered on the Tank's front face with corrected depth and pixel alignment.
+- Fluid textures tile/crop instead of stretching, preserving their native proportions.
+- The Tank screen is vertically centered and shows one `current / maximum` amount line.
+- Bucket/container transfers now update the authoritative Tank amount and synchronize the resulting container and fluid state.
+- Added detailed Tank transfer logging for diagnosing modded fluid-container behavior.
+- Added the Tank recipe, loot table, block/item models, texture, mining tags, language entries, and creative-tab registration.
+
+### Currency Presentation and Reliability
+
+- Economy command messages now use the actual custom Coin glyph instead of a generic currency character.
+- Market marquees move the Coin icon and associated price text as one unit.
+- Fluid and item availability, destination capacity, cancellation restoration, and order persistence received expanded automated test coverage.
+
+---
+
+## Storage Modes
+
+- `BOTH` — supplies Sell Orders and receives purchases.
+- `INPUT ONLY` — supplies Sell Orders but does not receive purchases.
+- `OUTPUT ONLY` — receives purchases but does not supply Sell Orders.
+
+These modes apply independently to Vault item storage and Tank fluid storage.
 
 ---
 
 ## Commands
 
-- `/economy balance` - Open your Market Terminal UI or view balance
-- `/economy pay <player> <amount>` - Transfer money to another player with chat alert & sound
-- `/economy serverorder buy <item> <qty> <price>` - OP command for infinite buy orders
-- `/economy serverorder sell <item> <qty> <price>` - OP command for infinite sell orders
-- `/economy give <player> <amount>` - OP command to give coins to a player
-- `/economy take <player> <amount>` - OP command to take coins from a player
-- `/economy set <player> <amount>` - OP command to set a player's balance
+- `/economy balance` — View your balance and open the Market Terminal.
+- `/economy pay <player> <amount>` — Transfer coins to another player.
+- `/economy serverorder buy <commodity> <qty> <price>` — Create an infinite server buy order for an item or fluid.
+- `/economy serverorder sell <commodity> <qty> <price>` — Create an infinite server sell order for an item or fluid.
+- `/economy give <player> <amount>` — Give coins to a player.
+- `/economy take <player> <amount>` — Take coins from a player.
+- `/economy set <player> <amount>` — Set a player's balance.
+
+Fluid command quantities use millibuckets (`mB`), so a quantity of `16000` is displayed as `16k mB`.

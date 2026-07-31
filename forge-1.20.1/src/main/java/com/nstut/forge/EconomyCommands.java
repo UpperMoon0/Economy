@@ -8,28 +8,38 @@ import com.mojang.brigadier.context.CommandContext;
 import com.nstut.Economy;
 import com.nstut.economy.api.IAccountManager;
 import com.nstut.economy.api.IBankAccount;
+import com.nstut.economy.api.ICommodity;
 import com.nstut.economy.blocks.VaultManager;
 import com.nstut.economy.config.EconomyConfig;
 import com.nstut.economy.core.TransactionContext;
+import com.nstut.economy.trading.FluidCommodity;
 import com.nstut.economy.trading.ItemCommodity;
 import com.nstut.economy.trading.Order;
 import com.nstut.economy.trading.OrderManager;
-import net.minecraft.commands.CommandBuildContext;
+import com.nstut.economy.util.CoinText;
+import com.nstut.economy.util.CommodityUtil;
+import net.minecraft.ChatFormatting;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
+import net.minecraft.commands.SharedSuggestionProvider;
 import net.minecraft.commands.arguments.EntityArgument;
-import net.minecraft.commands.arguments.item.ItemArgument;
-import net.minecraft.commands.arguments.item.ItemInput;
+import net.minecraft.commands.arguments.ResourceLocationArgument;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.level.material.Fluid;
+import net.minecraft.world.level.material.Fluids;
 import net.minecraftforge.event.RegisterCommandsEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.LinkedHashSet;
+import java.util.Set;
 
 @Mod.EventBusSubscriber(modid = Economy.MOD_ID, bus = Mod.EventBusSubscriber.Bus.FORGE)
 public class EconomyCommands {
@@ -37,13 +47,12 @@ public class EconomyCommands {
     @SubscribeEvent
     public static void onRegisterCommands(RegisterCommandsEvent event) {
         CommandDispatcher<CommandSourceStack> dispatcher = event.getDispatcher();
-        CommandBuildContext buildContext = event.getBuildContext();
 
-        dispatcher.register(buildEconomyNode("economy", buildContext));
-        dispatcher.register(buildEconomyNode("eco", buildContext));
+        dispatcher.register(buildEconomyNode("economy"));
+        dispatcher.register(buildEconomyNode("eco"));
     }
 
-    private static LiteralArgumentBuilder<CommandSourceStack> buildEconomyNode(String rootName, CommandBuildContext buildContext) {
+    private static LiteralArgumentBuilder<CommandSourceStack> buildEconomyNode(String rootName) {
         return Commands.literal(rootName)
             .then(Commands.literal("balance")
                 .executes(context -> {
@@ -82,12 +91,16 @@ public class EconomyCommands {
                                 String amtStr = com.nstut.economy.util.EconomyFormatUtil.formatCompact(amount);
                                 if (isSelf) {
                                     context.getSource().sendSuccess(() ->
-                                        Component.literal("§2[Market] §aTransferred §e" + amtStr + " coins §fto yourself."), false);
+                                        marketMessage("Transferred ", amtStr, " to yourself."), false);
                                     playMoneySound(sender);
                                 } else {
                                     context.getSource().sendSuccess(() ->
-                                        Component.literal("§2[Market] §aPaid §e" + amtStr + " coins §fto §e" + receiver.getName().getString()), false);
-                                    receiver.sendSystemMessage(Component.literal("§2[Market] §aReceived §e" + amtStr + " coins §ffrom §e" + sender.getName().getString()));
+                                        marketMessage("Paid ", amtStr, " to ")
+                                                .append(Component.literal(receiver.getName().getString())
+                                                        .withStyle(ChatFormatting.YELLOW)), false);
+                                    receiver.sendSystemMessage(marketMessage("Received ", amtStr, " from ")
+                                            .append(Component.literal(sender.getName().getString())
+                                                    .withStyle(ChatFormatting.YELLOW)));
                                     playMoneySound(sender);
                                     playMoneySound(receiver);
                                 }
@@ -105,19 +118,21 @@ public class EconomyCommands {
             .then(Commands.literal("serverorder")
                 .requires(source -> source.hasPermission(2))
                 .then(Commands.literal("buy")
-                    .then(Commands.argument("item", ItemArgument.item(buildContext))
-                        .then(Commands.argument("quantity", IntegerArgumentType.integer(1, 3456))
+                    .then(Commands.argument("commodity", ResourceLocationArgument.id())
+                        .suggests((context, builder) -> suggestCommodityIds(builder))
+                        .then(Commands.argument("quantity", IntegerArgumentType.integer(1))
                             .then(Commands.argument("price", DoubleArgumentType.doubleArg(0.01))
-                                .executes(context -> createServerBuyOrder(context))
+                                .executes(context -> createServerOrder(context, true))
                             )
                         )
                     )
                 )
                 .then(Commands.literal("sell")
-                    .then(Commands.argument("item", ItemArgument.item(buildContext))
-                        .then(Commands.argument("quantity", IntegerArgumentType.integer(1, 3456))
+                    .then(Commands.argument("commodity", ResourceLocationArgument.id())
+                        .suggests((context, builder) -> suggestCommodityIds(builder))
+                        .then(Commands.argument("quantity", IntegerArgumentType.integer(1))
                             .then(Commands.argument("price", DoubleArgumentType.doubleArg(0.01))
-                                .executes(context -> createServerSellOrder(context))
+                                .executes(context -> createServerOrder(context, false))
                             )
                         )
                     )
@@ -154,8 +169,9 @@ public class EconomyCommands {
         IBankAccount account = accounts.getOrCreatePlayerAccount(player.getUUID());
         EconomyConfig config = EconomyConfig.getInstance();
         context.getSource().sendSuccess(() ->
-            Component.literal(player.getName().getString() + "'s balance: " +
-                config.getCurrencySymbol() + account.getBalance().toPlainString() + " " + config.getCurrencyName()),
+            Component.literal(player.getName().getString() + "'s balance: ")
+                .append(CoinText.amount(account.getBalance().toPlainString()))
+                .append(Component.literal(" " + config.getCurrencyName())),
             false
         );
         return 1;
@@ -167,9 +183,10 @@ public class EconomyCommands {
         IAccountManager accounts = IAccountManager.getInstance();
         IBankAccount account = accounts.getOrCreatePlayerAccount(target.getUUID());
         account.credit(amount, TransactionContext.adminGive("Admin command"));
-        EconomyConfig config = EconomyConfig.getInstance();
         context.getSource().sendSuccess(() ->
-            Component.literal("Gave " + config.getCurrencySymbol() + amount.toPlainString() + " to " + target.getName().getString()),
+            Component.literal("Gave ")
+                .append(CoinText.amount(amount.toPlainString()))
+                .append(Component.literal(" to " + target.getName().getString())),
             true
         );
         return 1;
@@ -181,9 +198,10 @@ public class EconomyCommands {
         IAccountManager accounts = IAccountManager.getInstance();
         IBankAccount account = accounts.getOrCreatePlayerAccount(target.getUUID());
         if (account.debit(amount, TransactionContext.adminTake("Admin command"))) {
-            EconomyConfig config = EconomyConfig.getInstance();
             context.getSource().sendSuccess(() ->
-                Component.literal("Took " + config.getCurrencySymbol() + amount.toPlainString() + " from " + target.getName().getString()),
+                Component.literal("Took ")
+                    .append(CoinText.amount(amount.toPlainString()))
+                    .append(Component.literal(" from " + target.getName().getString())),
                 true
             );
             return 1;
@@ -200,68 +218,69 @@ public class EconomyCommands {
         com.nstut.economy.core.BankAccount account =
             (com.nstut.economy.core.BankAccount) accounts.getOrCreatePlayerAccount(target.getUUID());
         account.setBalance(amount);
-        EconomyConfig config = EconomyConfig.getInstance();
         context.getSource().sendSuccess(() ->
-            Component.literal("Set " + target.getName().getString() + "'s balance to " + config.getCurrencySymbol() + amount.toPlainString()),
+            Component.literal("Set " + target.getName().getString() + "'s balance to ")
+                .append(CoinText.amount(amount.toPlainString())),
             true
         );
         return 1;
     }
 
-    private static int createServerBuyOrder(CommandContext<CommandSourceStack> context) {
-        ItemInput itemInput = ItemArgument.getItem(context, "item");
-        if (itemInput.getItem() == net.minecraft.world.item.Items.AIR) {
-            context.getSource().sendFailure(Component.literal("Cannot create order for Air"));
-            return 0;
-        }
+    private static int createServerOrder(CommandContext<CommandSourceStack> context, boolean isBuy) {
+        ResourceLocation id = ResourceLocationArgument.getId(context, "commodity");
         int quantity = IntegerArgumentType.getInteger(context, "quantity");
         BigDecimal pricePerUnit = BigDecimal.valueOf(DoubleArgumentType.getDouble(context, "price"));
 
-        ResourceLocation id = BuiltInRegistries.ITEM.getKey(itemInput.getItem());
-        if (id == null) id = new ResourceLocation("minecraft", itemInput.getItem().toString().toLowerCase().replace(':', '_'));
-        ItemCommodity commodity = new ItemCommodity(id, itemInput.getItem(), BigDecimal.ZERO);
+        Fluid fluid = BuiltInRegistries.FLUID.get(id);
+        boolean isFluid = fluid != Fluids.EMPTY && !fluid.getFluidType().isAir();
+        ICommodity commodity;
+        if (isFluid) {
+            if (!CommodityUtil.isCanonicalFluid(fluid)) {
+                Fluid source = CommodityUtil.getCanonicalFluid(fluid);
+                ResourceLocation sourceId = BuiltInRegistries.FLUID.getKey(source);
+                context.getSource().sendFailure(Component.literal(
+                        "Fluid variants cannot be traded; use the source fluid " + sourceId));
+                return 0;
+            }
+            commodity = new FluidCommodity(id, fluid, BigDecimal.ZERO);
+        } else {
+            Item item = BuiltInRegistries.ITEM.get(id);
+            if (item == net.minecraft.world.item.Items.AIR) {
+                context.getSource().sendFailure(Component.literal("Unknown commodity: " + id));
+                return 0;
+            }
+            commodity = new ItemCommodity(id, item, BigDecimal.ZERO);
+        }
 
         OrderManager orderManager = Economy.getOrderManager();
-        Order order = orderManager.createServerBuyOrder(commodity, quantity, pricePerUnit);
+        Order order = isBuy
+                ? orderManager.createServerBuyOrder(commodity, quantity, pricePerUnit)
+                : orderManager.createServerSellOrder(commodity, quantity, pricePerUnit);
 
-        EconomyConfig config = EconomyConfig.getInstance();
         String priceStr = order.getTotalPrice().setScale(0, RoundingMode.HALF_UP).toPlainString();
+        String amount = com.nstut.economy.util.EconomyFormatUtil
+                .formatCommodityQuantityDetailed(quantity, isFluid);
+        String side = isBuy ? "buy" : "sell";
+        String priceUnit = isFluid ? "per mB" : "each";
         context.getSource().sendSuccess(() ->
-            Component.literal("Server buy order created: " + quantity + "x " +
-                commodity.getDisplayName().getString() + " @ " + config.getCurrencySymbol() +
-                pricePerUnit.setScale(0, RoundingMode.HALF_UP).toPlainString() + " each (total: " +
-                config.getCurrencySymbol() + priceStr + ")"),
+            Component.literal("Server " + side + " order created: " + amount + " of "
+                + commodity.getDisplayName().getString() + " @ ")
+                .append(CoinText.amount(pricePerUnit.stripTrailingZeros().toPlainString()))
+                .append(Component.literal(" " + priceUnit + " (total: "))
+                .append(CoinText.amount(priceStr))
+                .append(Component.literal(")")),
             true
         );
         return 1;
     }
 
-    private static int createServerSellOrder(CommandContext<CommandSourceStack> context) {
-        ItemInput itemInput = ItemArgument.getItem(context, "item");
-        if (itemInput.getItem() == net.minecraft.world.item.Items.AIR) {
-            context.getSource().sendFailure(Component.literal("Cannot create order for Air"));
-            return 0;
-        }
-        int quantity = IntegerArgumentType.getInteger(context, "quantity");
-        BigDecimal pricePerUnit = BigDecimal.valueOf(DoubleArgumentType.getDouble(context, "price"));
-
-        ResourceLocation id = BuiltInRegistries.ITEM.getKey(itemInput.getItem());
-        if (id == null) id = new ResourceLocation("minecraft", itemInput.getItem().toString().toLowerCase().replace(':', '_'));
-        ItemCommodity commodity = new ItemCommodity(id, itemInput.getItem(), BigDecimal.ZERO);
-
-        OrderManager orderManager = Economy.getOrderManager();
-        Order order = orderManager.createServerSellOrder(commodity, quantity, pricePerUnit);
-
-        EconomyConfig config = EconomyConfig.getInstance();
-        String priceStr = order.getTotalPrice().setScale(0, RoundingMode.HALF_UP).toPlainString();
-        context.getSource().sendSuccess(() ->
-            Component.literal("Server sell order created: " + quantity + "x " +
-                commodity.getDisplayName().getString() + " @ " + config.getCurrencySymbol() +
-                pricePerUnit.setScale(0, RoundingMode.HALF_UP).toPlainString() + " each (total: " +
-                config.getCurrencySymbol() + priceStr + ")"),
-            true
-        );
-        return 1;
+    private static java.util.concurrent.CompletableFuture<com.mojang.brigadier.suggestion.Suggestions>
+            suggestCommodityIds(com.mojang.brigadier.suggestion.SuggestionsBuilder builder) {
+        Set<ResourceLocation> ids = new LinkedHashSet<>(BuiltInRegistries.ITEM.keySet());
+        BuiltInRegistries.FLUID.keySet().stream()
+                .filter(id -> CommodityUtil.isCanonicalFluid(BuiltInRegistries.FLUID.get(id)))
+                .forEach(ids::add);
+        return SharedSuggestionProvider.suggestResource(ids, builder);
     }
 
     private static void playMoneySound(ServerPlayer player) {
@@ -270,5 +289,12 @@ public class EconomyCommands {
                 com.nstut.economy.sound.SoundRegistries.MONEY.get(),
                 net.minecraft.sounds.SoundSource.PLAYERS, 0.8F, 1.0F);
         }
+    }
+
+    private static MutableComponent marketMessage(String action, String amount, String suffix) {
+        return Component.literal("[Market] ").withStyle(ChatFormatting.DARK_GREEN)
+                .append(Component.literal(action).withStyle(ChatFormatting.GREEN))
+                .append(CoinText.amount(amount))
+                .append(Component.literal(suffix).withStyle(ChatFormatting.WHITE));
     }
 }

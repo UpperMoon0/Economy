@@ -4,6 +4,7 @@ import com.nstut.economy.api.IAccountManager;
 import com.nstut.economy.api.IBankAccount;
 import com.nstut.economy.api.ICommodity;
 import com.nstut.economy.api.IOrder;
+import com.nstut.economy.blocks.TankManager;
 import com.nstut.economy.blocks.VaultManager;
 import com.nstut.economy.core.TransactionContext;
 import com.nstut.economy.data.EconomyOrderData;
@@ -14,9 +15,13 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.material.Fluid;
+import net.minecraftforge.fluids.FluidStack;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 public class Order implements IOrder {
@@ -34,27 +39,34 @@ public class Order implements IOrder {
     private boolean serverOrder;
     private boolean isInfinite;
     private final NonNullList<ItemStack> reservedItems;
+    private final List<FluidStack> reservedFluids;
 
     public Order(UUID owner, ICommodity commodity, int quantity,
                  BigDecimal pricePerUnit, OrderType type, Instant expiresAt) {
-        this(owner, commodity, quantity, quantity, pricePerUnit, type, expiresAt, NonNullList.create(), false);
+        this(owner, commodity, quantity, quantity, pricePerUnit, type, expiresAt, NonNullList.create(), new ArrayList<>(), false);
     }
 
     public Order(UUID owner, ICommodity commodity, int quantity,
                  BigDecimal pricePerUnit, OrderType type, Instant expiresAt,
                  NonNullList<ItemStack> reservedItems) {
-        this(owner, commodity, quantity, quantity, pricePerUnit, type, expiresAt, reservedItems, false);
+        this(owner, commodity, quantity, quantity, pricePerUnit, type, expiresAt, reservedItems, new ArrayList<>(), false);
     }
 
     public Order(UUID owner, ICommodity commodity, int quantity, int initialQuantity,
                  BigDecimal pricePerUnit, OrderType type, Instant expiresAt,
                  NonNullList<ItemStack> reservedItems) {
-        this(owner, commodity, quantity, initialQuantity, pricePerUnit, type, expiresAt, reservedItems, false);
+        this(owner, commodity, quantity, initialQuantity, pricePerUnit, type, expiresAt, reservedItems, new ArrayList<>(), false);
     }
 
     public Order(UUID owner, ICommodity commodity, int quantity, int initialQuantity,
                  BigDecimal pricePerUnit, OrderType type, Instant expiresAt,
                  NonNullList<ItemStack> reservedItems, boolean isInfinite) {
+        this(owner, commodity, quantity, initialQuantity, pricePerUnit, type, expiresAt, reservedItems, new ArrayList<>(), isInfinite);
+    }
+
+    public Order(UUID owner, ICommodity commodity, int quantity, int initialQuantity,
+                 BigDecimal pricePerUnit, OrderType type, Instant expiresAt,
+                 NonNullList<ItemStack> reservedItems, List<FluidStack> reservedFluids, boolean isInfinite) {
         this.orderId = UUID.randomUUID();
         this.owner = owner;
         this.commodity = commodity;
@@ -66,18 +78,29 @@ public class Order implements IOrder {
         this.expiresAt = expiresAt;
         this.cancelled = false;
         this.reservedItems = reservedItems;
+        this.reservedFluids = reservedFluids != null ? reservedFluids : new ArrayList<>();
         this.isInfinite = isInfinite;
     }
 
     public static Order fromSnapshot(EconomyOrderData.OrderSnapshot snap) {
         ResourceLocation rl = new ResourceLocation(snap.itemId);
-        Item item = BuiltInRegistries.ITEM.get(rl);
-        ItemCommodity commodity = new ItemCommodity(rl, item, BigDecimal.ZERO);
+        ICommodity commodity;
+        boolean isFluid = "FLUID".equals(snap.commodityType)
+                || (!snap.reservedFluids.isEmpty()
+                && BuiltInRegistries.FLUID.get(rl) != net.minecraft.world.level.material.Fluids.EMPTY);
+
+        if (isFluid) {
+            Fluid fluid = BuiltInRegistries.FLUID.get(rl);
+            commodity = new FluidCommodity(rl, fluid, BigDecimal.ZERO);
+        } else {
+            Item item = BuiltInRegistries.ITEM.get(rl);
+            commodity = new ItemCommodity(rl, item, BigDecimal.ZERO);
+        }
         Instant expires = snap.hasExpiry ? Instant.ofEpochMilli(snap.expiresAt) : null;
         Order order = new Order(snap.owner, commodity, snap.quantity, snap.initialQuantity,
             new BigDecimal(snap.pricePerUnit),
             snap.type.equals("SELL") ? OrderType.SELL : OrderType.BUY,
-            expires, snap.reservedItems, snap.isInfinite);
+            expires, snap.reservedItems, snap.reservedFluids, snap.isInfinite);
         setField(order, "orderId", snap.orderId);
         setField(order, "createdAt", Instant.ofEpochMilli(snap.createdAt));
         if (snap.isServerOrder) {
@@ -96,12 +119,13 @@ public class Order implements IOrder {
     }
 
     public EconomyOrderData.OrderSnapshot toSnapshot() {
+        String typeStr = commodity instanceof FluidCommodity ? "FLUID" : "ITEM";
         return new EconomyOrderData.OrderSnapshot(
             orderId, owner, commodity.getId().toString(),
             quantity, initialQuantity, pricePerUnit.toPlainString(),
             type.name(), createdAt.toEpochMilli(),
             expiresAt != null ? expiresAt.toEpochMilli() : 0,
-            expiresAt != null, reservedItems, serverOrder, isInfinite
+            expiresAt != null, reservedItems, reservedFluids, serverOrder, isInfinite, typeStr
         );
     }
 
@@ -191,6 +215,9 @@ public class Order implements IOrder {
         if (commodity instanceof ItemCommodity ic && ic.getItem() == net.minecraft.world.item.Items.AIR) {
             return false;
         }
+        if (commodity instanceof FluidCommodity fc && fc.getFluid() == net.minecraft.world.level.material.Fluids.EMPTY) {
+            return false;
+        }
         return true;
     }
 
@@ -244,23 +271,56 @@ public class Order implements IOrder {
         IBankAccount buyerAccount = accounts.getOrCreatePlayerAccount(buyer);
         BigDecimal totalPrice = getTotalPrice();
 
+        if (level != null && commodity instanceof FluidCommodity fc) {
+            if (!serverOrder && getReservedFluidAmount() < quantity) {
+                return TransactionResult.failure("Sell order does not have enough reserved fluid");
+            }
+            if (TankManager.countAvailableFluidSpaceInTanks(level, buyer, fc.getFluid()) < quantity) {
+                return TransactionResult.failure("Buyer does not have enough compatible Tank space");
+            }
+        }
+
         if (!buyerAccount.transferTo(sellerAccount, totalPrice,
                 TransactionContext.transfer("Purchase of " + commodity.getDisplayName().getString(), buyer))) {
             return TransactionResult.failure("Payment failed");
         }
 
-        if (level != null && item != null) {
-            NonNullList<ItemStack> deliverItems = getItemsToDeliver(item, quantity);
-            if (!deliverItems.isEmpty()) {
-                if (!VaultManager.hasVault(buyer)) {
-                    sellerAccount.transferTo(buyerAccount, totalPrice,
-                            TransactionContext.transfer("Refund - buyer has no vault", buyer));
-                    return TransactionResult.failure("Buyer does not have a Vault block to receive items");
+        if (level != null) {
+            if (commodity instanceof ItemCommodity ic && ic.getItem() != null) {
+                NonNullList<ItemStack> deliverItems = getItemsToDeliver(ic.getItem(), quantity);
+                if (!deliverItems.isEmpty()) {
+                    if (!VaultManager.hasVault(buyer)) {
+                        sellerAccount.transferTo(buyerAccount, totalPrice,
+                                TransactionContext.transfer("Refund - buyer has no vault", buyer));
+                        return TransactionResult.failure("Buyer does not have a Vault block to receive items");
+                    }
+                    if (!VaultManager.insertItemStacksToVaults(level, buyer, deliverItems)) {
+                        sellerAccount.transferTo(buyerAccount, totalPrice,
+                                TransactionContext.transfer("Refund - buyer vault full", buyer));
+                        return TransactionResult.failure("Buyer's vault is full");
+                    }
                 }
-                if (!VaultManager.insertItemStacksToVaults(level, buyer, deliverItems)) {
+            } else if (commodity instanceof FluidCommodity fc) {
+                int delivered = 0;
+                int remaining = quantity;
+                if (serverOrder) {
+                    delivered = TankManager.insertFluidToTanks(level, buyer, new FluidStack(fc.getFluid(), quantity));
+                    remaining -= delivered;
+                } else {
+                    for (FluidStack fs : reservedFluids) {
+                        int take = Math.min(remaining, fs.getAmount());
+                        FluidStack toDeliver = fs.copy();
+                        toDeliver.setAmount(take);
+                        int inserted = TankManager.insertFluidToTanks(level, buyer, toDeliver);
+                        delivered += inserted;
+                        remaining -= inserted;
+                        if (remaining <= 0) break;
+                    }
+                }
+                if (delivered < quantity) {
                     sellerAccount.transferTo(buyerAccount, totalPrice,
-                            TransactionContext.transfer("Refund - buyer vault full", buyer));
-                    return TransactionResult.failure("Buyer's vault is full");
+                            TransactionContext.transfer("Refund - buyer tank full", buyer));
+                    return TransactionResult.failure("Buyer's tank is full");
                 }
             }
         }
@@ -268,33 +328,75 @@ public class Order implements IOrder {
         int tradedQty = this.quantity;
         this.quantity = 0;
         TradeLedger.recordTrade(commodity.getId().toString(), pricePerUnit, tradedQty, buyer, owner);
-        notifyPlayerTrade(level, buyer, owner, true, commodity.getDisplayName().getString(), tradedQty, pricePerUnit, totalPrice);
-        notifyPlayerTrade(level, owner, buyer, false, commodity.getDisplayName().getString(), tradedQty, pricePerUnit, totalPrice);
+        notifyPlayerTrade(level, buyer, owner, true, commodity.getDisplayName().getString(), commodity instanceof FluidCommodity, tradedQty, pricePerUnit, totalPrice);
+        notifyPlayerTrade(level, owner, buyer, false, commodity.getDisplayName().getString(), commodity instanceof FluidCommodity, tradedQty, pricePerUnit, totalPrice);
         return TransactionResult.success("Purchase successful", totalPrice, tradedQty);
     }
 
     private TransactionResult executeBuy(UUID seller, IAccountManager accounts, Item item, ServerLevel level) {
-        IBankAccount buyerAccount = accounts.getServerAccount();
+        IBankAccount buyerAccount = serverOrder
+                ? accounts.getServerAccount()
+                : accounts.getOrCreatePlayerAccount(owner);
         IBankAccount sellerAccount = accounts.getOrCreatePlayerAccount(seller);
         BigDecimal totalPrice = getTotalPrice();
 
-        if (level != null && item != null) {
-            if (!VaultManager.hasVault(seller)) {
-                return TransactionResult.failure("You do not have a Vault block with the required items");
-            }
-            if (VaultManager.countItemInVaults(level, seller, item) < quantity) {
-                return TransactionResult.failure("Not enough items in your vault(s)");
-            }
+        if (level != null) {
+            if (commodity instanceof ItemCommodity ic && ic.getItem() != null) {
+                Item it = ic.getItem();
+                if (!VaultManager.hasVault(seller)) {
+                    return TransactionResult.failure("You do not have a Vault block with the required items");
+                }
+                if (VaultManager.countItemInVaults(level, seller, it) < quantity) {
+                    return TransactionResult.failure("Not enough items in your vault(s)");
+                }
 
-            NonNullList<ItemStack> extracted = NonNullList.create();
-            if (!VaultManager.extractItemFromVaults(level, seller, item, quantity, extracted)) {
-                return TransactionResult.failure("Failed to extract items from vault(s)");
-            }
+                NonNullList<ItemStack> extracted = NonNullList.create();
+                if (!VaultManager.extractItemFromVaults(level, seller, it, quantity, extracted)) {
+                    return TransactionResult.failure("Failed to extract items from vault(s)");
+                }
 
-            if (!serverOrder) {
-                if (!VaultManager.hasVault(owner) || !VaultManager.insertItemStacksToVaults(level, owner, copyStacks(extracted))) {
-                    VaultManager.insertItemStacksToVaults(level, seller, extracted);
-                    return TransactionResult.failure("Buyer's vault is full or missing");
+                if (!serverOrder) {
+                    if (!VaultManager.hasVault(owner) || !VaultManager.insertItemStacksToVaults(level, owner, copyStacks(extracted))) {
+                        VaultManager.insertItemStacksToVaults(level, seller, extracted);
+                        return TransactionResult.failure("Buyer's vault is full or missing");
+                    }
+                }
+            } else if (commodity instanceof FluidCommodity fc) {
+                Fluid f = fc.getFluid();
+                if (!TankManager.hasTank(seller)) {
+                    return TransactionResult.failure("You do not have a Tank block with the required fluid");
+                }
+                if (TankManager.countFluidInTanks(level, seller, f) < quantity) {
+                    return TransactionResult.failure("Not enough fluid in your tank(s)");
+                }
+                if (!serverOrder
+                        && TankManager.countAvailableFluidSpaceInTanks(level, owner, f) < quantity) {
+                    return TransactionResult.failure("Buyer's tank is full or missing");
+                }
+
+                List<FluidStack> extracted = new ArrayList<>();
+                int drained = TankManager.extractFluidFromTanks(level, seller, f, quantity, extracted);
+                if (drained < quantity) {
+                    for (FluidStack fs : extracted) {
+                        TankManager.restoreFluidToTanks(level, seller, fs);
+                    }
+                    return TransactionResult.failure("Failed to extract fluid from tank(s)");
+                }
+
+                if (!serverOrder) {
+                    if (!TankManager.hasTank(owner)) {
+                        for (FluidStack fs : extracted) {
+                            TankManager.restoreFluidToTanks(level, seller, fs);
+                        }
+                        return TransactionResult.failure("Buyer's tank is missing");
+                    }
+                    int totalInserted = 0;
+                    for (FluidStack fs : extracted) {
+                        totalInserted += TankManager.insertFluidToTanks(level, owner, fs);
+                    }
+                    if (totalInserted < drained) {
+                        return TransactionResult.failure("Buyer's tank is full");
+                    }
                 }
             }
         }
@@ -309,8 +411,8 @@ public class Order implements IOrder {
             this.quantity = 0;
         }
         TradeLedger.recordTrade(commodity.getId().toString(), pricePerUnit, tradedQty, owner, seller);
-        notifyPlayerTrade(level, owner, seller, true, commodity.getDisplayName().getString(), tradedQty, pricePerUnit, totalPrice);
-        notifyPlayerTrade(level, seller, owner, false, commodity.getDisplayName().getString(), tradedQty, pricePerUnit, totalPrice);
+        notifyPlayerTrade(level, owner, seller, true, commodity.getDisplayName().getString(), commodity instanceof FluidCommodity, tradedQty, pricePerUnit, totalPrice);
+        notifyPlayerTrade(level, seller, owner, false, commodity.getDisplayName().getString(), commodity instanceof FluidCommodity, tradedQty, pricePerUnit, totalPrice);
         return TransactionResult.success("Sale successful", totalPrice, tradedQty);
     }
 
@@ -322,7 +424,10 @@ public class Order implements IOrder {
         if (tradeQty <= 0) return TransactionResult.failure("Nothing to trade");
 
         IAccountManager accounts = IAccountManager.getInstance();
-        Item item = (commodity instanceof ItemCommodity ic) ? ic.getItem() : null;
+        boolean isItem = commodity instanceof ItemCommodity;
+        boolean isFluid = commodity instanceof FluidCommodity;
+        Item item = isItem ? ((ItemCommodity) commodity).getItem() : null;
+        Fluid fluid = isFluid ? ((FluidCommodity) commodity).getFluid() : null;
 
         if (type == OrderType.SELL) {
             boolean isServerBuyer = OrderManager.SERVER_ID.equals(trader);
@@ -333,16 +438,28 @@ public class Order implements IOrder {
                 tradeQty = capByFunds(tradeQty, buyerAccount);
                 if (tradeQty <= 0) return TransactionResult.failure("Buyer has insufficient funds");
             }
-            if (!isServerBuyer && level != null && item != null) {
-                ItemStack sampleStack = new ItemStack(item);
-                int vaultSpace = VaultManager.hasVault(trader)
-                        ? VaultManager.countAvailableSpaceInVaults(level, trader, sampleStack)
-                        : 0;
-                if (vaultSpace < tradeQty) {
-                    if (vaultSpace <= 0) {
-                        return TransactionResult.failure("Buyer has no Vault block");
+            if (isFluid && !serverOrder) {
+                tradeQty = Math.min(tradeQty, getReservedFluidAmount());
+                if (tradeQty <= 0) return TransactionResult.failure("Sell order has no reserved fluid");
+            }
+            if (!isServerBuyer && level != null) {
+                if (isItem && item != null) {
+                    ItemStack sampleStack = new ItemStack(item);
+                    int vaultSpace = VaultManager.hasVault(trader)
+                            ? VaultManager.countAvailableSpaceInVaults(level, trader, sampleStack)
+                            : 0;
+                    if (vaultSpace < tradeQty) {
+                        if (vaultSpace <= 0) return TransactionResult.failure("Buyer has no Vault block");
+                        tradeQty = vaultSpace;
                     }
-                    tradeQty = vaultSpace;
+                } else if (isFluid && fluid != null) {
+                    int tankSpace = TankManager.hasTank(trader)
+                            ? TankManager.countAvailableFluidSpaceInTanks(level, trader, fluid)
+                            : 0;
+                    if (tankSpace < tradeQty) {
+                        if (tankSpace <= 0) return TransactionResult.failure("Buyer has no Tank block");
+                        tradeQty = tankSpace;
+                    }
                 }
             }
 
@@ -353,30 +470,57 @@ public class Order implements IOrder {
                 return TransactionResult.failure("Payment failed");
             }
 
-            if (!isServerBuyer && level != null && item != null) {
-                NonNullList<ItemStack> itemsToDeliver = NonNullList.create();
-                if (!reservedItems.isEmpty()) {
-                    int itemsNeeded = tradeQty;
-                    var it = reservedItems.iterator();
-                    while (it.hasNext() && itemsNeeded > 0) {
-                        ItemStack stack = it.next();
-                        if (stack.isEmpty()) continue;
-                        int take = Math.min(itemsNeeded, stack.getCount());
-                        ItemStack split = stack.split(take);
-                        itemsToDeliver.add(split);
-                        itemsNeeded -= take;
-                        if (stack.isEmpty()) it.remove();
-                    }
-                } else if (serverOrder) {
-                    itemsToDeliver = generateItemStacks(item, tradeQty);
-                }
-                if (!itemsToDeliver.isEmpty() && !VaultManager.insertItemStacksToVaults(level, trader, itemsToDeliver)) {
-                    sellerAccount.transferTo(buyerAccount, totalPrice,
-                            TransactionContext.transfer("Refund - buyer vault full", trader));
+            if (!isServerBuyer && level != null) {
+                if (isItem) {
+                    NonNullList<ItemStack> itemsToDeliver = NonNullList.create();
                     if (!reservedItems.isEmpty()) {
-                        for (ItemStack s : itemsToDeliver) reservedItems.add(s);
+                        int itemsNeeded = tradeQty;
+                        var it = reservedItems.iterator();
+                        while (it.hasNext() && itemsNeeded > 0) {
+                            ItemStack stack = it.next();
+                            if (stack.isEmpty()) continue;
+                            int take = Math.min(itemsNeeded, stack.getCount());
+                            ItemStack split = stack.split(take);
+                            itemsToDeliver.add(split);
+                            itemsNeeded -= take;
+                            if (stack.isEmpty()) it.remove();
+                        }
+                    } else if (serverOrder && item != null) {
+                        itemsToDeliver = generateItemStacks(item, tradeQty);
                     }
-                    return TransactionResult.failure("Buyer's vault is full");
+                    if (!itemsToDeliver.isEmpty() && !VaultManager.insertItemStacksToVaults(level, trader, itemsToDeliver)) {
+                        sellerAccount.transferTo(buyerAccount, totalPrice,
+                                TransactionContext.transfer("Refund - buyer vault full", trader));
+                        if (!reservedItems.isEmpty()) {
+                            for (ItemStack s : itemsToDeliver) reservedItems.add(s);
+                        }
+                        return TransactionResult.failure("Buyer's vault is full");
+                    }
+                } else if (isFluid) {
+                    int fluidToDeliver = tradeQty;
+                    if (serverOrder && reservedFluids.isEmpty() && fluid != null) {
+                        fluidToDeliver -= TankManager.insertFluidToTanks(
+                                level, trader, new FluidStack(fluid, tradeQty));
+                    } else if (!reservedFluids.isEmpty()) {
+                        var it = reservedFluids.iterator();
+                        while (it.hasNext() && fluidToDeliver > 0) {
+                            FluidStack fs = it.next();
+                            int take = Math.min(fluidToDeliver, fs.getAmount());
+                            FluidStack toDeliver = fs.copy();
+                            toDeliver.setAmount(take);
+                            int inserted = TankManager.insertFluidToTanks(level, trader, toDeliver);
+                            fluidToDeliver -= inserted;
+                            if (inserted > 0) {
+                                fs.shrink(inserted);
+                                if (fs.isEmpty()) it.remove();
+                            }
+                        }
+                    }
+                    if (fluidToDeliver > 0) {
+                        sellerAccount.transferTo(buyerAccount, totalPrice,
+                                TransactionContext.transfer("Refund - buyer tank full", trader));
+                        return TransactionResult.failure("Buyer's tank is full");
+                    }
                 }
             } else if (isServerBuyer && !reservedItems.isEmpty()) {
                 int itemsNeeded = tradeQty;
@@ -389,12 +533,22 @@ public class Order implements IOrder {
                     itemsNeeded -= take;
                     if (stack.isEmpty()) it.remove();
                 }
+            } else if (isServerBuyer && !reservedFluids.isEmpty()) {
+                int fluidNeeded = tradeQty;
+                var it = reservedFluids.iterator();
+                while (it.hasNext() && fluidNeeded > 0) {
+                    FluidStack fs = it.next();
+                    int take = Math.min(fluidNeeded, fs.getAmount());
+                    fs.shrink(take);
+                    fluidNeeded -= take;
+                    if (fs.isEmpty()) it.remove();
+                }
             }
 
             this.quantity -= tradeQty;
             TradeLedger.recordTrade(commodity.getId().toString(), pricePerUnit, tradeQty, trader, owner);
-            notifyPlayerTrade(level, trader, owner, true, commodity.getDisplayName().getString(), tradeQty, pricePerUnit, totalPrice);
-            notifyPlayerTrade(level, owner, trader, false, commodity.getDisplayName().getString(), tradeQty, pricePerUnit, totalPrice);
+            notifyPlayerTrade(level, trader, owner, true, commodity.getDisplayName().getString(), commodity instanceof FluidCommodity, tradeQty, pricePerUnit, totalPrice);
+            notifyPlayerTrade(level, owner, trader, false, commodity.getDisplayName().getString(), commodity instanceof FluidCommodity, tradeQty, pricePerUnit, totalPrice);
             if (level != null) {
                 com.nstut.economy.data.EconomyAccountData.recordSnapshot(trader, level);
                 com.nstut.economy.data.EconomyAccountData.recordSnapshot(owner, level);
@@ -404,12 +558,21 @@ public class Order implements IOrder {
             IBankAccount buyerAccount = serverOrder ? accounts.getServerAccount() : accounts.getOrCreatePlayerAccount(owner);
             IBankAccount sellerAccount = accounts.getOrCreatePlayerAccount(trader);
 
-            if (level != null && item != null) {
-                int availableInVault = VaultManager.countItemInVaults(level, trader, item);
-                if (availableInVault <= 0) {
-                    return TransactionResult.failure("No items in seller vault(s)");
+            if (level != null) {
+                if (isItem && item != null) {
+                    int availableInVault = VaultManager.countItemInVaults(level, trader, item);
+                    if (availableInVault <= 0) return TransactionResult.failure("No items in seller vault(s)");
+                    tradeQty = Math.min(tradeQty, availableInVault);
+                } else if (isFluid && fluid != null) {
+                    int availableInTank = TankManager.countFluidInTanks(level, trader, fluid);
+                    if (availableInTank <= 0) return TransactionResult.failure("No fluid in seller tank(s)");
+                    tradeQty = Math.min(tradeQty, availableInTank);
+                    if (!serverOrder) {
+                        int buyerSpace = TankManager.countAvailableFluidSpaceInTanks(level, owner, fluid);
+                        if (buyerSpace <= 0) return TransactionResult.failure("Buyer has no compatible Tank space");
+                        tradeQty = Math.min(tradeQty, buyerSpace);
+                    }
                 }
-                tradeQty = Math.min(tradeQty, availableInVault);
             }
 
             if (!serverOrder && !buyerAccount.hasSufficientFunds(pricePerUnit.multiply(BigDecimal.valueOf(tradeQty)))) {
@@ -419,15 +582,41 @@ public class Order implements IOrder {
 
             BigDecimal totalPrice = pricePerUnit.multiply(BigDecimal.valueOf(tradeQty));
 
-            if (level != null && item != null) {
-                NonNullList<ItemStack> extracted = NonNullList.create();
-                if (!VaultManager.extractItemFromVaults(level, trader, item, tradeQty, extracted)) {
-                    return TransactionResult.failure("Failed to extract items from seller vault(s)");
-                }
-                if (!serverOrder) {
-                    if (!VaultManager.hasVault(owner) || !VaultManager.insertItemStacksToVaults(level, owner, copyStacks(extracted))) {
-                        VaultManager.insertItemStacksToVaults(level, trader, extracted);
-                        return TransactionResult.failure("Buyer's vault is full or missing");
+            if (level != null) {
+                if (isItem && item != null) {
+                    NonNullList<ItemStack> extracted = NonNullList.create();
+                    if (!VaultManager.extractItemFromVaults(level, trader, item, tradeQty, extracted)) {
+                        return TransactionResult.failure("Failed to extract items from seller vault(s)");
+                    }
+                    if (!serverOrder) {
+                        if (!VaultManager.hasVault(owner) || !VaultManager.insertItemStacksToVaults(level, owner, copyStacks(extracted))) {
+                            VaultManager.insertItemStacksToVaults(level, trader, extracted);
+                            return TransactionResult.failure("Buyer's vault is full or missing");
+                        }
+                    }
+                } else if (isFluid && fluid != null) {
+                    List<FluidStack> extracted = new ArrayList<>();
+                    int drained = TankManager.extractFluidFromTanks(level, trader, fluid, tradeQty, extracted);
+                    if (drained < tradeQty) {
+                        for (FluidStack fs : extracted) {
+                            TankManager.restoreFluidToTanks(level, trader, fs);
+                        }
+                        return TransactionResult.failure("Failed to extract fluid from seller tank(s)");
+                    }
+                    if (!serverOrder) {
+                        if (!TankManager.hasTank(owner)) {
+                            for (FluidStack fs : extracted) {
+                                TankManager.restoreFluidToTanks(level, trader, fs);
+                            }
+                            return TransactionResult.failure("Buyer has no Tank block");
+                        }
+                        int totalInserted = 0;
+                        for (FluidStack fs : extracted) {
+                            totalInserted += TankManager.insertFluidToTanks(level, owner, fs);
+                        }
+                        if (totalInserted < drained) {
+                            return TransactionResult.failure("Buyer's tank is full");
+                        }
                     }
                 }
             }
@@ -441,8 +630,8 @@ public class Order implements IOrder {
                 this.quantity -= tradeQty;
             }
             TradeLedger.recordTrade(commodity.getId().toString(), pricePerUnit, tradeQty, owner, trader);
-            notifyPlayerTrade(level, owner, trader, true, commodity.getDisplayName().getString(), tradeQty, pricePerUnit, totalPrice);
-            notifyPlayerTrade(level, trader, owner, false, commodity.getDisplayName().getString(), tradeQty, pricePerUnit, totalPrice);
+            notifyPlayerTrade(level, owner, trader, true, commodity.getDisplayName().getString(), commodity instanceof FluidCommodity, tradeQty, pricePerUnit, totalPrice);
+            notifyPlayerTrade(level, trader, owner, false, commodity.getDisplayName().getString(), commodity instanceof FluidCommodity, tradeQty, pricePerUnit, totalPrice);
             if (level != null) {
                 com.nstut.economy.data.EconomyAccountData.recordSnapshot(owner, level);
                 com.nstut.economy.data.EconomyAccountData.recordSnapshot(trader, level);
@@ -451,7 +640,9 @@ public class Order implements IOrder {
         }
     }
 
-    private static void notifyPlayerTrade(ServerLevel level, UUID playerUUID, UUID counterpartyUUID, boolean isBuy, String itemName, int qty, BigDecimal pricePerUnit, BigDecimal totalPrice) {
+    private static void notifyPlayerTrade(ServerLevel level, UUID playerUUID, UUID counterpartyUUID,
+                                          boolean isBuy, String itemName, boolean isFluid, int qty,
+                                          BigDecimal pricePerUnit, BigDecimal totalPrice) {
         if (level == null || playerUUID == null) return;
         net.minecraft.server.level.ServerPlayer p = level.getServer().getPlayerList().getPlayer(playerUUID);
         if (p != null) {
@@ -464,13 +655,17 @@ public class Order implements IOrder {
             String prep = isBuy ? "from" : "to";
             String formattedTotal = com.nstut.economy.util.EconomyFormatUtil.formatCompact(totalPrice);
             String formattedUnit = com.nstut.economy.util.EconomyFormatUtil.formatCompact(pricePerUnit);
+            String formattedQuantity = com.nstut.economy.util.EconomyFormatUtil
+                    .formatCommodityQuantity(qty, isFluid);
 
-            String costDetails = (qty > 1) 
-                ? ("§e" + formattedUnit + " §fcoins each (Total: §e" + formattedTotal + " §fcoins)")
+            String costDetails = (qty > 1)
+                ? ("§e" + formattedUnit + (isFluid ? " §fcoins per mB" : " §fcoins each")
+                    + " (Total: §e" + formattedTotal + " §fcoins)")
                 : ("§e" + formattedTotal + " §fcoins");
 
             net.minecraft.network.chat.Component msg = net.minecraft.network.chat.Component.literal(
-                "§2[Market] §aOrder Matched! §f" + action + " §e" + qty + "x " + itemName + " §ffor " + costDetails + " " + prep + " §b" + counterpartyName + "§f."
+                "§2[Market] §aOrder Matched! §f" + action + " §e" + formattedQuantity + " of "
+                    + itemName + " §ffor " + costDetails + " " + prep + " §b" + counterpartyName + "§f."
             );
             p.sendSystemMessage(msg);
         }
@@ -497,6 +692,16 @@ public class Order implements IOrder {
         BigDecimal balance = account.getBalance();
         BigDecimal affordable = balance.divide(pricePerUnit, 0, java.math.RoundingMode.DOWN);
         return Math.min(tradeQty, Math.max(0, affordable.intValue()));
+    }
+
+    private int getReservedFluidAmount() {
+        int total = 0;
+        for (FluidStack stack : reservedFluids) {
+            if (!stack.isEmpty()) {
+                total += stack.getAmount();
+            }
+        }
+        return total;
     }
 
     private static NonNullList<ItemStack> copyStacks(NonNullList<ItemStack> original) {
@@ -531,6 +736,10 @@ public class Order implements IOrder {
 
     public NonNullList<ItemStack> getReservedItems() {
         return reservedItems;
+    }
+
+    public List<FluidStack> getReservedFluids() {
+        return reservedFluids;
     }
 
     @Override

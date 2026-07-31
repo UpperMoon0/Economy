@@ -3,14 +3,19 @@ package com.nstut.forge.network;
 import com.nstut.Economy;
 import com.nstut.economy.api.IAccountManager;
 import com.nstut.economy.api.IOrder;
+import com.nstut.economy.blocks.TankBlockEntity;
+import com.nstut.economy.blocks.TankManager;
+import com.nstut.economy.blocks.TankMenu;
 import com.nstut.economy.blocks.VaultBlockEntity;
 import com.nstut.economy.blocks.VaultManager;
 import com.nstut.economy.config.EconomyConfig;
 import com.nstut.economy.data.EconomyTradeData;
 import com.nstut.economy.data.TradeLedger;
+import com.nstut.economy.trading.FluidCommodity;
 import com.nstut.economy.trading.ItemCommodity;
 import com.nstut.economy.trading.Order;
 import com.nstut.economy.trading.OrderManager;
+import com.nstut.economy.util.CommodityUtil;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
@@ -19,6 +24,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.material.Fluid;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.fml.DistExecutor;
 import net.minecraftforge.network.NetworkEvent;
@@ -36,7 +42,7 @@ import java.util.UUID;
 import java.util.function.Supplier;
 
 public class MarketNetwork {
-    private static final String PROTOCOL_VERSION = "1";
+    private static final String PROTOCOL_VERSION = "2";
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             new ResourceLocation(Economy.MOD_ID, "market"),
             () -> PROTOCOL_VERSION,
@@ -58,6 +64,7 @@ public class MarketNetwork {
         CHANNEL.registerMessage(packetId++, RequestVaultInfoPacket.class, RequestVaultInfoPacket::encode, RequestVaultInfoPacket::decode, RequestVaultInfoPacket::handle);
         CHANNEL.registerMessage(packetId++, SyncVaultInfoPacket.class, SyncVaultInfoPacket::encode, SyncVaultInfoPacket::decode, SyncVaultInfoPacket::handle);
         CHANNEL.registerMessage(packetId++, ToggleVaultModePacket.class, ToggleVaultModePacket::encode, ToggleVaultModePacket::decode, ToggleVaultModePacket::handle);
+        CHANNEL.registerMessage(packetId++, ToggleTankModePacket.class, ToggleTankModePacket::encode, ToggleTankModePacket::decode, ToggleTankModePacket::handle);
         CHANNEL.registerMessage(packetId++, RequestPortfolioPacket.class, RequestPortfolioPacket::encode, RequestPortfolioPacket::decode, RequestPortfolioPacket::handle);
         CHANNEL.registerMessage(packetId++, SyncPortfolioPacket.class, SyncPortfolioPacket::encode, SyncPortfolioPacket::decode, SyncPortfolioPacket::handle);
         CHANNEL.registerMessage(packetId++, EditOrderPacket.class, EditOrderPacket::encode, EditOrderPacket::decode, EditOrderPacket::handle);
@@ -71,10 +78,15 @@ public class MarketNetwork {
         public final String globalPrice;
         public final int offerCount;
         public final double priceChangePercent;
+        public final String commodityType;
+
+        public ItemCardData(String itemId, String displayName, String globalPrice, int offerCount, double priceChangePercent, String commodityType) {
+            this.itemId = itemId; this.displayName = displayName; this.globalPrice = globalPrice; this.offerCount = offerCount;
+            this.priceChangePercent = priceChangePercent; this.commodityType = commodityType;
+        }
 
         public ItemCardData(String itemId, String displayName, String globalPrice, int offerCount, double priceChangePercent) {
-            this.itemId = itemId; this.displayName = displayName; this.globalPrice = globalPrice; this.offerCount = offerCount;
-            this.priceChangePercent = priceChangePercent;
+            this(itemId, displayName, globalPrice, offerCount, priceChangePercent, "ITEM");
         }
 
         public void write(FriendlyByteBuf buf) {
@@ -83,10 +95,11 @@ public class MarketNetwork {
             buf.writeUtf(globalPrice);
             buf.writeInt(offerCount);
             buf.writeDouble(priceChangePercent);
+            buf.writeUtf(commodityType);
         }
 
         public static ItemCardData read(FriendlyByteBuf buf) {
-            return new ItemCardData(buf.readUtf(), buf.readUtf(), buf.readUtf(), buf.readInt(), buf.readDouble());
+            return new ItemCardData(buf.readUtf(), buf.readUtf(), buf.readUtf(), buf.readInt(), buf.readDouble(), buf.readUtf());
         }
     }
 
@@ -253,21 +266,26 @@ public class MarketNetwork {
         public final String pricePerUnit;
         public final boolean isSell;
         public final boolean isInfinite;
+        public final String commodityType;
+
+        public CreateOrderPacket(String itemId, int quantity, String pricePerUnit, boolean isSell, boolean isInfinite, String commodityType) {
+            this.itemId = itemId; this.quantity = quantity; this.pricePerUnit = pricePerUnit; this.isSell = isSell; this.isInfinite = isInfinite; this.commodityType = commodityType;
+        }
 
         public CreateOrderPacket(String itemId, int quantity, String pricePerUnit, boolean isSell, boolean isInfinite) {
-            this.itemId = itemId; this.quantity = quantity; this.pricePerUnit = pricePerUnit; this.isSell = isSell; this.isInfinite = isInfinite;
+            this(itemId, quantity, pricePerUnit, isSell, isInfinite, "ITEM");
         }
 
         public CreateOrderPacket(String itemId, int quantity, String pricePerUnit, boolean isSell) {
-            this(itemId, quantity, pricePerUnit, isSell, false);
+            this(itemId, quantity, pricePerUnit, isSell, false, "ITEM");
         }
 
         public static void encode(CreateOrderPacket pkt, FriendlyByteBuf buf) {
-            buf.writeUtf(pkt.itemId); buf.writeInt(pkt.quantity); buf.writeUtf(pkt.pricePerUnit); buf.writeBoolean(pkt.isSell); buf.writeBoolean(pkt.isInfinite);
+            buf.writeUtf(pkt.itemId); buf.writeInt(pkt.quantity); buf.writeUtf(pkt.pricePerUnit); buf.writeBoolean(pkt.isSell); buf.writeBoolean(pkt.isInfinite); buf.writeUtf(pkt.commodityType);
         }
 
         public static CreateOrderPacket decode(FriendlyByteBuf buf) {
-            return new CreateOrderPacket(buf.readUtf(), buf.readInt(), buf.readUtf(), buf.readBoolean(), buf.readBoolean());
+            return new CreateOrderPacket(buf.readUtf(), buf.readInt(), buf.readUtf(), buf.readBoolean(), buf.readBoolean(), buf.readUtf());
         }
 
         public static void handle(CreateOrderPacket pkt, Supplier<NetworkEvent.Context> ctx) {
@@ -276,19 +294,42 @@ public class MarketNetwork {
                 if (player == null) return;
                 ServerLevel level = player.serverLevel();
                 OrderManager orderManager = Economy.getOrderManager();
-
-                Item item = BuiltInRegistries.ITEM.get(new ResourceLocation(pkt.itemId));
-                if (item == net.minecraft.world.item.Items.AIR) { sendItemList(player); return; }
                 BigDecimal price = new BigDecimal(pkt.pricePerUnit);
-                ItemCommodity commodity = new ItemCommodity(new ResourceLocation(pkt.itemId), item, BigDecimal.ZERO);
 
-                if (pkt.isSell) {
-                    if (VaultManager.countItemInVaults(level, player.getUUID(), item) < pkt.quantity) { sendItemDetail(player, pkt.itemId); return; }
-                    net.minecraft.core.NonNullList<net.minecraft.world.item.ItemStack> reserved = net.minecraft.core.NonNullList.create();
-                    if (!VaultManager.extractItemFromVaults(level, player.getUUID(), item, pkt.quantity, reserved)) { sendItemDetail(player, pkt.itemId); return; }
-                    orderManager.createSellOrder(player.getUUID(), commodity, pkt.quantity, price, reserved, level);
+                if ("FLUID".equals(pkt.commodityType)) {
+                    Fluid fluid = BuiltInRegistries.FLUID.get(new ResourceLocation(pkt.itemId));
+                    if (!CommodityUtil.isCanonicalFluid(fluid)) { sendItemList(player); return; }
+                    FluidCommodity commodity = new FluidCommodity(new ResourceLocation(pkt.itemId), fluid, BigDecimal.ZERO);
+
+                    if (pkt.isSell) {
+                        if (TankManager.countFluidInTanks(level, player.getUUID(), fluid) < pkt.quantity) { sendItemDetail(player, pkt.itemId); return; }
+                        List<net.minecraftforge.fluids.FluidStack> reservedFluids = new ArrayList<>();
+                        int drained = TankManager.extractFluidFromTanks(level, player.getUUID(), fluid, pkt.quantity, reservedFluids);
+                        if (drained < pkt.quantity) {
+                            for (var reservedFluid : reservedFluids) {
+                                TankManager.restoreFluidToTanks(level, player.getUUID(), reservedFluid);
+                            }
+                            sendItemDetail(player, pkt.itemId);
+                            return;
+                        }
+                        orderManager.createSellOrder(player.getUUID(), commodity, pkt.quantity, price,
+                                net.minecraft.core.NonNullList.create(), reservedFluids, level);
+                    } else {
+                        orderManager.createBuyOrder(player.getUUID(), commodity, pkt.quantity, price, pkt.isInfinite, level);
+                    }
                 } else {
-                    orderManager.createBuyOrder(player.getUUID(), commodity, pkt.quantity, price, pkt.isInfinite, level);
+                    Item item = BuiltInRegistries.ITEM.get(new ResourceLocation(pkt.itemId));
+                    if (item == net.minecraft.world.item.Items.AIR) { sendItemList(player); return; }
+                    ItemCommodity commodity = new ItemCommodity(new ResourceLocation(pkt.itemId), item, BigDecimal.ZERO);
+
+                    if (pkt.isSell) {
+                        if (VaultManager.countItemInVaults(level, player.getUUID(), item) < pkt.quantity) { sendItemDetail(player, pkt.itemId); return; }
+                        net.minecraft.core.NonNullList<net.minecraft.world.item.ItemStack> reserved = net.minecraft.core.NonNullList.create();
+                        if (!VaultManager.extractItemFromVaults(level, player.getUUID(), item, pkt.quantity, reserved)) { sendItemDetail(player, pkt.itemId); return; }
+                        orderManager.createSellOrder(player.getUUID(), commodity, pkt.quantity, price, reserved, level);
+                    } else {
+                        orderManager.createBuyOrder(player.getUUID(), commodity, pkt.quantity, price, pkt.isInfinite, level);
+                    }
                 }
                 orderManager.matchAllPendingOrders(level);
                 sendItemDetail(player, pkt.itemId);
@@ -318,6 +359,8 @@ public class MarketNetwork {
                 orderManager.cleanupOrders();
                 if (order.getCommodity() instanceof ItemCommodity ic) {
                     sendItemDetail(player, ic.getId().toString());
+                } else if (order.getCommodity() instanceof FluidCommodity fc) {
+                    sendItemDetail(player, fc.getId().toString());
                 } else {
                     sendItemList(player);
                 }
@@ -342,8 +385,14 @@ public class MarketNetwork {
                 var opt = orderManager.getOrder(pkt.orderId);
                 if (opt.isPresent() && opt.get().getOwner().equals(player.getUUID())) {
                     Order order = opt.get();
-                    if (order.getType() == IOrder.OrderType.SELL && !order.getReservedItems().isEmpty()) {
-                        VaultManager.insertItemStacksToVaults(player.serverLevel(), player.getUUID(), order.getReservedItems());
+                    if (order.getType() == IOrder.OrderType.SELL) {
+                        if (order.getCommodity() instanceof FluidCommodity fc && !order.getReservedFluids().isEmpty()) {
+                            for (var fs : order.getReservedFluids()) {
+                                TankManager.restoreFluidToTanks(player.serverLevel(), player.getUUID(), fs);
+                            }
+                        } else if (!order.getReservedItems().isEmpty()) {
+                            VaultManager.insertItemStacksToVaults(player.serverLevel(), player.getUUID(), order.getReservedItems());
+                        }
                     }
                     order.cancel();
                     orderManager.cleanupOrders();
@@ -351,6 +400,8 @@ public class MarketNetwork {
                 sendActiveOrders(player);
                 if (opt.isPresent() && opt.get().getCommodity() instanceof ItemCommodity ic) {
                     sendItemDetail(player, ic.getId().toString());
+                } else if (opt.isPresent() && opt.get().getCommodity() instanceof FluidCommodity fc) {
+                    sendItemDetail(player, fc.getId().toString());
                 } else {
                     sendItemList(player);
                 }
@@ -390,6 +441,8 @@ public class MarketNetwork {
                 sendItemList(player);
                 if (opt.isPresent() && opt.get().getCommodity() instanceof ItemCommodity ic) {
                     sendItemDetail(player, ic.getId().toString());
+                } else if (opt.isPresent() && opt.get().getCommodity() instanceof FluidCommodity fc) {
+                    sendItemDetail(player, fc.getId().toString());
                 }
             });
             ctx.get().setPacketHandled(true);
@@ -474,9 +527,17 @@ public class MarketNetwork {
 
         List<ActiveOrderEntry> entries = new ArrayList<>();
         for (Order o : playerOrders) {
-            if (!(o.getCommodity() instanceof ItemCommodity ic)) continue;
-            String itemId = ic.getItem().builtInRegistryHolder().key().location().toString();
-            String displayName = new ItemStack(ic.getItem()).getHoverName().getString();
+            String itemId;
+            String displayName;
+            if (o.getCommodity() instanceof ItemCommodity ic) {
+                itemId = ic.getItem().builtInRegistryHolder().key().location().toString();
+                displayName = new ItemStack(ic.getItem()).getHoverName().getString();
+            } else if (o.getCommodity() instanceof FluidCommodity fc) {
+                itemId = fc.getId().toString();
+                displayName = new net.minecraftforge.fluids.FluidStack(fc.getFluid(), 1000).getDisplayName().getString();
+            } else {
+                continue;
+            }
             String priceStr = o.getPricePerUnit().setScale(0, RoundingMode.HALF_UP).toPlainString();
             boolean isSell = o.getType() == IOrder.OrderType.SELL;
 
@@ -508,8 +569,14 @@ public class MarketNetwork {
         BigDecimal highestBid = null;
 
         for (Order order : orderManager.getAllOrders()) {
-            if (!(order.getCommodity() instanceof ItemCommodity ic)) continue;
-            String id = ic.getItem().builtInRegistryHolder().key().location().toString();
+            String id;
+            if (order.getCommodity() instanceof ItemCommodity ic) {
+                id = ic.getItem().builtInRegistryHolder().key().location().toString();
+            } else if (order.getCommodity() instanceof FluidCommodity fc) {
+                id = fc.getId().toString();
+            } else {
+                continue;
+            }
             if (!id.equals(itemId)) continue;
 
             BigDecimal price = order.getPricePerUnit();
@@ -552,8 +619,14 @@ public class MarketNetwork {
 
         // 1. Items with active orders
         for (Order order : orderManager.getAllOrders()) {
-            if (!(order.getCommodity() instanceof ItemCommodity ic)) continue;
-            String itemId = ic.getItem().builtInRegistryHolder().key().location().toString();
+            String itemId;
+            if (order.getCommodity() instanceof ItemCommodity ic) {
+                itemId = ic.getItem().builtInRegistryHolder().key().location().toString();
+            } else if (order.getCommodity() instanceof FluidCommodity fc) {
+                itemId = fc.getId().toString();
+            } else {
+                continue;
+            }
             itemIds.add(itemId);
             counts.merge(itemId, 1, Integer::sum);
         }
@@ -565,43 +638,32 @@ public class MarketNetwork {
             }
         }
 
-        // 3. Items inside player's Vaults
-        for (var vault : VaultManager.getVaults(player.serverLevel(), player.getUUID())) {
-            for (int s = 0; s < vault.getContainerSize(); s++) {
-                net.minecraft.world.item.ItemStack stack = vault.getItem(s);
-                if (!stack.isEmpty()) {
-                    String id = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
-                    itemIds.add(id);
-                }
-            }
-        }
-
-        // 4. Default commodity catalog items
-        itemIds.add("minecraft:diamond");
-        itemIds.add("minecraft:iron_ingot");
-        itemIds.add("minecraft:gold_ingot");
-        itemIds.add("minecraft:emerald");
-        itemIds.add("minecraft:netherite_ingot");
-        itemIds.add("minecraft:copper_ingot");
-        itemIds.add("minecraft:coal");
-        itemIds.add("minecraft:redstone");
-        itemIds.add("minecraft:lapis_lazuli");
-        itemIds.add("minecraft:quartz");
-        itemIds.add("minecraft:amethyst_shard");
-
         List<ItemCardData> cards = new ArrayList<>();
-        for (String itemId : itemIds) {
-            ResourceLocation rl = new ResourceLocation(itemId);
+        for (String commodityId : itemIds) {
+            ResourceLocation rl = new ResourceLocation(commodityId);
+
+            Fluid fluid = BuiltInRegistries.FLUID.get(rl);
             Item item = BuiltInRegistries.ITEM.get(rl);
-            if (item == net.minecraft.world.item.Items.AIR) continue;
+            String displayName;
+            boolean isFluid = false;
 
-            String displayName = new net.minecraft.world.item.ItemStack(item).getHoverName().getString();
+            if (fluid != net.minecraft.world.level.material.Fluids.EMPTY && !fluid.getFluidType().isAir()) {
+                isFluid = true;
+                displayName = new net.minecraftforge.fluids.FluidStack(fluid, 1000).getDisplayName().getString();
+                com.nstut.Economy.LOGGER.info("[sendItemList] Detected FLUID: id={}, name={}", commodityId, displayName);
+            } else if (item != net.minecraft.world.item.Items.AIR) {
+                displayName = new net.minecraft.world.item.ItemStack(item).getHoverName().getString();
+            } else {
+                continue;
+            }
 
-            BigDecimal effectivePrice = getGlobalPrice(orderManager, itemId);
-            if (effectivePrice == null) continue;
+            BigDecimal effectivePrice = getGlobalPrice(orderManager, commodityId);
+            if (effectivePrice == null) {
+                effectivePrice = BigDecimal.ZERO;
+            }
 
             double priceChange = Double.NaN;
-            var trades = TradeLedger.getRecentTrades(itemId, 50);
+            var trades = TradeLedger.getRecentTrades(commodityId, 50);
             if (!trades.isEmpty()) {
                 try {
                     double curP = effectivePrice.doubleValue();
@@ -622,7 +684,8 @@ public class MarketNetwork {
             }
 
             String priceStr = effectivePrice.setScale(0, RoundingMode.HALF_UP).toPlainString();
-            cards.add(new ItemCardData(itemId, displayName, priceStr, counts.getOrDefault(itemId, 0), priceChange));
+            String typeStr = isFluid ? "FLUID" : "ITEM";
+            cards.add(new ItemCardData(commodityId, displayName, priceStr, counts.getOrDefault(commodityId, 0), priceChange, typeStr));
         }
 
         CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), new SyncItemListPacket(balance, vaultCount, cards));
@@ -630,21 +693,39 @@ public class MarketNetwork {
 
     private static void sendItemDetail(ServerPlayer player, String itemId) {
         OrderManager orderManager = Economy.getOrderManager();
-        EconomyConfig config = EconomyConfig.getInstance();
         UUID playerId = player.getUUID();
 
         ResourceLocation rl = new ResourceLocation(itemId);
-        Item item = BuiltInRegistries.ITEM.get(rl);
-        String displayName = new net.minecraft.world.item.ItemStack(item).getHoverName().getString();
+        String displayName;
+        int vaultCount;
 
-        int vaultCount = VaultManager.countItemInVaults(player.serverLevel(), playerId, item);
+        Fluid fluid = BuiltInRegistries.FLUID.get(rl);
+        Item item = BuiltInRegistries.ITEM.get(rl);
+
+        if (fluid != net.minecraft.world.level.material.Fluids.EMPTY && !fluid.getFluidType().isAir()) {
+            displayName = new net.minecraftforge.fluids.FluidStack(fluid, 1000).getDisplayName().getString();
+            vaultCount = TankManager.countFluidInTanks(player.serverLevel(), playerId, fluid);
+        } else if (item != net.minecraft.world.item.Items.AIR) {
+            displayName = new net.minecraft.world.item.ItemStack(item).getHoverName().getString();
+            vaultCount = VaultManager.countItemInVaults(player.serverLevel(), playerId, item);
+        } else {
+            sendItemList(player);
+            return;
+        }
 
         List<OrderEntry> asks = new ArrayList<>();
         List<OrderEntry> bids = new ArrayList<>();
 
         for (Order order : orderManager.getAllOrders()) {
-            if (!(order.getCommodity() instanceof ItemCommodity ic)) continue;
-            if (!ic.getItem().builtInRegistryHolder().key().location().toString().equals(itemId)) continue;
+            String orderItemId;
+            if (order.getCommodity() instanceof ItemCommodity ic) {
+                orderItemId = ic.getItem().builtInRegistryHolder().key().location().toString();
+            } else if (order.getCommodity() instanceof FluidCommodity fc) {
+                orderItemId = fc.getId().toString();
+            } else {
+                continue;
+            }
+            if (!orderItemId.equals(itemId)) continue;
 
             String sellerName = "?";
             if (order.isServerOrder()) {
@@ -683,7 +764,6 @@ public class MarketNetwork {
             EconomyTradeData.TradeSnapshot t = trades.get(i);
             chart.add(new ChartPoint(new BigDecimal(t.price).intValue(), t.quantity, t.timestamp));
         }
-
         BigDecimal globalPrice = getGlobalPrice(orderManager, itemId);
         if (globalPrice != null) {
             chart.add(new ChartPoint(globalPrice.intValue(), 1, System.currentTimeMillis()));
@@ -747,7 +827,17 @@ public class MarketNetwork {
             // Resolve item display name
             net.minecraft.resources.ResourceLocation rl = new net.minecraft.resources.ResourceLocation(t.itemId);
             net.minecraft.world.item.Item item = net.minecraft.core.registries.BuiltInRegistries.ITEM.get(rl);
-            String displayName = new net.minecraft.world.item.ItemStack(item).getHoverName().getString();
+            String displayName;
+            if (item != net.minecraft.world.item.Items.AIR) {
+                displayName = new net.minecraft.world.item.ItemStack(item).getHoverName().getString();
+            } else {
+                net.minecraft.world.level.material.Fluid fluid = net.minecraft.core.registries.BuiltInRegistries.FLUID.get(rl);
+                if (fluid != net.minecraft.world.level.material.Fluids.EMPTY) {
+                    displayName = new net.minecraftforge.fluids.FluidStack(fluid, 1000).getDisplayName().getString();
+                } else {
+                    displayName = t.itemId;
+                }
+            }
 
             // Resolve counterparty name
             UUID counterUUID = isSeller ? t.buyer : t.seller;
@@ -776,11 +866,16 @@ public class MarketNetwork {
         public final int totalSlots;
         public final int totalItems;
         public final int mode;
+        public final boolean tank;
+        public final String contentId;
 
-        public VaultDetailEntry(int x, int y, int z, String dimension, int usedSlots, int totalSlots, int totalItems, int mode) {
+        public VaultDetailEntry(int x, int y, int z, String dimension, int usedSlots, int totalSlots,
+                                int totalItems, int mode, boolean tank, String contentId) {
             this.x = x; this.y = y; this.z = z; this.dimension = dimension;
             this.usedSlots = usedSlots; this.totalSlots = totalSlots; this.totalItems = totalItems;
             this.mode = mode;
+            this.tank = tank;
+            this.contentId = contentId != null ? contentId : "";
         }
 
         public void write(FriendlyByteBuf buf) {
@@ -788,11 +883,14 @@ public class MarketNetwork {
             buf.writeUtf(dimension);
             buf.writeInt(usedSlots); buf.writeInt(totalSlots); buf.writeInt(totalItems);
             buf.writeInt(mode);
+            buf.writeBoolean(tank);
+            buf.writeUtf(contentId);
         }
 
         public static VaultDetailEntry read(FriendlyByteBuf buf) {
             return new VaultDetailEntry(buf.readInt(), buf.readInt(), buf.readInt(),
-                buf.readUtf(), buf.readInt(), buf.readInt(), buf.readInt(), buf.readInt());
+                buf.readUtf(), buf.readInt(), buf.readInt(), buf.readInt(), buf.readInt(),
+                buf.readBoolean(), buf.readUtf());
         }
     }
 
@@ -835,16 +933,17 @@ public class MarketNetwork {
 
     public static void sendVaultInfo(ServerPlayer player) {
         UUID playerId = player.getUUID();
-        List<com.nstut.economy.data.EconomyAccountData.VaultRecord> records =
-            com.nstut.economy.blocks.VaultManager.getVaultRecords(playerId);
-
         List<VaultDetailEntry> entries = new ArrayList<>();
-        for (com.nstut.economy.data.EconomyAccountData.VaultRecord r : records) {
+
+        for (com.nstut.economy.data.EconomyAccountData.VaultRecord r :
+                com.nstut.economy.blocks.VaultManager.getVaultRecords(playerId)) {
             int used = 0;
             int total = 54;
             int items = 0;
             int mode = 0;
-            net.minecraft.world.level.block.entity.BlockEntity be = player.serverLevel().getBlockEntity(r.pos);
+            ServerLevel recordLevel = resolveRecordLevel(player, r.dimension);
+            net.minecraft.world.level.block.entity.BlockEntity be =
+                    recordLevel != null ? recordLevel.getBlockEntity(r.pos) : null;
             if (be instanceof com.nstut.economy.blocks.VaultBlockEntity vault) {
                 total = vault.getContainerSize();
                 mode = vault.getMode().id;
@@ -856,9 +955,41 @@ public class MarketNetwork {
                     }
                 }
             }
-            entries.add(new VaultDetailEntry(r.pos.getX(), r.pos.getY(), r.pos.getZ(), r.dimension, used, total, items, mode));
+            entries.add(new VaultDetailEntry(r.pos.getX(), r.pos.getY(), r.pos.getZ(),
+                    r.dimension, used, total, items, mode, false, ""));
+        }
+
+        for (com.nstut.economy.data.EconomyAccountData.VaultRecord r :
+                com.nstut.economy.blocks.TankManager.getTankRecords(playerId)) {
+            int amount = 0;
+            int capacity = TankBlockEntity.DEFAULT_CAPACITY;
+            int mode = 0;
+            String contentId = "";
+            ServerLevel recordLevel = resolveRecordLevel(player, r.dimension);
+            net.minecraft.world.level.block.entity.BlockEntity be =
+                    recordLevel != null ? recordLevel.getBlockEntity(r.pos) : null;
+            if (be instanceof TankBlockEntity tank) {
+                amount = tank.getFluidAmount();
+                capacity = tank.getCapacity();
+                mode = tank.getMode().id;
+                if (!tank.getFluid().isEmpty()) {
+                    contentId = BuiltInRegistries.FLUID.getKey(tank.getFluid().getFluid()).toString();
+                }
+            }
+            entries.add(new VaultDetailEntry(r.pos.getX(), r.pos.getY(), r.pos.getZ(),
+                    r.dimension, amount, capacity, amount, mode, true, contentId));
         }
         CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), new SyncVaultInfoPacket(entries));
+    }
+
+    private static ServerLevel resolveRecordLevel(ServerPlayer player, String dimension) {
+        if (player.getServer() == null || dimension == null || dimension.isEmpty()) {
+            return player.serverLevel();
+        }
+        ResourceLocation dimensionId = new ResourceLocation(dimension);
+        net.minecraft.resources.ResourceKey<Level> key =
+                net.minecraft.resources.ResourceKey.create(net.minecraft.core.registries.Registries.DIMENSION, dimensionId);
+        return player.getServer().getLevel(key);
     }
 
     public static class ToggleVaultModePacket {
@@ -877,6 +1008,30 @@ public class MarketNetwork {
                         vault.cycleMode();
                         if (player.containerMenu instanceof com.nstut.economy.blocks.VaultMenu vm) {
                             vm.setData(0, vault.getMode().id);
+                        }
+                    }
+                }
+            });
+            ctx.get().setPacketHandled(true);
+        }
+    }
+
+    public static class ToggleTankModePacket {
+        public final net.minecraft.core.BlockPos pos;
+
+        public ToggleTankModePacket(net.minecraft.core.BlockPos pos) { this.pos = pos; }
+
+        public static void encode(ToggleTankModePacket pkt, FriendlyByteBuf buf) { buf.writeBlockPos(pkt.pos); }
+        public static ToggleTankModePacket decode(FriendlyByteBuf buf) { return new ToggleTankModePacket(buf.readBlockPos()); }
+
+        public static void handle(ToggleTankModePacket pkt, Supplier<NetworkEvent.Context> ctx) {
+            ctx.get().enqueueWork(() -> {
+                ServerPlayer player = ctx.get().getSender();
+                if (player != null && player.level().getBlockEntity(pkt.pos) instanceof TankBlockEntity tank) {
+                    if (tank.getOwner() != null && tank.getOwner().equals(player.getUUID())) {
+                        tank.cycleMode();
+                        if (player.containerMenu instanceof TankMenu tm) {
+                            tm.setMode(tank.getMode().id);
                         }
                     }
                 }
@@ -1002,6 +1157,13 @@ public class MarketNetwork {
                 }
             }
         }
+        for (var tank : TankManager.getTanks(player.serverLevel(), player.getUUID())) {
+            var fluidStack = tank.getFluid();
+            if (!fluidStack.isEmpty()) {
+                String id = BuiltInRegistries.FLUID.getKey(fluidStack.getFluid()).toString();
+                itemCounts.put(id, itemCounts.getOrDefault(id, 0) + fluidStack.getAmount());
+            }
+        }
 
         com.nstut.economy.data.EconomyTradeData historyData = com.nstut.economy.data.EconomyTradeData.get(player.serverLevel());
         List<AssetHoldingData> holdings = new ArrayList<>();
@@ -1017,8 +1179,14 @@ public class MarketNetwork {
                 }
             }
             BigDecimal totalVal = unitPrice.multiply(BigDecimal.valueOf(qty));
-            net.minecraft.world.item.Item it = net.minecraft.core.registries.BuiltInRegistries.ITEM.get(new ResourceLocation(id));
-            String name = new ItemStack(it).getHoverName().getString();
+            Fluid fluid = BuiltInRegistries.FLUID.get(new ResourceLocation(id));
+            String name;
+            if (fluid != net.minecraft.world.level.material.Fluids.EMPTY && !fluid.getFluidType().isAir()) {
+                name = new net.minecraftforge.fluids.FluidStack(fluid, 1000).getDisplayName().getString();
+            } else {
+                net.minecraft.world.item.Item it = BuiltInRegistries.ITEM.get(new ResourceLocation(id));
+                name = new ItemStack(it).getHoverName().getString();
+            }
             holdings.add(new AssetHoldingData(id, name, qty, totalVal.setScale(0, java.math.RoundingMode.HALF_UP).toPlainString()));
         }
 

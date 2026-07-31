@@ -64,7 +64,15 @@ public class OrderManager {
     public Order createSellOrder(UUID owner, ICommodity commodity, int quantity,
                                   java.math.BigDecimal pricePerUnit, NonNullList<ItemStack> reservedItems,
                                   net.minecraft.server.level.ServerLevel level) {
-        Order order = new Order(owner, commodity, quantity, pricePerUnit, IOrder.OrderType.SELL, null, copyStacks(reservedItems));
+        return createSellOrder(owner, commodity, quantity, pricePerUnit, reservedItems, new ArrayList<>(), level);
+    }
+
+    public Order createSellOrder(UUID owner, ICommodity commodity, int quantity,
+                                  java.math.BigDecimal pricePerUnit, NonNullList<ItemStack> reservedItems,
+                                  List<net.minecraftforge.fluids.FluidStack> reservedFluids,
+                                  net.minecraft.server.level.ServerLevel level) {
+        Order order = new Order(owner, commodity, quantity, quantity, pricePerUnit, IOrder.OrderType.SELL, null,
+                copyStacks(reservedItems), copyFluidStacks(reservedFluids), false);
 
         List<Order> matchingBuyOrders = getBuyOrders(commodity).stream()
                 .filter(b -> b.getPricePerUnit().compareTo(pricePerUnit) >= 0 && !b.getOwner().equals(owner))
@@ -74,9 +82,9 @@ public class OrderManager {
         for (Order buyOrder : matchingBuyOrders) {
             if (order.getQuantity() <= 0) break;
             int matchQty = Math.min(order.getQuantity(), buyOrder.getQuantity());
-            IOrder.TransactionResult result = order.executePartial(buyOrder.getOwner(), matchQty, level);
-            if (result.success) {
-                buyOrder.reduceQuantity(matchQty);
+                IOrder.TransactionResult result = order.executePartial(buyOrder.getOwner(), matchQty, level);
+                if (result.success) {
+                    buyOrder.reduceQuantity(result.quantityTransferred);
                 if (backingData != null) {
                     if (buyOrder.getQuantity() == 0) backingData.removeOrder(buyOrder.getOrderId());
                     else backingData.putOrder(buyOrder.toSnapshot());
@@ -92,6 +100,19 @@ public class OrderManager {
             backingData.removeOrder(order.getOrderId());
         }
         return null;
+    }
+
+    private static List<net.minecraftforge.fluids.FluidStack> copyFluidStacks(
+            List<net.minecraftforge.fluids.FluidStack> stacks) {
+        List<net.minecraftforge.fluids.FluidStack> copy = new ArrayList<>();
+        if (stacks != null) {
+            for (net.minecraftforge.fluids.FluidStack stack : stacks) {
+                if (stack != null && !stack.isEmpty()) {
+                    copy.add(stack.copy());
+                }
+            }
+        }
+        return copy;
     }
 
     public Order createBuyOrder(UUID owner, ICommodity commodity, int quantity,
@@ -171,6 +192,38 @@ public class OrderManager {
                     }
                     if (!returnItems.isEmpty()) {
                         com.nstut.economy.blocks.VaultManager.insertItemStacksToVaults(level, requester, returnItems);
+                    }
+                }
+            } else if (order.getCommodity() instanceof FluidCommodity fc && level != null) {
+                net.minecraft.world.level.material.Fluid fluid = fc.getFluid();
+                int currentQty = order.getQuantity();
+                if (newQuantity > currentQty) {
+                    int needed = newQuantity - currentQty;
+                    int available = com.nstut.economy.blocks.TankManager.countFluidInTanks(level, requester, fluid);
+                    if (available < needed) {
+                        return false;
+                    }
+                    java.util.List<net.minecraftforge.fluids.FluidStack> drained = new java.util.ArrayList<>();
+                    int drainedAmount = com.nstut.economy.blocks.TankManager.extractFluidFromTanks(level, requester, fluid, needed, drained);
+                    if (drainedAmount < needed) {
+                        for (var fs : drained) {
+                            com.nstut.economy.blocks.TankManager.restoreFluidToTanks(level, requester, fs);
+                        }
+                        return false;
+                    }
+                    order.getReservedFluids().addAll(drained);
+                } else if (newQuantity < currentQty) {
+                    int excess = currentQty - newQuantity;
+                    var it = order.getReservedFluids().iterator();
+                    while (it.hasNext() && excess > 0) {
+                        net.minecraftforge.fluids.FluidStack fs = it.next();
+                        int take = Math.min(excess, fs.getAmount());
+                        net.minecraftforge.fluids.FluidStack toReturn = fs.copy();
+                        toReturn.setAmount(take);
+                        com.nstut.economy.blocks.TankManager.restoreFluidToTanks(level, requester, toReturn);
+                        fs.shrink(take);
+                        excess -= take;
+                        if (fs.isEmpty()) it.remove();
                     }
                 }
             }

@@ -95,7 +95,7 @@ public class VaultManager {
     public static int countItemInVaults(Level level, UUID owner, Item item) {
         int count = 0;
         for (VaultBlockEntity v : getVaults(level, owner)) {
-            if (v.getMode() == VaultBlockEntity.VaultMode.BOTH || v.getMode() == VaultBlockEntity.VaultMode.INPUT) {
+            if (v.getMode().canSupplyMarket()) {
                 count += v.countItem(item);
             }
         }
@@ -105,7 +105,7 @@ public class VaultManager {
     public static int countAvailableSpaceInVaults(Level level, UUID owner, ItemStack stack) {
         int space = 0;
         for (VaultBlockEntity v : getVaults(level, owner)) {
-            if (v.getMode() == VaultBlockEntity.VaultMode.BOTH || v.getMode() == VaultBlockEntity.VaultMode.OUTPUT) {
+            if (v.getMode().canReceiveMarket()) {
                 space += v.countAvailableSpace(stack);
             }
         }
@@ -117,7 +117,7 @@ public class VaultManager {
         int remaining = amount;
         for (VaultBlockEntity v : getVaults(level, owner)) {
             if (remaining <= 0) break;
-            if (v.getMode() != VaultBlockEntity.VaultMode.BOTH && v.getMode() != VaultBlockEntity.VaultMode.INPUT) continue;
+            if (!v.getMode().canSupplyMarket()) continue;
             int countInVault = v.countItem(item);
             if (countInVault > 0) {
                 int take = Math.min(remaining, countInVault);
@@ -137,7 +137,7 @@ public class VaultManager {
 
         for (VaultBlockEntity v : getVaults(level, owner)) {
             if (remaining.isEmpty()) break;
-            if (v.getMode() != VaultBlockEntity.VaultMode.BOTH && v.getMode() != VaultBlockEntity.VaultMode.OUTPUT) continue;
+            if (!v.getMode().canReceiveMarket()) continue;
             NonNullList<ItemStack> toInsert = NonNullList.create();
             for (ItemStack s : remaining) if (!s.isEmpty()) toInsert.add(s.copy());
             if (toInsert.isEmpty()) break;

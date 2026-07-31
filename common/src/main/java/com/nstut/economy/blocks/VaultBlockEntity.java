@@ -32,6 +32,14 @@ public class VaultBlockEntity extends BlockEntity implements Container {
             for (VaultMode m : values()) if (m.id == id) return m;
             return BOTH;
         }
+
+        public boolean canSupplyMarket() {
+            return this == BOTH || this == INPUT;
+        }
+
+        public boolean canReceiveMarket() {
+            return this == BOTH || this == OUTPUT;
+        }
     }
 
     private static final int SIZE = 54;

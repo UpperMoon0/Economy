@@ -43,6 +43,7 @@ public class EconomyAccountData extends SavedData {
 
     private final Map<UUID, BigDecimal> balances = new HashMap<>();
     private final Map<UUID, List<VaultRecord>> vaults = new HashMap<>();
+    private final Map<UUID, List<VaultRecord>> tanks = new HashMap<>();
     private final Map<UUID, List<PortfolioPoint>> portfolioHistory = new HashMap<>();
 
     public List<PortfolioPoint> getPortfolioHistory(UUID player) {
@@ -95,21 +96,30 @@ public class EconomyAccountData extends SavedData {
     }
     public boolean hasVault(UUID owner) { return vaults.containsKey(owner) && !vaults.get(owner).isEmpty(); }
 
-    public static EconomyAccountData get(net.minecraft.server.level.ServerLevel level) {
-        net.minecraft.server.level.ServerLevel target = (level != null && level.getServer() != null) ? level.getServer().overworld() : level;
-        return target.getDataStorage().computeIfAbsent(EconomyAccountData::load, EconomyAccountData::new, NAME);
-    }
-
-    public static EconomyAccountData load(CompoundTag tag) {
-        EconomyAccountData data = new EconomyAccountData();
-        CompoundTag balancesTag = tag.getCompound("Balances");
-        for (String key : balancesTag.getAllKeys()) {
-            try {
-                UUID uuid = UUID.fromString(key);
-                data.balances.put(uuid, new BigDecimal(balancesTag.getString(key)));
-            } catch (IllegalArgumentException e) {}
+    public Map<UUID, List<VaultRecord>> getTanks() { return tanks; }
+    public void addTank(UUID owner, BlockPos pos, String dimension) {
+        List<VaultRecord> list = tanks.computeIfAbsent(owner, k -> new ArrayList<>());
+        BlockPos p = pos.immutable();
+        String dim = dimension != null ? dimension : "minecraft:overworld";
+        for (VaultRecord r : list) {
+            if (r.pos.equals(p) && r.dimension.equals(dim)) return;
         }
-        CompoundTag vaultsTag = tag.getCompound("Vaults");
+        list.add(new VaultRecord(p, dim));
+        setDirty();
+    }
+    public void removeTank(UUID owner, BlockPos pos, String dimension) {
+        List<VaultRecord> list = tanks.get(owner);
+        if (list != null) {
+            BlockPos p = pos.immutable();
+            String dim = dimension != null ? dimension : "minecraft:overworld";
+            if (list.removeIf(r -> r.pos.equals(p) && r.dimension.equals(dim))) {
+                setDirty();
+            }
+        }
+    }
+    public boolean hasTank(UUID owner) { return tanks.containsKey(owner) && !tanks.get(owner).isEmpty(); }
+
+    private void loadVaultRecords(CompoundTag vaultsTag, Map<UUID, List<VaultRecord>> target) {
         for (String key : vaultsTag.getAllKeys()) {
             try {
                 UUID uuid = UUID.fromString(key);
@@ -128,9 +138,27 @@ public class EconomyAccountData extends SavedData {
                     String dim = posTag.contains("Dimension") ? posTag.getString("Dimension") : "minecraft:overworld";
                     list.add(new VaultRecord(pos, dim));
                 }
-                data.vaults.put(uuid, list);
+                target.put(uuid, list);
             } catch (Exception e) {}
         }
+    }
+
+    public static EconomyAccountData get(net.minecraft.server.level.ServerLevel level) {
+        net.minecraft.server.level.ServerLevel target = (level != null && level.getServer() != null) ? level.getServer().overworld() : level;
+        return target.getDataStorage().computeIfAbsent(EconomyAccountData::load, EconomyAccountData::new, NAME);
+    }
+
+    public static EconomyAccountData load(CompoundTag tag) {
+        EconomyAccountData data = new EconomyAccountData();
+        CompoundTag balancesTag = tag.getCompound("Balances");
+        for (String key : balancesTag.getAllKeys()) {
+            try {
+                UUID uuid = UUID.fromString(key);
+                data.balances.put(uuid, new BigDecimal(balancesTag.getString(key)));
+            } catch (IllegalArgumentException e) {}
+        }
+        data.loadVaultRecords(tag.getCompound("Vaults"), data.vaults);
+        data.loadVaultRecords(tag.getCompound("Tanks"), data.tanks);
 
         CompoundTag historyTag = tag.getCompound("PortfolioHistory");
         for (String key : historyTag.getAllKeys()) {
@@ -167,6 +195,15 @@ public class EconomyAccountData extends SavedData {
                     String itemId = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
                     itemCounts.put(itemId, itemCounts.getOrDefault(itemId, 0) + stack.getCount());
                 }
+            }
+        }
+        for (com.nstut.economy.blocks.TankBlockEntity tank
+                : com.nstut.economy.blocks.TankManager.getTanks(level, player)) {
+            net.minecraftforge.fluids.FluidStack fluid = tank.getFluid();
+            if (!fluid.isEmpty()) {
+                String fluidId = net.minecraft.core.registries.BuiltInRegistries.FLUID
+                        .getKey(fluid.getFluid()).toString();
+                itemCounts.put(fluidId, itemCounts.getOrDefault(fluidId, 0) + fluid.getAmount());
             }
         }
 
@@ -209,6 +246,21 @@ public class EconomyAccountData extends SavedData {
             vaultsTag.put(e.getKey().toString(), listTag);
         }
         tag.put("Vaults", vaultsTag);
+
+        CompoundTag tanksTag = new CompoundTag();
+        for (Map.Entry<UUID, List<VaultRecord>> e : tanks.entrySet()) {
+            ListTag listTag = new ListTag();
+            for (VaultRecord r : e.getValue()) {
+                CompoundTag posTag = new CompoundTag();
+                posTag.putInt("X", r.pos.getX());
+                posTag.putInt("Y", r.pos.getY());
+                posTag.putInt("Z", r.pos.getZ());
+                posTag.putString("Dimension", r.dimension);
+                listTag.add(posTag);
+            }
+            tanksTag.put(e.getKey().toString(), listTag);
+        }
+        tag.put("Tanks", tanksTag);
 
         CompoundTag historyTag = new CompoundTag();
         for (Map.Entry<UUID, List<PortfolioPoint>> e : portfolioHistory.entrySet()) {

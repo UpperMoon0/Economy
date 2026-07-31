@@ -142,12 +142,12 @@ public class ItemCommodity implements ICommodity {
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
-        if (!(o instanceof ICommodity that)) return false;
-        return id != null && id.equals(that.getId());
+        if (!(o instanceof ItemCommodity that)) return false;
+        return id != null && id.equals(that.id);
     }
 
     @Override
     public int hashCode() {
-        return id != null ? id.hashCode() : 0;
+        return 31 * ItemCommodity.class.hashCode() + (id != null ? id.hashCode() : 0);
     }
 }
