@@ -9,7 +9,7 @@ version = "${version}"
 displayName = "NsTut Economy"
 authors = "NsTut"
 description = '''
-A modern order-book economy with unified item and fluid trading, physical Vault and Tank storage, automated order matching, persistent market orders, portfolio tracking, player transfers, and a full in-game Market Terminal.
+A complete in-game economy for trading items and fluids. Use the Market Terminal to browse prices, create and manage orders, track your portfolio, send coins to other players, and connect your Vaults and Fluid Tanks to the market.
 '''
 
 [[dependencies.economy]]
