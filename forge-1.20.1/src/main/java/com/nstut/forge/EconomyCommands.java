@@ -170,7 +170,7 @@ public class EconomyCommands {
         EconomyConfig config = EconomyConfig.getInstance();
         context.getSource().sendSuccess(() ->
             Component.literal(player.getName().getString() + "'s balance: ")
-                .append(CoinText.amount(account.getBalance().toPlainString()))
+                .append(CoinText.amount(account.getBalance()))
                 .append(Component.literal(" " + config.getCurrencyName())),
             false
         );
@@ -185,7 +185,7 @@ public class EconomyCommands {
         account.credit(amount, TransactionContext.adminGive("Admin command"));
         context.getSource().sendSuccess(() ->
             Component.literal("Gave ")
-                .append(CoinText.amount(amount.toPlainString()))
+                .append(CoinText.amount(amount))
                 .append(Component.literal(" to " + target.getName().getString())),
             true
         );
@@ -200,7 +200,7 @@ public class EconomyCommands {
         if (account.debit(amount, TransactionContext.adminTake("Admin command"))) {
             context.getSource().sendSuccess(() ->
                 Component.literal("Took ")
-                    .append(CoinText.amount(amount.toPlainString()))
+                    .append(CoinText.amount(amount))
                     .append(Component.literal(" from " + target.getName().getString())),
                 true
             );
@@ -220,7 +220,7 @@ public class EconomyCommands {
         account.setBalance(amount);
         context.getSource().sendSuccess(() ->
             Component.literal("Set " + target.getName().getString() + "'s balance to ")
-                .append(CoinText.amount(amount.toPlainString())),
+                .append(CoinText.amount(amount)),
             true
         );
         return 1;
@@ -265,7 +265,7 @@ public class EconomyCommands {
         context.getSource().sendSuccess(() ->
             Component.literal("Server " + side + " order created: " + amount + " of "
                 + commodity.getDisplayName().getString() + " @ ")
-                .append(CoinText.amount(pricePerUnit.stripTrailingZeros().toPlainString()))
+                .append(CoinText.amount(pricePerUnit))
                 .append(Component.literal(" " + priceUnit + " (total: "))
                 .append(CoinText.amount(priceStr))
                 .append(Component.literal(")")),

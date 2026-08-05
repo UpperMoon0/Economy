@@ -4,7 +4,11 @@ import com.nstut.Economy;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
+import net.minecraft.network.chat.Style;
 import net.minecraft.resources.ResourceLocation;
+
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 
 /**
  * Inline chat representation of the Economy coin item texture.
@@ -20,7 +24,30 @@ public final class CoinText {
                 .withStyle(style -> style.withFont(FONT).withColor(ChatFormatting.WHITE));
     }
 
+    public static MutableComponent amount(BigDecimal amount) {
+        return amount(formatMoney(amount));
+    }
+
     public static MutableComponent amount(String amount) {
-        return icon().append(Component.literal(" " + amount).withStyle(ChatFormatting.GOLD));
+        String formatted = formatMoney(amount);
+        return Component.empty()
+                .append(icon())
+                .append(Component.literal(" " + formatted).withStyle(style -> style.withFont(Style.DEFAULT_FONT).withColor(ChatFormatting.GOLD)));
+    }
+
+    public static String formatMoney(BigDecimal amount) {
+        if (amount == null) return "0";
+        return amount.setScale(0, RoundingMode.HALF_UP).toPlainString();
+    }
+
+    public static String formatMoney(String amount) {
+        if (amount == null || amount.isEmpty()) return "0";
+        try {
+            return formatMoney(new BigDecimal(amount));
+        } catch (Exception e) {
+            return amount;
+        }
     }
 }
+
+
