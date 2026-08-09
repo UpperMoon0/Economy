@@ -2,132 +2,123 @@ package com.nstut.forge.client;
 
 import com.nstut.economy.blocks.VaultBlockEntity;
 import com.nstut.economy.blocks.VaultMenu;
+import com.nstut.economy.ui.framework.UiRender;
+import com.nstut.economy.ui.framework.UiTheme;
 import com.nstut.forge.network.MarketNetwork;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
+import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.Slot;
+import net.minecraft.world.phys.BlockHitResult;
 import org.jetbrains.annotations.NotNull;
 
+/** Premium, texture-free vault surface built from the shared Economy UI theme. */
 public class VaultScreen extends AbstractContainerScreen<VaultMenu> {
-
-    private static final int BG_COLOR = 0xFF141423;
-    private static final int PANEL_BORDER = 0xFF1E1E34;
-    private static final int SLOT_BG = 0xFF0C0C17;
-    private static final int SLOT_BORDER = 0xFF2A2A48;
-    private static final int ACCENT = 0xFF00D4AA;
-    private static final int TEXT_MUTED = 0xFF9E9E9E;
 
     public VaultScreen(VaultMenu menu, Inventory playerInventory, Component title) {
         super(menu, playerInventory, title);
         this.imageWidth = 348;
         this.imageHeight = 200;
         this.inventoryLabelY = 102;
-        this.titleLabelY = 13;
+        this.titleLabelY = 8;
     }
 
     @Override
     protected void renderBg(@NotNull GuiGraphics g, float partialTick, int mouseX, int mouseY) {
         renderBackground(g);
-
-        // Main Sleek Dark Container Frame
         int x = leftPos;
         int y = topPos;
-        g.fill(x, y, x + imageWidth, y + imageHeight, BG_COLOR);
 
-        // Outer Borders
-        g.fill(x, y, x + imageWidth, y + 1, PANEL_BORDER);
-        g.fill(x, y + imageHeight - 1, x + imageWidth, y + imageHeight, PANEL_BORDER);
-        g.fill(x, y, x + 1, y + imageHeight, PANEL_BORDER);
-        g.fill(x + imageWidth - 1, y, x + imageWidth, y + imageHeight, PANEL_BORDER);
+        UiRender.surface(g, x, y, imageWidth, imageHeight, UiTheme.RADIUS_LG,
+                UiTheme.SHELL, UiTheme.BORDER, true);
 
-        // Section Dividers
-        g.fill(x + 8, y + 30, x + imageWidth - 8, y + 31, PANEL_BORDER);
-        g.fill(x + 8, y + 96, x + imageWidth - 8, y + 97, PANEL_BORDER);
+        // A restrained warm highlight echoes the reference UI without
+        // competing with Economy's mint interaction accent.
+        UiRender.roundedRect(g, x + 108, y + 3, 126, 2, 1,
+                UiRender.alpha(UiTheme.AMBIENT_WARM, 95));
 
-        // Render Framed Dark Item Slots
+        UiRender.surface(g, x + 7, y + 31, imageWidth - 14, 65, UiTheme.RADIUS_MD,
+                UiTheme.SURFACE, UiTheme.BORDER_SUBTLE, false);
+        UiRender.surface(g, x + 85, y + 99, 178, 97, UiTheme.RADIUS_MD,
+                UiTheme.SURFACE, UiTheme.BORDER_SUBTLE, false);
+
         for (Slot slot : menu.slots) {
-            int sx = x + slot.x;
-            int sy = y + slot.y;
-            g.fill(sx - 1, sy - 1, sx + 17, sy + 17, SLOT_BG);
-            g.fill(sx - 1, sy - 1, sx + 17, sy, SLOT_BORDER);
-            g.fill(sx - 1, sy + 16, sx + 17, sy + 17, SLOT_BORDER);
-            g.fill(sx - 1, sy - 1, sx, sy + 17, SLOT_BORDER);
-            g.fill(sx + 16, sy - 1, sx + 17, sy + 17, SLOT_BORDER);
+            UiRender.slot(g, x + slot.x - 1, y + slot.y - 1, 18, 18);
         }
 
-        // Custom Sleek Mode Button Rendering (Right aligned in top header)
-        VaultBlockEntity.VaultMode currentMode = menu.getMode();
-        String label = switch (currentMode) {
-            case BOTH -> "MODE: BOTH";
-            case INPUT -> "MODE: INPUT";
-            case OUTPUT -> "MODE: OUTPUT";
+        renderModeButton(g, mouseX, mouseY);
+    }
+
+    private String modeLabel() {
+        return switch (menu.getMode()) {
+            case BOTH -> "BOTH";
+            case INPUT -> "INPUT";
+            case OUTPUT -> "OUTPUT";
         };
+    }
 
-        int btnW = font.width(label) + 10;
-        int btnH = 14;
-        int btnX = x + imageWidth - btnW - 12;
-        int btnY = y + 10;
+    private int modeButtonWidth() {
+        return font.width("MODE  " + modeLabel()) + 18;
+    }
 
-        boolean hovered = mouseX >= btnX && mouseX < btnX + btnW && mouseY >= btnY && mouseY < btnY + btnH;
+    private void renderModeButton(GuiGraphics g, int mouseX, int mouseY) {
+        VaultBlockEntity.VaultMode mode = menu.getMode();
+        String label = "MODE  " + modeLabel();
+        int buttonWidth = modeButtonWidth();
+        int buttonHeight = 17;
+        int buttonX = leftPos + imageWidth - buttonWidth - 10;
+        int buttonY = topPos + 7;
+        boolean hovered = mouseX >= buttonX && mouseX < buttonX + buttonWidth
+                && mouseY >= buttonY && mouseY < buttonY + buttonHeight;
 
-        int fillBg = currentMode == VaultBlockEntity.VaultMode.INPUT ? (hovered ? 0xFF991B1B : 0x80991B1B) :
-                    (currentMode == VaultBlockEntity.VaultMode.OUTPUT ? (hovered ? 0xFF065F46 : 0x80065F46) :
-                    (hovered ? 0xFF003024 : 0x80003024));
+        int accent = switch (mode) {
+            case BOTH -> UiTheme.ACCENT;
+            case INPUT -> UiTheme.DANGER;
+            case OUTPUT -> UiTheme.SUCCESS;
+        };
+        int background = switch (mode) {
+            case BOTH -> UiTheme.ACCENT_DEEP;
+            case INPUT -> UiTheme.DANGER_DEEP;
+            case OUTPUT -> UiTheme.SUCCESS_DEEP;
+        };
+        if (hovered) background = UiRender.mix(background, accent, 0.18F);
 
-        int borderClr = currentMode == VaultBlockEntity.VaultMode.INPUT ? 0xFFDC2626 :
-                       (currentMode == VaultBlockEntity.VaultMode.OUTPUT ? 0xFF059669 : ACCENT);
-
-        int textClr = currentMode == VaultBlockEntity.VaultMode.INPUT ? 0xFFFF6666 :
-                     (currentMode == VaultBlockEntity.VaultMode.OUTPUT ? 0xFF66FF66 : ACCENT);
-
-        g.fill(btnX, btnY, btnX + btnW, btnY + btnH, fillBg);
-        g.fill(btnX, btnY, btnX + btnW, btnY + 1, borderClr);
-        g.fill(btnX, btnY + btnH - 1, btnX + btnW, btnY + btnH, borderClr);
-        g.fill(btnX, btnY, btnX + 1, btnY + btnH, borderClr);
-        g.fill(btnX + btnW - 1, btnY, btnX + btnW, btnY + btnH, borderClr);
-
-        int tw = font.width(label);
-        g.drawString(font, label, btnX + (btnW - tw) / 2, btnY + 3, textClr, false);
+        UiRender.pill(g, buttonX, buttonY, buttonWidth, buttonHeight, background, accent);
+        UiRender.roundedRect(g, buttonX + 6, buttonY + 7, 3, 3, 2, accent);
+        g.drawString(font, label, buttonX + 13, buttonY + 4, accent, false);
 
         if (hovered) {
-            String tooltip = switch (currentMode) {
-                case BOTH -> "Both Mode: Used for Sell Orders (Input) AND receiving bought items (Output).";
-                case INPUT -> "Input Only Mode: Used ONLY for creating Sell Orders. Bought items avoid this Vault.";
-                case OUTPUT -> "Output Only Mode: Used ONLY for receiving bought items. Sell Orders ignore items here.";
+            String tooltip = switch (mode) {
+                case BOTH -> "Both way: contributes to sell orders and receives purchased items.";
+                case INPUT -> "Input only: contributes items to sell orders.";
+                case OUTPUT -> "Output only: receives purchased items.";
             };
-            var lines = font.split(Component.literal(tooltip), 180);
-            g.renderTooltip(font, lines, mouseX, mouseY);
+            g.renderTooltip(font, font.split(Component.literal(tooltip), 190), mouseX, mouseY);
         }
     }
 
     @Override
     protected void renderLabels(@NotNull GuiGraphics g, int mouseX, int mouseY) {
-        g.drawString(font, "VAULT STORAGE", 12, 13, ACCENT, false);
-        g.drawString(font, "INVENTORY", 93, 102, TEXT_MUTED, false);
+        g.drawString(font, "VAULT", 12, 7, UiTheme.TEXT_PRIMARY, false);
+        g.drawString(font, "SECURE ITEM STORAGE", 12, 18, UiTheme.TEXT_MUTED, false);
+        g.drawString(font, "PLAYER INVENTORY", 93, 102, UiTheme.TEXT_MUTED, false);
     }
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
         if (button == 0) {
-            VaultBlockEntity.VaultMode currentMode = menu.getMode();
-            String label = switch (currentMode) {
-                case BOTH -> "MODE: BOTH";
-                case INPUT -> "MODE: INPUT";
-                case OUTPUT -> "MODE: OUTPUT";
-            };
-            int btnW = font.width(label) + 10;
-            int btnH = 14;
-            int btnX = leftPos + imageWidth - btnW - 12;
-            int btnY = topPos + 10;
-
-            if (mouseX >= btnX && mouseX < btnX + btnW && mouseY >= btnY && mouseY < btnY + btnH) {
-                net.minecraft.core.BlockPos targetPos = null;
+            int buttonWidth = modeButtonWidth();
+            int buttonX = leftPos + imageWidth - buttonWidth - 10;
+            int buttonY = topPos + 7;
+            if (mouseX >= buttonX && mouseX < buttonX + buttonWidth
+                    && mouseY >= buttonY && mouseY < buttonY + 17) {
+                BlockPos targetPos = null;
                 if (menu.getVaultBlockEntity() != null) {
                     targetPos = menu.getVaultBlockEntity().getBlockPos();
-                } else if (minecraft != null && minecraft.hitResult instanceof net.minecraft.world.phys.BlockHitResult bhr) {
-                    targetPos = bhr.getBlockPos();
+                } else if (minecraft != null && minecraft.hitResult instanceof BlockHitResult hit) {
+                    targetPos = hit.getBlockPos();
                 }
                 if (targetPos != null) {
                     MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.ToggleVaultModePacket(targetPos));

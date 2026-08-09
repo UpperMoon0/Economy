@@ -39,18 +39,28 @@ public class HStack extends UIComponent {
     public void layout(int x, int y, int availableWidth, int availableHeight) {
         setBounds(x, y, availableWidth, availableHeight);
         List<UIComponent> vc = visibleChildren();
-        int flexCount = 0, fixedTotal = 0;
+        float flexTotal = 0.0F;
+        int fixedTotal = 0;
         for (UIComponent c : vc) {
-            if (c instanceof Spacer || c.isFlex()) flexCount++;
-            else fixedTotal += c.preferredWidth(null);
+            if (c instanceof Spacer || c.isFlex()) flexTotal += c.getFlexGrow() > 0.0F ? c.getFlexGrow() : 1.0F;
+            else fixedTotal += c.preferredWidth(measureFont());
         }
-        int flexSize = flexCount > 0 ? Math.max(0, (availableWidth - fixedTotal - gap * (Math.max(0, vc.size() - 1)))) / flexCount : 0;
-        int flexRemainder = flexCount > 0 ? (availableWidth - fixedTotal - gap * (Math.max(0, vc.size() - 1))) % flexCount : 0;
+        int flexSpace = Math.max(0, availableWidth - fixedTotal - gap * Math.max(0, vc.size() - 1));
 
         int cx = x;
-        int flexIdx = 0;
+        int distributed = 0;
+        float usedWeight = 0.0F;
         for (UIComponent c : vc) {
-            int cw = (c instanceof Spacer || c.isFlex()) ? flexSize + (flexIdx++ < flexRemainder ? 1 : 0) : c.preferredWidth(null);
+            boolean flexible = c instanceof Spacer || c.isFlex();
+            int cw;
+            if (flexible && flexTotal > 0.0F) {
+                usedWeight += c.getFlexGrow() > 0.0F ? c.getFlexGrow() : 1.0F;
+                int target = Math.round(flexSpace * usedWeight / flexTotal);
+                cw = target - distributed;
+                distributed = target;
+            } else {
+                cw = c.preferredWidth(measureFont());
+            }
             c.layout(cx, y, cw, availableHeight);
             cx += cw + gap;
         }

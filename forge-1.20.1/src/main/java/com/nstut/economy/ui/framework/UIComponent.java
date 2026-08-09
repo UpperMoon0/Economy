@@ -14,9 +14,17 @@ public abstract class UIComponent {
     protected boolean hovered;
     protected boolean visible = true;
     protected boolean flex;
+    protected float flexGrow;
+    private Font measureFont;
 
-    public UIComponent flex() { this.flex = true; return this; }
-    public boolean isFlex() { return flex; }
+    public UIComponent flex() { return flex(1.0F); }
+    public UIComponent flex(float grow) {
+        this.flex = grow > 0.0F;
+        this.flexGrow = Math.max(0.0F, grow);
+        return this;
+    }
+    public boolean isFlex() { return flexGrow > 0.0F || flex; }
+    public float getFlexGrow() { return flexGrow > 0.0F ? flexGrow : (flex ? 1.0F : 0.0F); }
 
     public void setVisible(boolean v) { this.visible = v; }
     public boolean isVisible() { return visible; }
@@ -36,6 +44,23 @@ public abstract class UIComponent {
 
     public abstract int preferredWidth(Font font);
     public abstract int preferredHeight(Font font);
+
+    /**
+     * Measures and lays out an entire component tree with the real screen font.
+     * Existing layout implementations stay source-compatible while no longer
+     * having to guess text sizes with a null font.
+     */
+    public final void layoutTree(Font font, int x, int y, int availableWidth, int availableHeight) {
+        setMeasureFont(font);
+        layout(x, y, availableWidth, availableHeight);
+    }
+
+    private void setMeasureFont(Font font) {
+        this.measureFont = font;
+        for (UIComponent child : children) child.setMeasureFont(font);
+    }
+
+    protected final Font measureFont() { return measureFont; }
 
     public void layout(int x, int y, int availableWidth, int availableHeight) {
         setBounds(x, y, availableWidth, availableHeight);
@@ -71,6 +96,41 @@ public abstract class UIComponent {
     }
 
     public boolean isHovered() { return hovered; }
+
+    protected final void renderChildren(GuiGraphics g, Font font, int mx, int my, float pt) {
+        for (UIComponent child : children) {
+            if (child.isVisible()) child.render(g, font, mx, my, pt);
+        }
+    }
+
+    protected final boolean childrenMouseClicked(double mx, double my, int button) {
+        for (int i = children.size() - 1; i >= 0; i--) {
+            UIComponent child = children.get(i);
+            if (child.isVisible() && child.mouseClicked(mx, my, button)) return true;
+        }
+        return false;
+    }
+
+    protected final boolean childrenMouseScrolled(double mx, double my, double delta) {
+        for (UIComponent child : children) {
+            if (child.isVisible() && child.mouseScrolled(mx, my, delta)) return true;
+        }
+        return false;
+    }
+
+    protected final boolean childrenMouseDragged(double mx, double my, int button, double dragX, double dragY) {
+        for (UIComponent child : children) {
+            if (child.isVisible() && child.mouseDragged(mx, my, button, dragX, dragY)) return true;
+        }
+        return false;
+    }
+
+    protected final boolean childrenMouseReleased(double mx, double my, int button) {
+        for (UIComponent child : children) {
+            if (child.isVisible() && child.mouseReleased(mx, my, button)) return true;
+        }
+        return false;
+    }
 
     public void dispose() {
         for (UIComponent c : children) c.dispose();

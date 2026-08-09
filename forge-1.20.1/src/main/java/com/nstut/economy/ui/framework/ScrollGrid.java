@@ -89,8 +89,9 @@ public class ScrollGrid extends UIComponent {
             int trackX = x + width - 6;
             int thumbHeight = Math.max(10, height * visibleRows / totalRows);
             int thumbY = scrollRow * (height - thumbHeight) / maxScroll;
-            g.fill(trackX, y, trackX + 5, y + height, trackColor);
-            g.fill(trackX, y + thumbY, trackX + 5, y + thumbY + thumbHeight, thumbColor);
+            UiRender.roundedRect(g, trackX + 1, y, 3, height, 2, trackColor);
+            UiRender.roundedRect(g, trackX, y + thumbY, 5, thumbHeight, 3,
+                    draggingScrollbar ? UiTheme.ACCENT_HOVER : thumbColor);
         }
     }
 

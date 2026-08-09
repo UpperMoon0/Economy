@@ -69,8 +69,9 @@ public class ScrollList extends UIComponent {
             int trackH = height;
             int thumbH = Math.max(10, trackH * maxVisible / total);
             int thumbY = scrollOffset * (trackH - thumbH) / maxScroll;
-            g.fill(trackX, y, trackX + 5, y + trackH, trackColor);
-            g.fill(trackX, y + thumbY, trackX + 5, y + thumbY + thumbH, thumbColor);
+            UiRender.roundedRect(g, trackX + 1, y, 3, trackH, 2, trackColor);
+            UiRender.roundedRect(g, trackX, y + thumbY, 5, thumbH, 3,
+                    isDraggingScrollbar ? UiTheme.ACCENT_HOVER : thumbColor);
         }
     }
 
@@ -162,4 +163,3 @@ public class ScrollList extends UIComponent {
         isDraggingScrollbar = false;
     }
 }
-

@@ -34,99 +34,23 @@ import java.util.Map;
 
 public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
 
-    private static final int SCREEN_W = 320;
-    private static final int SCREEN_H = 240;
+    private static final int SCREEN_W = 356;
+    private static final int SCREEN_H = 248;
 
-    private static final int BG_DARK = 0xFF141424;
-    private static final int PANEL = 0xFF1E1E30;
-    private static final int PANEL_BORDER = 0xFF2F2F48;
-    private static final int CARD_BG = 0xFF232338;
-    private static final int CARD_HOVER = 0xFF2F2F4A;
-    private static final int ACCENT = 0xFF00D4AA;
-    private static final int ACCENT_DIM = 0xFF008866;
-    private static final int TEXT_PRIMARY = 0xFFE5E5F0;
-    private static final int TEXT_MUTED = 0xFF8A8A9E;
-    private static final int GREEN = 0xFF22CC66;
-    private static final int RED = 0xFFEE4444;
-    private static final int CHART_BG = 0xFF18182A;
-    private static final int CHART_LINE = 0xFF00D4AA;
-    private static final int SIDEBAR_W = 74;
-
-    private static class PaddingBox extends UIComponent {
-        private final int top, right, bottom, left;
-
-        public PaddingBox(int top, int right, int bottom, int left, UIComponent child) {
-            this.top = top; this.right = right; this.bottom = bottom; this.left = left;
-            if (child != null) addChild(child);
-        }
-
-        @Override
-        public int preferredWidth(Font font) {
-            int max = 0;
-            for (UIComponent c : children) max = Math.max(max, c.preferredWidth(font));
-            return max + left + right;
-        }
-
-        @Override
-        public int preferredHeight(Font font) {
-            int total = 0;
-            for (UIComponent c : children) total += c.preferredHeight(font);
-            return total + top + bottom;
-        }
-
-        @Override
-        public void layout(int x, int y, int availableWidth, int availableHeight) {
-            setBounds(x, y, availableWidth, availableHeight);
-            int cw = Math.max(0, availableWidth - left - right);
-            int ch = Math.max(0, availableHeight - top - bottom);
-            for (UIComponent c : children) {
-                c.layout(x + left, y + top, cw, ch);
-            }
-        }
-
-        @Override
-        public void render(GuiGraphics g, Font font, int mx, int my, float pt) {
-            if (!visible) return;
-            for (UIComponent c : children) if (c.isVisible()) c.render(g, font, mx, my, pt);
-        }
-
-        @Override
-        public boolean mouseClicked(double mx, double my, int button) {
-            if (!visible) return false;
-            for (int i = children.size() - 1; i >= 0; i--) {
-                UIComponent c = children.get(i);
-                if (c.isVisible() && c.mouseClicked(mx, my, button)) return true;
-            }
-            return false;
-        }
-
-        @Override
-        public boolean mouseScrolled(double mx, double my, double delta) {
-            if (!visible) return false;
-            for (UIComponent c : children) {
-                if (c.isVisible() && c.mouseScrolled(mx, my, delta)) return true;
-            }
-            return false;
-        }
-
-        @Override
-        public boolean mouseDragged(double mx, double my, int button, double dragX, double dragY) {
-            if (!visible) return false;
-            for (UIComponent c : children) {
-                if (c.isVisible() && c.mouseDragged(mx, my, button, dragX, dragY)) return true;
-            }
-            return false;
-        }
-
-        @Override
-        public boolean mouseReleased(double mx, double my, int button) {
-            if (!visible) return false;
-            for (UIComponent c : children) {
-                if (c.isVisible() && c.mouseReleased(mx, my, button)) return true;
-            }
-            return false;
-        }
-    }
+    private static final int BG_DARK = UiTheme.SHELL;
+    private static final int PANEL = UiTheme.SURFACE;
+    private static final int PANEL_BORDER = UiTheme.BORDER_SUBTLE;
+    private static final int CARD_BG = UiTheme.SURFACE_RAISED;
+    private static final int CARD_HOVER = UiTheme.SURFACE_HOVER;
+    private static final int ACCENT = UiTheme.ACCENT;
+    private static final int ACCENT_DIM = UiTheme.ACCENT_DIM;
+    private static final int TEXT_PRIMARY = UiTheme.TEXT_PRIMARY;
+    private static final int TEXT_MUTED = UiTheme.TEXT_MUTED;
+    private static final int GREEN = UiTheme.SUCCESS;
+    private static final int RED = UiTheme.DANGER;
+    private static final int CHART_BG = UiTheme.INPUT;
+    private static final int CHART_LINE = UiTheme.ACCENT;
+    private static final int SIDEBAR_W = 84;
 
     private static void renderSmallCoin(GuiGraphics g, int x, int y) {
         g.pose().pushPose();
@@ -138,11 +62,8 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
 
     private static void drawStatBox(GuiGraphics g, Font font, int x, int y, int width, int height,
                                     String label, String value, int valueColor) {
-        g.fill(x, y, x + width, y + height, CARD_BG);
-        g.fill(x, y, x + width, y + 1, PANEL_BORDER);
-        g.fill(x, y + height - 1, x + width, y + height, PANEL_BORDER);
-        g.fill(x, y, x + 1, y + height, PANEL_BORDER);
-        g.fill(x + width - 1, y, x + width, y + height, PANEL_BORDER);
+        UiRender.surface(g, x, y, width, height, UiTheme.RADIUS_SM,
+                CARD_BG, PANEL_BORDER, false);
         g.drawString(font, label, x + (width - font.width(label)) / 2, y + 3, TEXT_MUTED);
         g.drawString(font, value, x + (width - font.width(value)) / 2, y + 13, valueColor);
     }
@@ -493,8 +414,8 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
     @Override
     protected void init() {
         super.init();
-        editQtyField = new EditBoxWrapper(10, TEXT_PRIMARY, PANEL, this.font).setPlaceholder("Qty");
-        editPriceField = new EditBoxWrapper(20, TEXT_PRIMARY, PANEL, this.font).setPlaceholder("Price");
+        editQtyField = new EditBoxWrapper(10, TEXT_PRIMARY, UiTheme.INPUT, this.font).setPlaceholder("Qty");
+        editPriceField = new EditBoxWrapper(20, TEXT_PRIMARY, UiTheme.INPUT, this.font).setPlaceholder("Price");
         editQtyField.setVisible(false);
         editPriceField.setVisible(false);
 
@@ -582,21 +503,24 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         HStack main = new HStack().gap(0);
         root.addChild(main);
 
-        // Sidebar with Padding & Padding Boxes around buttons
+        // Persistent navigation rail, composed from reusable layout primitives.
         VStack sidebar = new VStack().gap(5);
-        sidebar.addChild(new SizedBox(0, 4)); // top margin
-        sidebar.addChild(TextWidget.centered("Market", ACCENT));
+        sidebar.addChild(new SizedBox(0, 7));
+        sidebar.addChild(TextWidget.centered("ECONOMY", TEXT_PRIMARY));
+        sidebar.addChild(TextWidget.centered("MARKET", ACCENT));
         balanceWidget = new UIComponent() {
             @Override public int preferredWidth(Font f) { return SIDEBAR_W; }
-            @Override public int preferredHeight(Font f) { return 16; }
+            @Override public int preferredHeight(Font f) { return 19; }
             @Override
             public void render(GuiGraphics g, Font fnt, int mx, int my, float pt) {
                 String balDisp = formatCompact(new BigDecimal(cachedBalance));
                 int textW = fnt.width(balDisp);
                 int totalW = 8 + 3 + textW;
                 int startX = x + (width - totalW) / 2;
-                renderSmallCoin(g, startX, y + 4);
-                g.drawString(fnt, balDisp, startX + 11, y + 3, TEXT_PRIMARY);
+                UiRender.pill(g, x + 6, y + 1, width - 12, height - 2,
+                        UiTheme.INPUT, UiTheme.BORDER_SUBTLE);
+                renderSmallCoin(g, startX, y + 5);
+                g.drawString(fnt, balDisp, startX + 11, y + 4, TEXT_PRIMARY);
             }
         };
         sidebar.addChild(balanceWidget);
@@ -604,13 +528,13 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         sidebar.addChild(new Divider(PANEL_BORDER));
         sidebar.addChild(new SizedBox(0, 2));
 
-        browseBtn = btn("Browse", PANEL, CARD_HOVER).onPress(() -> {
+        browseBtn = btn("Browse", PANEL, CARD_HOVER).alignLeft().activeIndicator().height(18).onPress(() -> {
             selectedItemId = null;
             switchView(0);
         });
-        sidebar.addChild(new PaddingBox(0, 4, 0, 4, browseBtn));
+        sidebar.addChild(new Padding(0, 4, 0, 4, browseBtn));
 
-        newOrderBtn = btn("New Order", PANEL, CARD_HOVER).onPress(() -> {
+        newOrderBtn = btn("New Order", PANEL, CARD_HOVER).alignLeft().activeIndicator().height(18).onPress(() -> {
             createOrderSourceMode = 0;
             selectedItemId = null;
             createSellMode = true;
@@ -621,38 +545,38 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
             updateCreateOfferLabels();
             switchView(2);
         });
-        sidebar.addChild(new PaddingBox(0, 4, 0, 4, newOrderBtn));
+        sidebar.addChild(new Padding(0, 4, 0, 4, newOrderBtn));
 
-        orderHistoryBtn = btn("Orders", PANEL, CARD_HOVER).onPress(() -> {
+        orderHistoryBtn = btn("Orders", PANEL, CARD_HOVER).alignLeft().activeIndicator().height(18).onPress(() -> {
             cachedHistory = new ArrayList<>();
             cachedActiveOrders = new ArrayList<>();
             switchView(3);
             MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestActiveOrdersPacket());
             MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestOrderHistoryPacket());
         });
-        sidebar.addChild(new PaddingBox(0, 4, 0, 4, orderHistoryBtn));
+        sidebar.addChild(new Padding(0, 4, 0, 4, orderHistoryBtn));
 
-        portfolioBtn = btn("Portfolio", PANEL, CARD_HOVER).onPress(() -> {
+        portfolioBtn = btn("Portfolio", PANEL, CARD_HOVER).alignLeft().activeIndicator().height(18).onPress(() -> {
             cachedPortfolioPoints = new ArrayList<>();
             cachedAssetHoldings = new ArrayList<>();
             switchView(5);
             MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestPortfolioPacket());
         });
-        sidebar.addChild(new PaddingBox(0, 4, 0, 4, portfolioBtn));
+        sidebar.addChild(new Padding(0, 4, 0, 4, portfolioBtn));
 
-        containersBtn = btn("Containers", PANEL, CARD_HOVER).onPress(() -> {
+        containersBtn = btn("Containers", PANEL, CARD_HOVER).alignLeft().activeIndicator().height(18).onPress(() -> {
             cachedContainerEntries = new ArrayList<>();
             switchView(4);
             MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestVaultInfoPacket());
         });
-        sidebar.addChild(new PaddingBox(0, 4, 0, 4, containersBtn));
+        sidebar.addChild(new Padding(0, 4, 0, 4, containersBtn));
 
         sidebar.addChild(new Spacer());
         SizedBox sidebarBox = new SizedBox(SIDEBAR_W, SCREEN_H);
         sidebarBox.addChild(sidebar);
         main.addChild(sidebarBox);
 
-        // Content Container wrapped with 8px Margin & Padding
+        // Content container follows the same predictable inset rhythm as cards.
         VStack contentArea = new VStack().gap(4);
         contentArea.flex();
 
@@ -688,7 +612,7 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         this.portfolioView = portfolio;
         contentArea.addChild(portfolio);
 
-        PaddingBox contentPadding = new PaddingBox(8, 8, 8, 8, contentArea);
+        Padding contentPadding = new Padding(10, 10, 10, 10, contentArea);
         contentPadding.flex();
         main.addChild(contentPadding);
     }
@@ -699,8 +623,17 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
 
     private UIComponent buildBrowser(Font font) {
         VStack v = new VStack().gap(4);
+        v.addChild(new UIComponent() {
+            @Override public int preferredWidth(Font f) { return 0; }
+            @Override public int preferredHeight(Font f) { return 15; }
+            @Override public void render(GuiGraphics g, Font fnt, int mx, int my, float pt) {
+                g.drawString(fnt, "MARKETPLACE", x, y + 2, TEXT_PRIMARY);
+                String listingCount = filterCards().size() + " live listings";
+                g.drawString(fnt, listingCount, x + width - fnt.width(listingCount), y + 2, TEXT_MUTED);
+            }
+        });
         searchQuery = savedSearchQuery;
-        searchField = new EditBoxWrapper(60, TEXT_PRIMARY, PANEL, font).setPlaceholder("Search products...");
+        searchField = new EditBoxWrapper(60, TEXT_PRIMARY, UiTheme.INPUT, font).setPlaceholder("Search products...");
         if (savedSearchQuery != null && !savedSearchQuery.isEmpty()) {
             searchField.setValue(savedSearchQuery);
         }
@@ -824,12 +757,13 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         int fillColor = cardHovered ? CARD_HOVER : CARD_BG;
         int borderColor = cardHovered ? ACCENT : PANEL_BORDER;
 
-        g.fill(cardX, cardY, cardX + cardWidth, cardY + cardHeight, fillColor);
-        g.fill(cardX, cardY, cardX + cardWidth, cardY + 1, borderColor);
-        g.fill(cardX, cardY + cardHeight - 1, cardX + cardWidth, cardY + cardHeight, borderColor);
-        g.fill(cardX, cardY, cardX + 1, cardY + cardHeight, borderColor);
-        g.fill(cardX + cardWidth - 1, cardY, cardX + cardWidth, cardY + cardHeight, borderColor);
-
+        UiRender.surface(g, cardX, cardY, cardWidth, cardHeight, UiTheme.RADIUS_MD,
+                fillColor, borderColor, cardHovered);
+        if (cardHovered) {
+            UiRender.roundedRect(g, cardX + 2, cardY + 6, 2, cardHeight - 12, 1, ACCENT);
+        }
+        UiRender.roundedOutline(g, cardX + 4, cardY + 9, 22, 22, UiTheme.RADIUS_SM,
+                UiTheme.INPUT, PANEL_BORDER);
         renderCommodityIcon(g, card.itemId, cardX + 6, cardY + 12);
 
         int textX = cardX + 28;
@@ -866,7 +800,10 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
             countText = font.plainSubstrByWidth(countText, textWidth);
             g.drawString(font, countText, textX, cardY + 28, TEXT_MUTED);
         } else {
-            g.drawString(font, countText, cardX + cardWidth - countWidth - 6, cardY + 16, TEXT_MUTED);
+            int pillWidth = countWidth + 10;
+            int pillX = cardX + cardWidth - pillWidth - 5;
+            UiRender.pill(g, pillX, cardY + 13, pillWidth, 15, UiTheme.INPUT, PANEL_BORDER);
+            g.drawString(font, countText, pillX + 5, cardY + 16, TEXT_MUTED);
         }
     }
 
@@ -939,11 +876,8 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
             @Override public int preferredHeight(Font f) { return 40; }
             @Override
             public void render(GuiGraphics g, Font fnt, int mx, int my, float pt) {
-                g.fill(x, y, x + width, y + height, CHART_BG);
-                g.fill(x, y, x + width, y + 1, PANEL_BORDER);
-                g.fill(x, y + height - 1, x + width, y + height, PANEL_BORDER);
-                g.fill(x, y, x + 1, y + height, PANEL_BORDER);
-                g.fill(x + width - 1, y, x + width, y + height, PANEL_BORDER);
+                UiRender.surface(g, x, y, width, height, UiTheme.RADIUS_MD,
+                        CHART_BG, PANEL_BORDER, false);
 
                 if (cachedDetail != null && cachedDetail.chart != null && !cachedDetail.chart.isEmpty()) {
                     List<MarketNetwork.ChartPoint> pts = cachedDetail.chart;
@@ -991,13 +925,9 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
                     detailLiveBtnW = liveW;
                     detailLiveBtnH = liveH;
                     boolean liveHover = mx >= liveX && mx < liveX + liveW && my >= liveY && my < liveY + liveH;
-                    int liveBg = detailChartOffset > 0 ? (liveHover ? 0xFF047857 : 0xFF065F46) : (liveHover ? CARD_HOVER : 0xFF003024);
+                    int liveBg = detailChartOffset > 0 ? (liveHover ? UiTheme.SUCCESS : UiTheme.SUCCESS_DEEP) : (liveHover ? CARD_HOVER : UiTheme.ACCENT_DEEP);
                     int liveBorder = detailChartOffset > 0 ? GREEN : (liveHover ? ACCENT : PANEL_BORDER);
-                    g.fill(liveX, liveY, liveX + liveW, liveY + liveH, liveBg);
-                    g.fill(liveX, liveY, liveX + liveW, liveY + 1, liveBorder);
-                    g.fill(liveX, liveY + liveH - 1, liveX + liveW, liveY + liveH, liveBorder);
-                    g.fill(liveX, liveY, liveX + 1, liveY + liveH, liveBorder);
-                    g.fill(liveX + liveW - 1, liveY, liveX + liveW, liveY + liveH, liveBorder);
+                    UiRender.pill(g, liveX, liveY, liveW, liveH, liveBg, liveBorder);
                     g.drawString(fnt, liveStr, liveX + 3, liveY + 2, detailChartOffset > 0 ? 0xFFFFFFFF : ACCENT);
                     if (liveHover && detailChartOffset > 0) {
                         pendingTooltip = "Click to snap back to current live time";
@@ -1041,11 +971,8 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
                     }
 
                     // Draw right current price badge pill container
-                    g.fill(badgeX, badgeY, badgeX + badgeW, badgeY + badgeH, 0xFF003024);
-                    g.fill(badgeX, badgeY, badgeX + badgeW, badgeY + 1, ACCENT);
-                    g.fill(badgeX, badgeY + badgeH - 1, badgeX + badgeW, badgeY + badgeH, ACCENT);
-                    g.fill(badgeX, badgeY, badgeX + 1, badgeY + badgeH, ACCENT);
-                    g.fill(badgeX + badgeW - 1, badgeY, badgeX + badgeW, badgeY + badgeH, ACCENT);
+                    UiRender.pill(g, badgeX, badgeY, badgeW, badgeH,
+                            UiTheme.ACCENT_DEEP, ACCENT);
                     g.drawString(fnt, currentPriceStr, badgeX + 4, badgeY + 2, ACCENT);
                 } else {
                     g.drawString(fnt, "No trade history available yet", x + (width - fnt.width("No trade history available yet")) / 2, y + 18, TEXT_MUTED);
@@ -1085,7 +1012,8 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
                 MarketNetwork.OrderEntry e = myOrders.get(idx);
                 boolean isSell = cachedDetail != null && cachedDetail.asks.contains(e);
 
-                if (hover) g.fill(rx, ry, rx + rw, ry + 16, CARD_HOVER);
+                if (hover) UiRender.roundedRect(g, rx, ry + 1, rw, 15,
+                        UiTheme.RADIUS_SM, CARD_HOVER);
 
                 // 1. Order Type Badge (SELL or BUY)
                 String typeText = isSell ? "SELL" : "BUY";
@@ -1096,14 +1024,10 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
                 int badgeY = ry + 2;
 
                 int bgClr = isSell ? 0x40801818 : 0x40105028;
-                int borderClr = isSell ? 0xFFC03030 : 0xFF20A050;
-                int textClr = isSell ? 0xFFFF6666 : 0xFF66FF66;
+                int borderClr = isSell ? UiTheme.DANGER : UiTheme.SUCCESS;
+                int textClr = isSell ? UiTheme.DANGER : UiTheme.SUCCESS;
 
-                g.fill(badgeX, badgeY, badgeX + badgeW, badgeY + badgeH, bgClr);
-                g.fill(badgeX, badgeY, badgeX + badgeW, badgeY + 1, borderClr);
-                g.fill(badgeX, badgeY + badgeH - 1, badgeX + badgeW, badgeY + badgeH, borderClr);
-                g.fill(badgeX, badgeY, badgeX + 1, badgeY + badgeH, borderClr);
-                g.fill(badgeX + badgeW - 1, badgeY, badgeX + badgeW, badgeY + badgeH, borderClr);
+                UiRender.pill(g, badgeX, badgeY, badgeW, badgeH, bgClr, borderClr);
                 g.drawString(fnt, typeText, badgeX + 3, badgeY + 2, textClr);
 
                 // 2. Coin Icon & Price x Quantity (with fulfillment progress if partially filled)
@@ -1160,22 +1084,14 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
 
                 boolean isEditHover = (mx >= editX && mx < cancelX && my >= btnY && my <= btnY + btnH);
                 int editBg = isEditHover ? CARD_HOVER : PANEL;
-                g.fill(editX, btnY, editX + editW, btnY + btnH, editBg);
-                g.fill(editX, btnY, editX + editW, btnY + 1, ACCENT);
-                g.fill(editX, btnY + btnH - 1, editX + editW, btnY + btnH, ACCENT);
-                g.fill(editX, btnY, editX + 1, btnY + btnH, ACCENT);
-                g.fill(editX + editW - 1, btnY, editX + editW, btnY + btnH, ACCENT);
+                UiRender.pill(g, editX, btnY, editW, btnH, editBg, ACCENT);
                 g.drawString(fnt, editText, editX + 3, badgeY + 2, ACCENT);
 
                 boolean isCancelHover = (mx >= cancelX && mx <= cancelX + cancelW && my >= btnY && my <= btnY + btnH);
-                int cancelBg = isCancelHover ? 0xFFC02020 : 0x60901818;
-                int cancelBorder = 0xFFFF4444;
+                int cancelBg = isCancelHover ? UiRender.mix(UiTheme.DANGER_DEEP, UiTheme.DANGER, 0.28F) : UiTheme.DANGER_DEEP;
+                int cancelBorder = UiTheme.DANGER;
 
-                g.fill(cancelX, btnY, cancelX + cancelW, btnY + btnH, cancelBg);
-                g.fill(cancelX, btnY, cancelX + cancelW, btnY + 1, cancelBorder);
-                g.fill(cancelX, btnY + btnH - 1, cancelX + cancelW, btnY + btnH, cancelBorder);
-                g.fill(cancelX, btnY, cancelX + 1, btnY + btnH, cancelBorder);
-                g.fill(cancelX + cancelW - 1, btnY, cancelX + cancelW, btnY + btnH, cancelBorder);
+                UiRender.pill(g, cancelX, btnY, cancelW, btnH, cancelBg, cancelBorder);
                 g.drawString(fnt, cancelText, cancelX + 3, badgeY + 2, 0xFFFFFFFF);
             },
             (idx, button, mx, my) -> {
@@ -1293,7 +1209,8 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
                 if (idx >= entries.size()) return;
                 MarketNetwork.OrderEntry e = entries.get(idx);
                 int clr = e.isServerOrder ? ACCENT : (isAsks ? RED : GREEN);
-                if (hover) g.fill(rx, ry, rx + rw, ry + 17, CARD_HOVER);
+                if (hover) UiRender.roundedRect(g, rx, ry + 1, rw, 16,
+                        UiTheme.RADIUS_SM, CARD_HOVER);
 
                 int textX = rx + 3;
                 if (e.isServerOrder) {
@@ -1303,11 +1220,8 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
                     int badgeX = rx + 2;
                     int badgeY = ry + 3;
 
-                    g.fill(badgeX, badgeY, badgeX + badgeW, badgeY + badgeH, 0xFF003024);
-                    g.fill(badgeX, badgeY, badgeX + badgeW, badgeY + 1, ACCENT);
-                    g.fill(badgeX, badgeY + badgeH - 1, badgeX + badgeW, badgeY + badgeH, ACCENT);
-                    g.fill(badgeX, badgeY, badgeX + 1, badgeY + badgeH, ACCENT);
-                    g.fill(badgeX + badgeW - 1, badgeY, badgeX + badgeW, badgeY + badgeH, ACCENT);
+                    UiRender.pill(g, badgeX, badgeY, badgeW, badgeH,
+                            UiTheme.ACCENT_DEEP, ACCENT);
 
                     g.drawString(fnt, badge, badgeX + 4, badgeY + 2, ACCENT);
                     textX += badgeW + 4;
@@ -1323,11 +1237,8 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
                     int badgeX = rx + 2;
                     int badgeY = ry + 3;
 
-                    g.fill(badgeX, badgeY, badgeX + badgeW, badgeY + badgeH, 0xFF232338);
-                    g.fill(badgeX, badgeY, badgeX + badgeW, badgeY + 1, PANEL_BORDER);
-                    g.fill(badgeX, badgeY + badgeH - 1, badgeX + badgeW, badgeY + badgeH, PANEL_BORDER);
-                    g.fill(badgeX, badgeY, badgeX + 1, badgeY + badgeH, PANEL_BORDER);
-                    g.fill(badgeX + badgeW - 1, badgeY, badgeX + badgeW, badgeY + badgeH, PANEL_BORDER);
+                    UiRender.pill(g, badgeX, badgeY, badgeW, badgeH,
+                            CARD_BG, PANEL_BORDER);
 
                     g.drawString(fnt, dispName, badgeX + 3, badgeY + 2, TEXT_PRIMARY);
                     textX += badgeW + 4;
@@ -1433,12 +1344,12 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         v.addChild(new Divider(PANEL_BORDER));
 
         HStack modeSelector = new HStack().gap(4);
-        sellModeBtn = btn("SELL ORDER", createSellMode ? 0xFF991B1B : PANEL, 0xFFDC2626).onPress(() -> {
+        sellModeBtn = btn("SELL ORDER", createSellMode ? UiTheme.DANGER_DEEP : PANEL, UiTheme.DANGER).onPress(() -> {
             createSellMode = true;
             updateCreateOfferLabels();
         });
         sellModeBtn.flex();
-        buyModeBtn = btn("BUY ORDER", !createSellMode ? 0xFF065F46 : PANEL, 0xFF059669).onPress(() -> {
+        buyModeBtn = btn("BUY ORDER", !createSellMode ? UiTheme.SUCCESS_DEEP : PANEL, UiTheme.SUCCESS).onPress(() -> {
             createSellMode = false;
             updateCreateOfferLabels();
         });
@@ -1449,7 +1360,7 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
 
         v.addChild(new SizedBox(0, 2));
 
-        itemIdField = new EditBoxWrapper(128, TEXT_PRIMARY, PANEL, font).setPlaceholder("Search item name or ID...");
+        itemIdField = new EditBoxWrapper(128, TEXT_PRIMARY, UiTheme.INPUT, font).setPlaceholder("Search item name or ID...");
         if (selectedItemId != null) {
             itemIdField.setValue(selectedItemId);
             itemSearchAutoFilled = selectedItemId;
@@ -1502,7 +1413,7 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         v.addChild(vaultStockBadge);
 
         HStack qtyRow = new HStack().gap(4);
-        qtyField = new EditBoxWrapper(10, TEXT_PRIMARY, PANEL, font).setPlaceholder("Quantity (e.g. 10)");
+        qtyField = new EditBoxWrapper(10, TEXT_PRIMARY, UiTheme.INPUT, font).setPlaceholder("Quantity (e.g. 10)");
         qtyField.flex();
         qtyRow.addChild(qtyField);
 
@@ -1518,7 +1429,7 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
 
         infiniteBuyBtn = btn("∞", PANEL, CARD_HOVER).onPress(() -> {
             isCreateInfinite = !isCreateInfinite;
-            infiniteBuyBtn.setColors(isCreateInfinite ? 0xFF047857 : PANEL, isCreateInfinite ? 0xFF059669 : CARD_HOVER);
+            infiniteBuyBtn.setColors(isCreateInfinite ? UiTheme.SUCCESS_DEEP : PANEL, isCreateInfinite ? UiTheme.SUCCESS : CARD_HOVER);
             if (isCreateInfinite && qtyField != null) {
                 qtyField.setValue("∞");
             } else if (!isCreateInfinite && qtyField != null && qtyField.getValue().equals("∞")) {
@@ -1528,14 +1439,14 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         qtyRow.addChild(infiniteBuyBtn);
         v.addChild(qtyRow);
 
-        priceField = new EditBoxWrapper(20, TEXT_PRIMARY, PANEL, font).setPlaceholder("Price per unit (e.g. 150)");
+        priceField = new EditBoxWrapper(20, TEXT_PRIMARY, UiTheme.INPUT, font).setPlaceholder("Price per unit (e.g. 150)");
         v.addChild(priceField);
 
         v.addChild(new SizedBox(0, 4));
 
         createBtn = btn(createSellMode ? "SUBMIT SELL ORDER" : "SUBMIT BUY ORDER",
-                createSellMode ? 0xFFB91C1C : 0xFF047857,
-                createSellMode ? 0xFFDC2626 : 0xFF059669).onPress(this::submitOffer);
+                createSellMode ? UiTheme.DANGER_DEEP : UiTheme.SUCCESS_DEEP,
+                createSellMode ? UiTheme.DANGER : UiTheme.SUCCESS).onPress(this::submitOffer);
         v.addChild(createBtn);
 
         createOfferErrorLabel = TextWidget.label("", RED);
@@ -1555,15 +1466,15 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         }
         if (createBtn != null) {
             createBtn.setLabel(createSellMode ? "SUBMIT SELL ORDER" : "SUBMIT BUY ORDER");
-            createBtn.setColors(createSellMode ? 0xFFB91C1C : 0xFF047857,
-                                createSellMode ? 0xFFDC2626 : 0xFF059669);
+            createBtn.setColors(createSellMode ? UiTheme.DANGER_DEEP : UiTheme.SUCCESS_DEEP,
+                                createSellMode ? UiTheme.DANGER : UiTheme.SUCCESS);
         }
         if (maxQtyBtn != null) {
             maxQtyBtn.setVisible(createSellMode);
         }
         if (infiniteBuyBtn != null) {
             infiniteBuyBtn.setVisible(!createSellMode);
-            infiniteBuyBtn.setColors(isCreateInfinite ? 0xFF047857 : PANEL, isCreateInfinite ? 0xFF059669 : CARD_HOVER);
+            infiniteBuyBtn.setColors(isCreateInfinite ? UiTheme.SUCCESS_DEEP : PANEL, isCreateInfinite ? UiTheme.SUCCESS : CARD_HOVER);
         }
     }
 
@@ -1741,7 +1652,7 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         }
 
         if (root != null) {
-            root.layout(this.leftPos, this.topPos, this.imageWidth, this.imageHeight);
+            root.layoutTree(this.font, left(), top(), SCREEN_W, SCREEN_H);
         }
         syncEditBoxes();
 
@@ -1936,7 +1847,7 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         VStack v = new VStack().gap(4);
 
         activeOrdersSearchQuery = savedActiveOrdersSearchQuery;
-        activeOrdersSearchField = new EditBoxWrapper(60, TEXT_PRIMARY, PANEL, font).setPlaceholder("Search item name or ID...");
+        activeOrdersSearchField = new EditBoxWrapper(60, TEXT_PRIMARY, UiTheme.INPUT, font).setPlaceholder("Search item name or ID...");
         if (savedActiveOrdersSearchQuery != null && !savedActiveOrdersSearchQuery.isEmpty()) {
             activeOrdersSearchField.setValue(savedActiveOrdersSearchQuery);
         }
@@ -1983,8 +1894,8 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
                 if (idx >= entries.size()) return;
                 MarketNetwork.ActiveOrderEntry e = entries.get(idx);
 
-                if (hover) g.fill(rx, ry, rx + rw, ry + 35, CARD_HOVER);
-                g.fill(rx, ry + 35, rx + rw, ry + 36, PANEL_BORDER);
+                UiRender.roundedOutline(g, rx, ry + 1, rw, 34, UiTheme.RADIUS_SM,
+                        hover ? CARD_HOVER : CARD_BG, PANEL_BORDER);
 
                 // Icon
                 renderCommodityIcon(g, e.itemId, rx + 4, ry + 10);
@@ -2021,19 +1932,11 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
                 boolean cancelHover = mx >= cancelX && mx < cancelX + cancelW && my >= btnY && my < btnY + btnH;
 
                 int editBg = editHover ? CARD_HOVER : PANEL;
-                g.fill(editX, btnY, editX + editW, btnY + btnH, editBg);
-                g.fill(editX, btnY, editX + editW, btnY + 1, ACCENT);
-                g.fill(editX, btnY + btnH - 1, editX + editW, btnY + btnH, ACCENT);
-                g.fill(editX, btnY, editX + 1, btnY + btnH, ACCENT);
-                g.fill(editX + editW - 1, btnY, editX + editW, btnY + btnH, ACCENT);
+                UiRender.pill(g, editX, btnY, editW, btnH, editBg, ACCENT);
                 g.drawString(fnt, "Edit", editX + (editW - fnt.width("Edit")) / 2, btnY + 6, ACCENT);
 
-                int cancelBg = cancelHover ? 0xFF991B1B : 0xFF7F1D1D;
-                g.fill(cancelX, btnY, cancelX + cancelW, btnY + btnH, cancelBg);
-                g.fill(cancelX, btnY, cancelX + cancelW, btnY + 1, RED);
-                g.fill(cancelX, btnY + btnH - 1, cancelX + cancelW, btnY + btnH, RED);
-                g.fill(cancelX, btnY, cancelX + 1, btnY + btnH, RED);
-                g.fill(cancelX + cancelW - 1, btnY, cancelX + cancelW, btnY + btnH, RED);
+                int cancelBg = cancelHover ? UiRender.mix(UiTheme.DANGER_DEEP, UiTheme.DANGER, 0.28F) : UiTheme.DANGER_DEEP;
+                UiRender.pill(g, cancelX, btnY, cancelW, btnH, cancelBg, RED);
                 g.drawString(fnt, "Cancel", cancelX + (cancelW - fnt.width("Cancel")) / 2, btnY + 6, TEXT_PRIMARY);
             },
             (idx, btn, mx, my) -> {
@@ -2106,15 +2009,10 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         int modalX = left() + (SCREEN_W - modalW) / 2;
         int modalY = top() + (SCREEN_H - modalH) / 2;
 
-        // Dark dim backdrop over whole screen
-        g.fill(left(), top(), left() + SCREEN_W, top() + SCREEN_H, 0xEE000000);
-
-        // Modal container background & border
-        g.fill(modalX, modalY, modalX + modalW, modalY + modalH, 0xFF0F1524);
-        g.fill(modalX, modalY, modalX + modalW, modalY + 1, ACCENT);
-        g.fill(modalX, modalY + modalH - 1, modalX + modalW, modalY + modalH, ACCENT);
-        g.fill(modalX, modalY, modalX + 1, modalY + modalH, ACCENT);
-        g.fill(modalX + modalW - 1, modalY, modalX + modalW, modalY + modalH, ACCENT);
+        UiRender.roundedRect(g, left(), top(), SCREEN_W, SCREEN_H,
+                UiTheme.RADIUS_LG, UiTheme.BACKDROP);
+        UiRender.surface(g, modalX, modalY, modalW, modalH, UiTheme.RADIUS_LG,
+                UiTheme.SURFACE_RAISED, ACCENT, true);
 
         // Title
         String title = "EDIT ORDER";
@@ -2136,12 +2034,8 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
             int infW = 24;
             int infH = 18;
             boolean infHover = mx >= infX && mx < infX + infW && my >= infY && my < infY + infH;
-            int infBg = editIsInfinite ? 0xFF047857 : (infHover ? CARD_HOVER : PANEL);
-            g.fill(infX, infY, infX + infW, infY + infH, infBg);
-            g.fill(infX, infY, infX + infW, infY + 1, ACCENT);
-            g.fill(infX, infY + infH - 1, infX + infW, infY + infH, ACCENT);
-            g.fill(infX, infY, infX + 1, infY + infH, ACCENT);
-            g.fill(infX + infW - 1, infY, infX + infW, infY + infH, ACCENT);
+            int infBg = editIsInfinite ? UiTheme.SUCCESS_DEEP : (infHover ? CARD_HOVER : PANEL);
+            UiRender.pill(g, infX, infY, infW, infH, infBg, ACCENT);
             g.drawString(font, "\u221E", infX + (infW - font.width("\u221E")) / 2, infY + 5, TEXT_PRIMARY);
             if (infHover) {
                 pendingTooltip = "Infinite Order: Buy order stays open continuously";
@@ -2182,24 +2076,16 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         int saveX = modalX + 18;
         int saveY = modalY + 105;
         boolean saveHover = mx >= saveX && mx <= saveX + btnW && my >= saveY && my <= saveY + btnH;
-        int saveBg = saveHover ? 0xFF004030 : 0xFF003024;
-        g.fill(saveX, saveY, saveX + btnW, saveY + btnH, saveBg);
-        g.fill(saveX, saveY, saveX + btnW, saveY + 1, ACCENT);
-        g.fill(saveX, saveY + btnH - 1, saveX + btnW, saveY + btnH, ACCENT);
-        g.fill(saveX, saveY, saveX + 1, saveY + btnH, ACCENT);
-        g.fill(saveX + btnW - 1, saveY, saveX + btnW, saveY + btnH, ACCENT);
+        int saveBg = saveHover ? UiRender.mix(UiTheme.ACCENT_DEEP, UiTheme.ACCENT, 0.18F) : UiTheme.ACCENT_DEEP;
+        UiRender.pill(g, saveX, saveY, btnW, btnH, saveBg, ACCENT);
         g.drawString(font, "Save", saveX + (btnW - font.width("Save")) / 2, saveY + 4, ACCENT);
 
         // Cancel Button
         int cancelX = modalX + modalW - btnW - 18;
         int cancelY = modalY + 105;
         boolean cancelHover = mx >= cancelX && mx <= cancelX + btnW && my >= cancelY && my <= cancelY + btnH;
-        int cancelBg = cancelHover ? 0xFFC02020 : 0x80901818;
-        g.fill(cancelX, cancelY, cancelX + btnW, cancelY + btnH, cancelBg);
-        g.fill(cancelX, cancelY, cancelX + btnW, cancelY + 1, RED);
-        g.fill(cancelX, cancelY + btnH - 1, cancelX + btnW, cancelY + btnH, RED);
-        g.fill(cancelX, cancelY, cancelX + 1, cancelY + btnH, RED);
-        g.fill(cancelX + btnW - 1, cancelY, cancelX + btnW, cancelY + btnH, RED);
+        int cancelBg = cancelHover ? UiRender.mix(UiTheme.DANGER_DEEP, UiTheme.DANGER, 0.28F) : UiTheme.DANGER_DEEP;
+        UiRender.pill(g, cancelX, cancelY, btnW, btnH, cancelBg, RED);
         g.drawString(font, "Cancel", cancelX + (btnW - font.width("Cancel")) / 2, cancelY + 4, 0xFFFFFFFF);
 
         if (editErrorMsg != null && !editErrorMsg.isEmpty()) {
@@ -2273,7 +2159,7 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         v.addChild(TextWidget.centered("ORDER HISTORY", ACCENT));
 
         historySearchQuery = savedHistorySearchQuery;
-        historySearchField = new EditBoxWrapper(60, TEXT_PRIMARY, PANEL, font).setPlaceholder("Search item or player...");
+        historySearchField = new EditBoxWrapper(60, TEXT_PRIMARY, UiTheme.INPUT, font).setPlaceholder("Search item or player...");
         if (savedHistorySearchQuery != null && !savedHistorySearchQuery.isEmpty()) {
             historySearchField.setValue(savedHistorySearchQuery);
         }
@@ -2321,8 +2207,8 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
                 if (idx >= entries.size()) return;
                 HistoryEntry e = entries.get(idx);
 
-                if (hover) g.fill(rx, ry, rx + rw, ry + 27, CARD_HOVER);
-                g.fill(rx, ry + 27, rx + rw, ry + 28, PANEL_BORDER);
+                UiRender.roundedOutline(g, rx, ry + 1, rw, 26, UiTheme.RADIUS_SM,
+                        hover ? CARD_HOVER : CARD_BG, PANEL_BORDER);
 
                 // Item icon centered vertically
                 renderCommodityIcon(g, e.itemId, rx + 4, ry + 6);
@@ -2423,8 +2309,8 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
                 if (idx >= cachedContainerEntries.size()) return;
                 MarketNetwork.VaultDetailEntry e = cachedContainerEntries.get(idx);
 
-                if (hover) g.fill(rx, ry, rx + rw, ry + 39, CARD_HOVER);
-                g.fill(rx, ry + 39, rx + rw, ry + 40, PANEL_BORDER);
+                UiRender.roundedOutline(g, rx, ry + 1, rw, 38, UiTheme.RADIUS_SM,
+                        hover ? CARD_HOVER : CARD_BG, PANEL_BORDER);
 
                 int typeIndex = 1;
                 for (int i = 0; i < idx; i++) {
@@ -2438,14 +2324,10 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
                 int badgeW = fnt.width(badge) + 6;
                 int badgeX = rx + rw - badgeW - 4;
                 int badgeBg = isFull ? 0x40801818 : 0x40105028;
-                int badgeBorder = isFull ? 0xFFFF4444 : 0xFF20A050;
-                int badgeText = isFull ? 0xFFFF6666 : 0xFF66FF66;
+                int badgeBorder = isFull ? UiTheme.DANGER : UiTheme.SUCCESS;
+                int badgeText = isFull ? UiTheme.DANGER : UiTheme.SUCCESS;
 
-                g.fill(badgeX, ry + 2, badgeX + badgeW, ry + 13, badgeBg);
-                g.fill(badgeX, ry + 2, badgeX + badgeW, ry + 3, badgeBorder);
-                g.fill(badgeX, ry + 12, badgeX + badgeW, ry + 13, badgeBorder);
-                g.fill(badgeX, ry + 2, badgeX + 1, ry + 13, badgeBorder);
-                g.fill(badgeX + badgeW - 1, ry + 2, badgeX + badgeW, ry + 13, badgeBorder);
+                UiRender.pill(g, badgeX, ry + 2, badgeW, 11, badgeBg, badgeBorder);
                 g.drawString(fnt, badge, badgeX + 3, ry + 3, badgeText);
 
                 String modeBadge = switch (e.mode) {
@@ -2455,15 +2337,11 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
                 };
                 int modeW = fnt.width(modeBadge) + 6;
                 int modeX = badgeX - modeW - 4;
-                int modeBg = e.mode == 1 ? 0x40801818 : (e.mode == 2 ? 0x40105028 : 0x40004050);
-                int modeBorder = e.mode == 1 ? 0xFFFF4444 : (e.mode == 2 ? 0xFF20A050 : 0xFF00D4AA);
-                int modeText = e.mode == 1 ? 0xFFFF6666 : (e.mode == 2 ? 0xFF66FF66 : 0xFF00D4AA);
+                int modeBg = e.mode == 1 ? UiTheme.DANGER_DEEP : (e.mode == 2 ? UiTheme.SUCCESS_DEEP : UiTheme.ACCENT_DEEP);
+                int modeBorder = e.mode == 1 ? UiTheme.DANGER : (e.mode == 2 ? UiTheme.SUCCESS : UiTheme.ACCENT);
+                int modeText = modeBorder;
 
-                g.fill(modeX, ry + 2, modeX + modeW, ry + 13, modeBg);
-                g.fill(modeX, ry + 2, modeX + modeW, ry + 3, modeBorder);
-                g.fill(modeX, ry + 12, modeX + modeW, ry + 13, modeBorder);
-                g.fill(modeX, ry + 2, modeX + 1, ry + 13, modeBorder);
-                g.fill(modeX + modeW - 1, ry + 2, modeX + modeW, ry + 13, modeBorder);
+                UiRender.pill(g, modeX, ry + 2, modeW, 11, modeBg, modeBorder);
                 g.drawString(fnt, modeBadge, modeX + 3, ry + 3, modeText);
 
                 if (mx >= modeX && mx < modeX + modeW && my >= ry + 2 && my < ry + 13) {
@@ -2493,10 +2371,10 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
                 int contentsW = fnt.width(contentsStr);
                 int barW = Math.max(20, rw - contentsW - 16);
                 int barH = 5;
-                g.fill(barX, barY, barX + barW, barY + barH, 0xFF1A1A2E);
                 int pct = e.totalSlots > 0 ? (int) ((long) e.usedSlots * barW / e.totalSlots) : 0;
                 int fillClr = isFull ? RED : GREEN;
-                g.fill(barX, barY, barX + pct, barY + barH, fillClr);
+                UiRender.progressTrack(g, barX, barY, barW, barH,
+                        barW <= 0 ? 0.0F : pct / (float) barW, fillClr);
 
                 g.drawString(fnt, contentsStr, rx + rw - contentsW - 4, ry + 28, TEXT_MUTED);
             },
@@ -2533,11 +2411,8 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
 
                 // Box 1: NET WORTH
                 int b1X = x;
-                g.fill(b1X, y, b1X + boxW, y + height, CARD_BG);
-                g.fill(b1X, y, b1X + boxW, y + 1, PANEL_BORDER);
-                g.fill(b1X, y + height - 1, b1X + boxW, y + height, PANEL_BORDER);
-                g.fill(b1X, y, b1X + 1, y + height, PANEL_BORDER);
-                g.fill(b1X + boxW - 1, y, b1X + boxW, y + height, PANEL_BORDER);
+                UiRender.surface(g, b1X, y, boxW, height, UiTheme.RADIUS_SM,
+                        CARD_BG, PANEL_BORDER, false);
                 g.drawString(fnt, "NET WORTH", b1X + (boxW - fnt.width("NET WORTH")) / 2, y + 3, TEXT_MUTED);
                 String nwStr = formatCompact(latestNW);
                 int nwW = 10 + fnt.width(nwStr);
@@ -2547,11 +2422,8 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
 
                 // Box 2: CASH
                 int b2X = b1X + boxW + 4;
-                g.fill(b2X, y, b2X + boxW, y + height, CARD_BG);
-                g.fill(b2X, y, b2X + boxW, y + 1, PANEL_BORDER);
-                g.fill(b2X, y + height - 1, b2X + boxW, y + height, PANEL_BORDER);
-                g.fill(b2X, y, b2X + 1, y + height, PANEL_BORDER);
-                g.fill(b2X + boxW - 1, y, b2X + boxW, y + height, PANEL_BORDER);
+                UiRender.surface(g, b2X, y, boxW, height, UiTheme.RADIUS_SM,
+                        CARD_BG, PANEL_BORDER, false);
                 g.drawString(fnt, "LIQUID CASH", b2X + (boxW - fnt.width("LIQUID CASH")) / 2, y + 3, TEXT_MUTED);
                 String balStr = formatCompact(latestBal);
                 int balW = 10 + fnt.width(balStr);
@@ -2561,11 +2433,8 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
 
                 // Box 3: ASSETS
                 int b3X = b2X + boxW + 4;
-                g.fill(b3X, y, b3X + boxW, y + height, CARD_BG);
-                g.fill(b3X, y, b3X + boxW, y + 1, PANEL_BORDER);
-                g.fill(b3X, y + height - 1, b3X + boxW, y + height, PANEL_BORDER);
-                g.fill(b3X, y, b3X + 1, y + height, PANEL_BORDER);
-                g.fill(b3X + boxW - 1, y, b3X + boxW, y + height, PANEL_BORDER);
+                UiRender.surface(g, b3X, y, boxW, height, UiTheme.RADIUS_SM,
+                        CARD_BG, PANEL_BORDER, false);
                 g.drawString(fnt, "VAULT ASSETS", b3X + (boxW - fnt.width("VAULT ASSETS")) / 2, y + 3, TEXT_MUTED);
                 String assStr = formatCompact(latestAss);
                 int assW = 10 + fnt.width(assStr);
@@ -2594,11 +2463,8 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
             @Override public int preferredHeight(Font f) { return 48; }
             @Override
             public void render(GuiGraphics g, Font fnt, int mx, int my, float pt) {
-                g.fill(x, y, x + width, y + height, CARD_BG);
-                g.fill(x, y, x + width, y + 1, PANEL_BORDER);
-                g.fill(x, y + height - 1, x + width, y + height, PANEL_BORDER);
-                g.fill(x, y, x + 1, y + height, PANEL_BORDER);
-                g.fill(x + width - 1, y, x + width, y + height, PANEL_BORDER);
+                UiRender.surface(g, x, y, width, height, UiTheme.RADIUS_MD,
+                        CHART_BG, PANEL_BORDER, false);
 
                 List<MarketNetwork.PortfolioPointData> pts = cachedPortfolioPoints;
                 if (pts.size() >= 2) {
@@ -2644,13 +2510,9 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
                     portfolioLiveBtnW = liveW;
                     portfolioLiveBtnH = liveH;
                     boolean liveHover = mx >= liveX && mx < liveX + liveW && my >= liveY && my < liveY + liveH;
-                    int liveBg = portfolioChartOffset > 0 ? (liveHover ? 0xFF047857 : 0xFF065F46) : (liveHover ? CARD_HOVER : 0xFF003024);
+                    int liveBg = portfolioChartOffset > 0 ? (liveHover ? UiTheme.SUCCESS : UiTheme.SUCCESS_DEEP) : (liveHover ? CARD_HOVER : UiTheme.ACCENT_DEEP);
                     int liveBorder = portfolioChartOffset > 0 ? GREEN : (liveHover ? ACCENT : PANEL_BORDER);
-                    g.fill(liveX, liveY, liveX + liveW, liveY + liveH, liveBg);
-                    g.fill(liveX, liveY, liveX + liveW, liveY + 1, liveBorder);
-                    g.fill(liveX, liveY + liveH - 1, liveX + liveW, liveY + liveH, liveBorder);
-                    g.fill(liveX, liveY, liveX + 1, liveY + liveH, liveBorder);
-                    g.fill(liveX + liveW - 1, liveY, liveX + liveW, liveY + liveH, liveBorder);
+                    UiRender.pill(g, liveX, liveY, liveW, liveH, liveBg, liveBorder);
                     g.drawString(fnt, liveStr, liveX + 3, liveY + 2, portfolioChartOffset > 0 ? 0xFFFFFFFF : ACCENT);
                     if (liveHover && portfolioChartOffset > 0) {
                         pendingTooltip = "Click to snap back to current live time";
@@ -2665,11 +2527,8 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
                     }
 
                     // Render right side current Net Worth badge
-                    g.fill(badgeX, badgeY, badgeX + badgeW, badgeY + badgeH, 0xFF003024);
-                    g.fill(badgeX, badgeY, badgeX + badgeW, badgeY + 1, ACCENT);
-                    g.fill(badgeX, badgeY + badgeH - 1, badgeX + badgeW, badgeY + badgeH, ACCENT);
-                    g.fill(badgeX, badgeY, badgeX + 1, badgeY + badgeH, ACCENT);
-                    g.fill(badgeX + badgeW - 1, badgeY, badgeX + badgeW, badgeY + badgeH, ACCENT);
+                    UiRender.pill(g, badgeX, badgeY, badgeW, badgeH,
+                            UiTheme.ACCENT_DEEP, ACCENT);
                     g.drawString(fnt, currentPriceStr, badgeX + 4, badgeY + 2, ACCENT);
 
                     int ptsCount = visiblePts.size();
@@ -2716,8 +2575,8 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
                 if (idx >= cachedAssetHoldings.size()) return;
                 var h = cachedAssetHoldings.get(idx);
 
-                if (hover) g.fill(rx, ry, rx + rw, ry + 25, CARD_HOVER);
-                g.fill(rx, ry + 25, rx + rw, ry + 26, PANEL_BORDER);
+                UiRender.roundedOutline(g, rx, ry + 1, rw, 24, UiTheme.RADIUS_SM,
+                        hover ? CARD_HOVER : CARD_BG, PANEL_BORDER);
 
                 renderCommodityIcon(g, h.itemId, rx + 4, ry + 5);
 
@@ -2761,9 +2620,13 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
     @Override
     protected void renderBg(GuiGraphics g, float pt, int mx, int my) {
         int x = left(), y = top();
-        g.fill(x, y, x + SCREEN_W, y + SCREEN_H, BG_DARK);
-        g.fill(x, y, x + SIDEBAR_W, y + SCREEN_H, PANEL);
-        g.fill(x + SIDEBAR_W - 1, y, x + SIDEBAR_W, y + SCREEN_H, PANEL_BORDER);
+        UiRender.surface(g, x, y, SCREEN_W, SCREEN_H, UiTheme.RADIUS_LG,
+                BG_DARK, UiTheme.BORDER, true);
+        UiRender.roundedRect(g, x + 2, y + 2, SIDEBAR_W - 3, SCREEN_H - 4,
+                UiTheme.RADIUS_MD, UiTheme.SIDEBAR);
+        g.fill(x + SIDEBAR_W - 1, y + 9, x + SIDEBAR_W, y + SCREEN_H - 9, PANEL_BORDER);
+        UiRender.roundedRect(g, x + SIDEBAR_W + 48, y + 3, 124, 2, 1,
+                UiRender.alpha(UiTheme.AMBIENT_WARM, 110));
     }
 
     @Override
@@ -2778,7 +2641,7 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         this.renderBackground(g);
         int sx = left(), sy = top();
         if (root != null) {
-            root.layout(sx, sy, SCREEN_W, SCREEN_H);
+            root.layoutTree(this.font, sx, sy, SCREEN_W, SCREEN_H);
             syncEditBoxes();
         }
         super.render(g, mx, my, pt);
@@ -2811,9 +2674,9 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
     }
 
     private static final int DROP_ROW_H = 16;
-    private static final int DROP_BG     = 0xFF1A1A2E;
-    private static final int DROP_BORDER = 0xFF00D4AA;
-    private static final int DROP_HOVER  = 0xFF252540;
+    private static final int DROP_BG     = UiTheme.SURFACE_RAISED;
+    private static final int DROP_BORDER = UiTheme.ACCENT;
+    private static final int DROP_HOVER  = UiTheme.SURFACE_HOVER;
 
     private void renderItemDropdown(GuiGraphics g, int mx, int my, ItemDropdownData d) {
         if (pendingConfirmation != null || editingOrder != null) return;
@@ -2826,12 +2689,8 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         g.pose().pushPose();
         g.pose().translate(0, 0, 300);
 
-        // 100% Solid Opaque Dark Background + Border
-        g.fill(d.x, d.y, d.x + d.w, d.y + totalH, 0xFF0E0E1A);
-        g.fill(d.x, d.y, d.x + d.w, d.y + 1, DROP_BORDER);
-        g.fill(d.x, d.y + totalH - 1, d.x + d.w, d.y + totalH, DROP_BORDER);
-        g.fill(d.x, d.y, d.x + 1, d.y + totalH, DROP_BORDER);
-        g.fill(d.x + d.w - 1, d.y, d.x + d.w, d.y + totalH, DROP_BORDER);
+        UiRender.surface(g, d.x, d.y, d.w, totalH, UiTheme.RADIUS_MD,
+                DROP_BG, DROP_BORDER, true);
 
         int itemWidth = maxScroll > 0 ? d.w - 6 : d.w;
 
@@ -2841,7 +2700,8 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
             ItemSearchResult r = d.results.get(idx);
             int ry = d.y + i * DROP_ROW_H;
             boolean rowHover = mx >= d.x && mx < d.x + itemWidth && my >= ry && my < ry + DROP_ROW_H;
-            if (rowHover) g.fill(d.x + 1, ry, d.x + itemWidth, ry + DROP_ROW_H, DROP_HOVER);
+            if (rowHover) UiRender.roundedRect(g, d.x + 2, ry + 1,
+                    itemWidth - 3, DROP_ROW_H - 2, UiTheme.RADIUS_SM, DROP_HOVER);
 
             // Row divider (skip first)
             if (i > 0) g.fill(d.x + 1, ry, d.x + itemWidth, ry + 1, PANEL_BORDER);
@@ -2861,8 +2721,8 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
             int trackH = totalH;
             int thumbH = Math.max(10, trackH * visibleRows / totalResults);
             int thumbY = d.scrollOffset * (trackH - thumbH) / maxScroll;
-            g.fill(trackX, d.y, trackX + 5, d.y + trackH, PANEL);
-            g.fill(trackX, d.y + thumbY, trackX + 5, d.y + thumbY + thumbH, ACCENT);
+            UiRender.roundedRect(g, trackX + 1, d.y + 2, 3, trackH - 4, 2, PANEL);
+            UiRender.roundedRect(g, trackX, d.y + thumbY, 5, thumbH, 3, ACCENT);
         }
 
         g.pose().popPose();
@@ -2887,15 +2747,10 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         int modalX = left() + (SCREEN_W - modalW) / 2;
         int modalY = top() + (SCREEN_H - modalH) / 2;
 
-        // Dark dim backdrop over whole screen
-        g.fill(left(), top(), left() + SCREEN_W, top() + SCREEN_H, 0xEE000000);
-
-        // Modal container background & border
-        g.fill(modalX, modalY, modalX + modalW, modalY + modalH, 0xFF0F1524);
-        g.fill(modalX, modalY, modalX + modalW, modalY + 1, ACCENT);
-        g.fill(modalX, modalY + modalH - 1, modalX + modalW, modalY + modalH, ACCENT);
-        g.fill(modalX, modalY, modalX + 1, modalY + modalH, ACCENT);
-        g.fill(modalX + modalW - 1, modalY, modalX + modalW, modalY + modalH, ACCENT);
+        UiRender.roundedRect(g, left(), top(), SCREEN_W, SCREEN_H,
+                UiTheme.RADIUS_LG, UiTheme.BACKDROP);
+        UiRender.surface(g, modalX, modalY, modalW, modalH, UiTheme.RADIUS_LG,
+                UiTheme.SURFACE_RAISED, ACCENT, true);
 
         // Title
         String title = "CONFIRM TRANSACTION";
@@ -2924,24 +2779,16 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
         int confirmX = modalX + 18;
         int confirmY = modalY + 66;
         boolean confirmHover = mx >= confirmX && mx <= confirmX + btnW && my >= confirmY && my <= confirmY + btnH;
-        int confirmBg = confirmHover ? 0xFF004030 : 0xFF003024;
-        g.fill(confirmX, confirmY, confirmX + btnW, confirmY + btnH, confirmBg);
-        g.fill(confirmX, confirmY, confirmX + btnW, confirmY + 1, ACCENT);
-        g.fill(confirmX, confirmY + btnH - 1, confirmX + btnW, confirmY + btnH, ACCENT);
-        g.fill(confirmX, confirmY, confirmX + 1, confirmY + btnH, ACCENT);
-        g.fill(confirmX + btnW - 1, confirmY, confirmX + btnW, confirmY + btnH, ACCENT);
+        int confirmBg = confirmHover ? UiRender.mix(UiTheme.ACCENT_DEEP, UiTheme.ACCENT, 0.18F) : UiTheme.ACCENT_DEEP;
+        UiRender.pill(g, confirmX, confirmY, btnW, btnH, confirmBg, ACCENT);
         g.drawString(font, "Confirm", confirmX + (btnW - font.width("Confirm")) / 2, confirmY + 4, ACCENT);
 
         // Cancel Button
         int cancelX = modalX + modalW - btnW - 18;
         int cancelY = modalY + 66;
         boolean cancelHover = mx >= cancelX && mx <= cancelX + btnW && my >= cancelY && my <= cancelY + btnH;
-        int cancelBg = cancelHover ? 0xFFC02020 : 0x80901818;
-        g.fill(cancelX, cancelY, cancelX + btnW, cancelY + btnH, cancelBg);
-        g.fill(cancelX, cancelY, cancelX + btnW, cancelY + 1, RED);
-        g.fill(cancelX, cancelY + btnH - 1, cancelX + btnW, cancelY + btnH, RED);
-        g.fill(cancelX, cancelY, cancelX + 1, cancelY + btnH, RED);
-        g.fill(cancelX + btnW - 1, cancelY, cancelX + btnW, cancelY + btnH, RED);
+        int cancelBg = cancelHover ? UiRender.mix(UiTheme.DANGER_DEEP, UiTheme.DANGER, 0.28F) : UiTheme.DANGER_DEEP;
+        UiRender.pill(g, cancelX, cancelY, btnW, btnH, cancelBg, RED);
         g.drawString(font, "Cancel", cancelX + (btnW - font.width("Cancel")) / 2, cancelY + 4, 0xFFFFFFFF);
 
         g.pose().popPose();
@@ -2949,7 +2796,6 @@ public class MarketScreen extends AbstractContainerScreen<MarketMenu> {
 
     @Override
     public boolean mouseClicked(double mx, double my, int btn) {
-        com.nstut.Economy.LOGGER.info("[MarketScreen] mouseClicked mx={}, my={}, btn={}, viewMode={}", mx, my, btn, viewMode);
         if (editingOrder != null) {
             int modalW = 220;
             int modalH = 140;
