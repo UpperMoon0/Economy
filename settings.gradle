@@ -7,11 +7,5 @@ pluginManagement {
 
 rootProject.name = 'economy'
 
-includeBuild('../OpenUI-MC') {
-    dependencySubstitution {
-        substitute module('com.nstut:openui-mc') using project(':forge-1.20.1')
-    }
-}
-
 include 'common'
 include 'forge-1.20.1'
