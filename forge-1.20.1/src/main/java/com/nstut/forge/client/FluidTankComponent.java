@@ -1,5 +1,6 @@
 package com.nstut.forge.client;
 
+import com.nstut.openui.api.ClipStack;
 import com.nstut.openui.api.UIComponent;
 import com.nstut.openui.api.UiRender;
 import com.nstut.openui.theme.ColorScheme;
@@ -13,10 +14,12 @@ import net.minecraft.world.level.material.Fluid;
 import net.minecraftforge.client.extensions.common.IClientFluidTypeExtensions;
 import net.minecraftforge.fluids.FluidStack;
 
+import java.util.Objects;
+
 /**
  * Theme-aware vessel shell with the real Forge fluid sprite/tint drawn inside a
  * clipped inner region. The fill height is derived from amount / capacity.
- * Knows nothing about screen coordinates outside its own bounds.
+ * Fixed 48x48 bounds.
  */
 public class FluidTankComponent extends UIComponent {
     private FluidStack fluid;
@@ -28,13 +31,17 @@ public class FluidTankComponent extends UIComponent {
     }
 
     public void setFluid(FluidStack fluid) {
-        this.fluid = fluid;
-        invalidatePaint();
+        if (!Objects.equals(this.fluid, fluid)) {
+            this.fluid = fluid;
+            invalidatePaint();
+        }
     }
 
     public void setCapacity(int capacity) {
-        this.capacity = capacity;
-        invalidatePaint();
+        if (this.capacity != capacity) {
+            this.capacity = capacity;
+            invalidatePaint();
+        }
     }
 
     @Override
@@ -72,18 +79,21 @@ public class FluidTankComponent extends UIComponent {
             float a = ((tint >> 24) & 0xFF) / 255f;
             if (a == 0) a = 1f;
 
-            g.enableScissor(innerX, fluidY, innerX + innerW, fluidY + fluidH);
-            RenderSystem.setShaderColor(r, gr, b, a);
-            RenderSystem.setShaderTexture(0, TextureAtlas.LOCATION_BLOCKS);
-            int right = innerX + innerW;
-            for (int tileX = innerX; tileX < right; tileX += 16) {
-                for (int tileBottom = fluidY + fluidH; tileBottom > fluidY; tileBottom -= 16) {
-                    g.blit(tileX, tileBottom - 16, 0, 16, 16, sprite);
+            ClipStack.push(g, innerX, fluidY, innerW, fluidH);
+            try {
+                RenderSystem.setShaderColor(r, gr, b, a);
+                RenderSystem.setShaderTexture(0, TextureAtlas.LOCATION_BLOCKS);
+                int right = innerX + innerW;
+                for (int tileX = innerX; tileX < right; tileX += 16) {
+                    for (int tileBottom = fluidY + fluidH; tileBottom > fluidY; tileBottom -= 16) {
+                        g.blit(tileX, tileBottom - 16, 0, 16, 16, sprite);
+                    }
                 }
+                RenderSystem.setShaderColor(1f, 1f, 1f, 1f);
+                g.fill(innerX + 2, fluidY + 1, innerX + innerW - 2, fluidY + 2, 0x55FFFFFF);
+            } finally {
+                ClipStack.pop(g);
             }
-            g.disableScissor();
-            RenderSystem.setShaderColor(1f, 1f, 1f, 1f);
-            g.fill(innerX + 2, fluidY + 1, innerX + innerW - 2, fluidY + 2, 0x55FFFFFF);
         }
     }
 }

@@ -9,8 +9,9 @@ import com.nstut.openui.api.HStack;
 import com.nstut.openui.api.Ui;
 import com.nstut.openui.api.UIComponent;
 import com.nstut.openui.api.UiRender;
-import com.nstut.openui.api.UiTheme;
 import com.nstut.openui.api.VStack;
+import com.nstut.openui.layout.Alignment;
+import com.nstut.openui.layout.Insets;
 import com.nstut.openui.theme.ColorScheme;
 import com.nstut.openui.theme.TextStyle;
 import net.minecraft.client.gui.Font;
@@ -23,9 +24,10 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraftforge.fluids.FluidStack;
 import org.jetbrains.annotations.NotNull;
 
-import java.util.function.Supplier;
-
-/** Fluid tank dashboard migrated to the shared Economy OpenUI container screen. */
+/**
+ * Fluid tank dashboard migrated to the shared Economy OpenUI container screen.
+ * Follows theme-native colors, explicit transfer slot positioning, and clean layout.
+ */
 public class TankScreen extends EconomyUiContainerScreen<TankMenu> {
 
     private ButtonWidget modeBtn;
@@ -34,10 +36,10 @@ public class TankScreen extends EconomyUiContainerScreen<TankMenu> {
 
     public TankScreen(TankMenu menu, Inventory playerInventory, Component title) {
         super(menu, playerInventory, title);
-        this.imageWidth = 280;
-        this.imageHeight = 186;
-        this.inventoryLabelY = 90;
-        this.titleLabelY = 8;
+        this.imageWidth = TankMenu.IMAGE_WIDTH;
+        this.imageHeight = TankMenu.IMAGE_HEIGHT;
+        this.inventoryLabelY = TankMenu.PLAYER_INV_Y - 10;
+        this.titleLabelY = 6;
         this.currentMode = menu.getMode();
     }
 
@@ -58,69 +60,68 @@ public class TankScreen extends EconomyUiContainerScreen<TankMenu> {
 
     @Override
     protected void renderBackgroundLayer(GuiGraphics g, float partialTick, int mouseX, int mouseY) {
-        renderBackground(g);
+        renderBaseShell(g);
         int x = leftPos;
         int y = topPos;
+        ColorScheme c = colors();
 
-        UiRender.surface(g, x, y, imageWidth, imageHeight, UiTheme.RADIUS_LG,
-                UiTheme.SHELL, UiTheme.BORDER, true);
-        UiRender.roundedRect(g, x + 83, y + 3, 98, 2, 1,
-                UiRender.alpha(UiTheme.AMBIENT_WARM, 95));
-        UiRender.surface(g, x + 8, y + 31, imageWidth - 16, 54, UiTheme.RADIUS_MD,
-                UiTheme.SURFACE, UiTheme.BORDER_SUBTLE, false);
-        UiRender.surface(g, x + 51, y + 94, 178, 89, UiTheme.RADIUS_MD,
-                UiTheme.SURFACE, UiTheme.BORDER_SUBTLE, false);
+        // Upper panel for tank & transfer
+        UiRender.surface(g, x + 8, y + 30, imageWidth - 16, 62, radii().control(),
+                c.input(), c.borderSubtle(), c);
 
+        // Lower panel for player inventory
+        UiRender.surface(g, x + 51, y + 96, 178, 82, radii().control(),
+                c.input(), c.borderSubtle(), c);
+
+        // Slots
         for (Slot slot : menu.slots) {
-            UiRender.slot(g, x + slot.x - 1, y + slot.y - 1, 18, 18);
+            UiRender.slot(g, x + slot.x - 1, y + slot.y - 1, 18, 18, c);
         }
     }
 
     @Override
-    protected void renderLabels(@NotNull GuiGraphics g, int mouseX, int mouseY) {
-        // Titles are drawn by OpenUI in buildUI to stay theme-consistent.
-    }
-
-    @Override
     protected UIComponent buildUI() {
-        VStack root = new VStack().gap(6);
+        VStack titles = new VStack().gap(1);
+        titles.addChild(Ui.text(Component.translatable("ui.economy.tank.title")).style(TextStyle.TITLE));
+        titles.addChild(Ui.text(Component.translatable("ui.economy.tank.subtitle")).style(TextStyle.CAPTION));
 
-        HStack header = new HStack().gap(8);
-        header.addChild(Ui.text(Component.translatable("ui.economy.tank.title")).style(TextStyle.TITLE));
-        header.addChild(Ui.text(Component.translatable("ui.economy.tank.subtitle")).style(TextStyle.CAPTION));
+        HStack header = new HStack().gap(4).align(Alignment.CENTER);
+        header.addChild(titles);
         header.addChild(Ui.spacer().flex());
         modeBtn = Ui.button(modeLabel(currentMode), this::cycleMode).ghost();
         header.addChild(modeBtn);
         header.addChild(buildThemeToggle());
-        root.addChild(header);
 
-        HStack body = new HStack().gap(8);
-        VStack tankInfo = new VStack().gap(4);
-        tankInfo.width(150);
+        HStack body = new HStack().gap(8).align(Alignment.CENTER);
+
+        HStack tankSection = new HStack().gap(8).align(Alignment.CENTER);
         TankBlockEntity tank = menu.getTankBlockEntity();
         FluidStack initial = tank != null ? tank.getFluid() : FluidStack.EMPTY;
         int cap = tank != null ? tank.getCapacity() : TankBlockEntity.DEFAULT_CAPACITY;
         tankComponent = new FluidTankComponent(initial, cap);
-        tankInfo.addChild(tankComponent);
-        tankInfo.addChild(new TankInfoText());
-        body.addChild(tankInfo);
+        tankSection.addChild(tankComponent);
+        tankSection.addChild(new TankInfoText().flex());
+
+        body.addChild(tankSection.width(160));
         body.addChild(Ui.spacer().flex());
 
         VStack transfer = new VStack().gap(2);
         transfer.addChild(Ui.text(Component.translatable("ui.economy.tank.transfer")).style(TextStyle.CAPTION));
         transfer.addChild(Ui.text(Component.translatable("ui.economy.tank.transfer_hint")).style(TextStyle.CAPTION));
-        body.addChild(transfer);
+        body.addChild(transfer.width(80));
 
+        VStack root = new VStack().gap(6);
+        root.addChild(header);
         root.addChild(body);
-        return root;
+
+        return Ui.padding(Insets.of(6, 10, 6, 10), root);
     }
 
     private class TankInfoText extends UIComponent {
         @Override public int preferredWidth(Font f) { return 0; }
-        @Override public int preferredHeight(Font f) { return 40; }
+        @Override public int preferredHeight(Font f) { return 48; }
         @Override public void render(GuiGraphics g, Font f, int mx, int my, float pt) {
-            if (uiRuntime() == null) return;
-            ColorScheme c = uiRuntime().theme().colors();
+            ColorScheme c = colors();
             TankBlockEntity t = menu.getTankBlockEntity();
             if (t == null) return;
             FluidStack fluid = t.getFluid();
@@ -130,14 +131,14 @@ public class TankScreen extends EconomyUiContainerScreen<TankMenu> {
 
             String name = fluid.isEmpty() ? Component.translatable("ui.economy.tank.empty").getString() : fluid.getDisplayName().getString();
             name = f.plainSubstrByWidth(name, width);
-            g.drawString(f, name, x, y + 2, c.onSurface());
+            g.drawString(f, name, x, y + 4, c.onSurface());
 
             String amt = EconomyFormatUtil.formatFluidAmount(amount)
                     + " / " + EconomyFormatUtil.formatFluidAmount(capacity);
             amt = f.plainSubstrByWidth(amt, width);
-            g.drawString(f, amt, x, y + 14, c.onSurfaceMuted());
+            g.drawString(f, amt, x, y + 18, c.onSurfaceMuted());
 
-            UiRender.progressTrack(g, x, y + 30, width, 4, fill, c.primary());
+            UiRender.progressTrack(g, x, y + 36, width, 4, fill, c);
         }
     }
 

@@ -8,8 +8,10 @@ import com.nstut.openui.api.HStack;
 import com.nstut.openui.api.Ui;
 import com.nstut.openui.api.UIComponent;
 import com.nstut.openui.api.UiRender;
-import com.nstut.openui.api.UiTheme;
 import com.nstut.openui.api.VStack;
+import com.nstut.openui.layout.Alignment;
+import com.nstut.openui.layout.Insets;
+import com.nstut.openui.theme.ColorScheme;
 import com.nstut.openui.theme.TextStyle;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.core.BlockPos;
@@ -19,9 +21,10 @@ import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.phys.BlockHitResult;
 import org.jetbrains.annotations.NotNull;
 
-import java.util.function.Supplier;
-
-/** Vault surface migrated to the shared Economy OpenUI container screen. */
+/**
+ * Vault surface migrated to the shared Economy OpenUI container screen.
+ * Follows a clean 9x6 double chest layout with theme-native colors and surfaces.
+ */
 public class VaultScreen extends EconomyUiContainerScreen<VaultMenu> {
 
     private ButtonWidget modeBtn;
@@ -29,10 +32,10 @@ public class VaultScreen extends EconomyUiContainerScreen<VaultMenu> {
 
     public VaultScreen(VaultMenu menu, Inventory playerInventory, Component title) {
         super(menu, playerInventory, title);
-        this.imageWidth = 348;
-        this.imageHeight = 200;
-        this.inventoryLabelY = 102;
-        this.titleLabelY = 8;
+        this.imageWidth = VaultMenu.IMAGE_WIDTH;
+        this.imageHeight = VaultMenu.IMAGE_HEIGHT;
+        this.inventoryLabelY = VaultMenu.PLAYER_INV_Y - 10;
+        this.titleLabelY = 6;
         this.currentMode = menu.getMode();
     }
 
@@ -48,45 +51,39 @@ public class VaultScreen extends EconomyUiContainerScreen<VaultMenu> {
 
     @Override
     protected void renderBackgroundLayer(GuiGraphics g, float partialTick, int mouseX, int mouseY) {
-        renderBackground(g);
+        renderBaseShell(g);
         int x = leftPos;
         int y = topPos;
+        ColorScheme c = colors();
 
-        UiRender.surface(g, x, y, imageWidth, imageHeight, UiTheme.RADIUS_LG,
-                UiTheme.SHELL, UiTheme.BORDER, true);
+        // Background panel for vault slots (6 rows of 9)
+        UiRender.surface(g, x + 11, y + 30, 174, 114, radii().control(),
+                c.input(), c.borderSubtle(), c);
 
-        UiRender.roundedRect(g, x + 108, y + 3, 126, 2, 1,
-                UiRender.alpha(UiTheme.AMBIENT_WARM, 95));
+        // Background panel for player inventory & hotbar (4 rows of 9)
+        UiRender.surface(g, x + 11, y + 146, 174, 80, radii().control(),
+                c.input(), c.borderSubtle(), c);
 
-        UiRender.surface(g, x + 7, y + 31, imageWidth - 14, 65, UiTheme.RADIUS_MD,
-                UiTheme.SURFACE, UiTheme.BORDER_SUBTLE, false);
-        UiRender.surface(g, x + 85, y + 99, 178, 97, UiTheme.RADIUS_MD,
-                UiTheme.SURFACE, UiTheme.BORDER_SUBTLE, false);
-
+        // Render all slot frames
         for (Slot slot : menu.slots) {
-            UiRender.slot(g, x + slot.x - 1, y + slot.y - 1, 18, 18);
+            UiRender.slot(g, x + slot.x - 1, y + slot.y - 1, 18, 18, c);
         }
     }
 
     @Override
-    protected void renderLabels(@NotNull GuiGraphics g, int mouseX, int mouseY) {
-        // Titles are drawn by OpenUI in buildUI to stay theme-consistent.
-    }
-
-    @Override
     protected UIComponent buildUI() {
-        VStack root = new VStack().gap(6);
+        VStack titles = new VStack().gap(1);
+        titles.addChild(Ui.text(Component.translatable("ui.economy.vault.title")).style(TextStyle.TITLE));
+        titles.addChild(Ui.text(Component.translatable("ui.economy.vault.subtitle")).style(TextStyle.CAPTION));
 
-        HStack header = new HStack().gap(8);
-        header.addChild(Ui.text(Component.translatable("ui.economy.vault.title")).style(TextStyle.TITLE));
-        header.addChild(Ui.text(Component.translatable("ui.economy.vault.subtitle")).style(TextStyle.CAPTION));
+        HStack header = new HStack().gap(4).align(Alignment.CENTER);
+        header.addChild(titles);
         header.addChild(Ui.spacer().flex());
         modeBtn = Ui.button(modeLabel(currentMode), this::cycleMode).ghost();
         header.addChild(modeBtn);
         header.addChild(buildThemeToggle());
-        root.addChild(header);
 
-        return root;
+        return Ui.padding(Insets.of(6, 10, 6, 10), header);
     }
 
     private Component modeLabel(VaultBlockEntity.VaultMode m) {

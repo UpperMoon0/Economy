@@ -203,9 +203,19 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
 
     @Override
     protected void init() {
+        // Market has no vanilla inventory slots, so we can dynamically resize.
+        this.imageWidth = Math.max(340, Math.min(640, this.width - 16));
+        this.imageHeight = Math.max(220, Math.min(420, this.height - 16));
+        this.leftPos = (this.width - this.imageWidth) / 2;
+        this.topPos = (this.height - this.imageHeight) / 2;
         super.init();
         MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestRefreshPacket());
         MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestPortfolioPacket());
+    }
+
+    @Override
+    protected void renderBackgroundLayer(GuiGraphics g, float partialTick, int mouseX, int mouseY) {
+        renderBaseShell(g);
     }
 
     @Override
@@ -290,13 +300,15 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
     private UIComponent buildContent() {
         VStack content = new VStack().gap(6);
         content.flex();
-        content.addChild(Ui.switcher(view)
+        UIComponent switcher = Ui.switcher(view)
                 .when(MarketView.BROWSE, this::buildBrowseView)
                 .when(MarketView.DETAIL, this::buildDetailView)
                 .when(MarketView.NEW_ORDER, this::buildNewOrderView)
                 .when(MarketView.ORDERS, this::buildOrdersView)
                 .when(MarketView.PORTFOLIO, this::buildPortfolioView)
-                .when(MarketView.CONTAINERS, this::buildContainersView));
+                .when(MarketView.CONTAINERS, this::buildContainersView);
+        switcher.flex();
+        content.addChild(switcher);
         return content;
     }
 
@@ -391,11 +403,21 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                         BrowseSort.NAME_ASC, t("ui.economy.opt.name_asc"), BrowseSort.MOST_ACTIVE, t("ui.economy.opt.most_active"))));
         v.addChild(filters);
 
-        v.addChild(Ui.switcher(browseEmpty)
+        UIComponent listings = Ui.switcher(browseEmpty)
                 .when(false, () -> Ui.switcher(browseLayout)
-                        .when(BrowseLayout.GRID, () -> Ui.grid(visibleBrowseCards, this::buildCommodityCard).minCellWidth(150).cellHeight(44))
-                        .when(BrowseLayout.LIST, () -> Ui.list(visibleBrowseCards, this::buildCommodityRow).itemHeight(44)))
-                .when(true, () -> Ui.emptyState(Component.translatable("ui.economy.empty.no_listings"))));
+                        .when(BrowseLayout.GRID, () -> Ui.virtualGrid(visibleBrowseCards, this::buildCommodityCard)
+                                .key(c -> c.itemId)
+                                .minCellWidth(120)
+                                .cellHeight(44)
+                                .gap(4)
+                                .flex())
+                        .when(BrowseLayout.LIST, () -> Ui.list(visibleBrowseCards, this::buildCommodityRow)
+                                .key(c -> c.itemId)
+                                .itemHeight(44)
+                                .flex()))
+                .when(true, () -> Ui.emptyState(Component.translatable("ui.economy.empty.no_listings")));
+        listings.flex();
+        v.addChild(listings);
         v.flex();
         return v;
     }
@@ -829,9 +851,11 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         v.addChild(Ui.tabs(ordersTab)
                 .tab(OrdersTab.ACTIVE, t("ui.economy.orders.active"))
                 .tab(OrdersTab.HISTORY, t("ui.economy.orders.history")));
-        v.addChild(Ui.switcher(ordersTab)
+        UIComponent ordersSwitcher = Ui.switcher(ordersTab)
                 .when(OrdersTab.ACTIVE, this::buildActiveOrdersList)
-                .when(OrdersTab.HISTORY, this::buildHistoryView));
+                .when(OrdersTab.HISTORY, this::buildHistoryView);
+        ordersSwitcher.flex();
+        v.addChild(ordersSwitcher);
         updateOrdersSubtabs();
         return v;
     }
@@ -857,9 +881,14 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                 Map.of(ActiveOrderSort.NEWEST, t("ui.economy.opt.newest"), ActiveOrderSort.OLDEST, t("ui.economy.opt.oldest"),
                         ActiveOrderSort.PRICE_ASC, t("ui.economy.opt.price_asc"), ActiveOrderSort.PRICE_DESC, t("ui.economy.opt.price_desc"))));
         v.addChild(bar);
-        v.addChild(Ui.switcher(activeEmpty)
-                .when(false, () -> Ui.list(visibleActiveOrders, this::buildActiveOrderRow).itemHeight(36))
-                .when(true, () -> Ui.emptyState(Component.translatable("ui.economy.empty.no_active_trades"))));
+        UIComponent activeList = Ui.switcher(activeEmpty)
+                .when(false, () -> Ui.list(visibleActiveOrders, this::buildActiveOrderRow)
+                        .key(e -> e.orderId)
+                        .itemHeight(36)
+                        .flex())
+                .when(true, () -> Ui.emptyState(Component.translatable("ui.economy.empty.no_active_trades")));
+        activeList.flex();
+        v.addChild(activeList);
         return v;
     }
 
@@ -984,9 +1013,14 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                 Map.of(HistorySort.NEWEST, t("ui.economy.opt.newest"), HistorySort.OLDEST, t("ui.economy.opt.oldest"),
                         HistorySort.HIGHEST_TOTAL, t("ui.economy.opt.highest_total"))));
         v.addChild(bar);
-        v.addChild(Ui.switcher(historyEmpty)
-                .when(false, () -> Ui.list(visibleHistory, this::buildHistoryRow).itemHeight(28))
-                .when(true, () -> Ui.emptyState(Component.translatable("ui.economy.empty.no_trades"))));
+        UIComponent historyList = Ui.switcher(historyEmpty)
+                .when(false, () -> Ui.list(visibleHistory, this::buildHistoryRow)
+                        .key(e -> e.orderId)
+                        .itemHeight(28)
+                        .flex())
+                .when(true, () -> Ui.emptyState(Component.translatable("ui.economy.empty.no_trades")));
+        historyList.flex();
+        v.addChild(historyList);
         return v;
     }
 
@@ -1041,9 +1075,14 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
             }
         });
         v.addChild(new TrendChartComponent(portfolioChartSamples, portfolioChartOffset, true));
-        v.addChild(Ui.switcher(holdingsEmpty)
-                .when(false, () -> Ui.list(visibleHoldings, this::buildHoldingRow).itemHeight(26))
-                .when(true, () -> Ui.emptyState(Component.translatable("ui.economy.empty.no_holdings"))));
+        UIComponent holdingsList = Ui.switcher(holdingsEmpty)
+                .when(false, () -> Ui.list(visibleHoldings, this::buildHoldingRow)
+                        .key(h -> h.itemId)
+                        .itemHeight(26)
+                        .flex())
+                .when(true, () -> Ui.emptyState(Component.translatable("ui.economy.empty.no_holdings")));
+        holdingsList.flex();
+        v.addChild(holdingsList);
         return v;
     }
 
@@ -1097,9 +1136,14 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                 drawStatBox(g, f, x + 3 * (boxW + 4), y, boxW, height, t("ui.economy.containers.fluid"), Component.translatable("ui.economy.containers.fluid_unit", formatCompact(fluid)).getString(), c.success(), c);
             }
         });
-        v.addChild(Ui.switcher(containersEmpty)
-                .when(false, () -> Ui.list(visibleContainers, this::buildContainerRow).itemHeight(40))
-                .when(true, () -> Ui.emptyState(Component.translatable("ui.economy.empty.no_containers"))));
+        UIComponent containersList = Ui.switcher(containersEmpty)
+                .when(false, () -> Ui.list(visibleContainers, this::buildContainerRow)
+                        .key(e -> e.dimension + ":" + e.x + "," + e.y + "," + e.z)
+                        .itemHeight(40)
+                        .flex())
+                .when(true, () -> Ui.emptyState(Component.translatable("ui.economy.empty.no_containers")));
+        containersList.flex();
+        v.addChild(containersList);
         return v;
     }
 

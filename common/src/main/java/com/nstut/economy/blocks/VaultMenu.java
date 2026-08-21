@@ -13,7 +13,15 @@ import org.jetbrains.annotations.NotNull;
 
 public class VaultMenu extends AbstractContainerMenu {
 
-    private static final int CONTAINER_SIZE = 54;
+    public static final int CONTAINER_SIZE = 54;
+    public static final int IMAGE_WIDTH = 196;
+    public static final int IMAGE_HEIGHT = 234;
+    public static final int VAULT_SLOT_START_X = 17;
+    public static final int VAULT_SLOT_START_Y = 36;
+    public static final int PLAYER_INV_X = 17;
+    public static final int PLAYER_INV_Y = 152;
+    public static final int HOTBAR_Y = 210;
+
     private final Container container;
     private final ContainerData data;
     private final VaultBlockEntity vaultBlockEntity;
@@ -32,28 +40,23 @@ public class VaultMenu extends AbstractContainerMenu {
         this.vaultBlockEntity = vault;
         container.startOpen(playerInventory.player);
 
-        // Vault Container Slots (3 rows of 18)
-        int startX = 12;
-        int startY = 36;
-        for (int row = 0; row < 3; row++) {
-            for (int col = 0; col < 18; col++) {
-                this.addSlot(new Slot(container, col + row * 18, startX + col * 18, startY + row * 18));
+        // Vault Container Slots (6 rows of 9 = 54 slots)
+        for (int row = 0; row < 6; row++) {
+            for (int col = 0; col < 9; col++) {
+                this.addSlot(new Slot(container, col + row * 9, VAULT_SLOT_START_X + col * 18, VAULT_SLOT_START_Y + row * 18));
             }
         }
 
-        // Player Inventory (3 rows of 9, centered horizontally at X = 93)
-        int playerInvX = 93;
-        int playerInvY = 114;
+        // Player Inventory (3 rows of 9)
         for (int row = 0; row < 3; row++) {
             for (int col = 0; col < 9; col++) {
-                this.addSlot(new Slot(playerInventory, col + row * 9 + 9, playerInvX + col * 18, playerInvY + row * 18));
+                this.addSlot(new Slot(playerInventory, col + row * 9 + 9, PLAYER_INV_X + col * 18, PLAYER_INV_Y + row * 18));
             }
         }
 
-        // Player Hotbar (1 row of 9, centered horizontally at X = 93)
-        int hotbarY = 174;
+        // Player Hotbar (1 row of 9)
         for (int col = 0; col < 9; col++) {
-            this.addSlot(new Slot(playerInventory, col, playerInvX + col * 18, hotbarY));
+            this.addSlot(new Slot(playerInventory, col, PLAYER_INV_X + col * 18, HOTBAR_Y));
         }
 
         this.addDataSlots(data);

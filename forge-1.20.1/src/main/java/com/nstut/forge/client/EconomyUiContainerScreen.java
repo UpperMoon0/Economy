@@ -3,9 +3,14 @@ package com.nstut.forge.client;
 import com.nstut.openui.api.ButtonWidget;
 import com.nstut.openui.api.Ui;
 import com.nstut.openui.api.UIComponent;
+import com.nstut.openui.api.UiRender;
 import com.nstut.openui.minecraft.UiContainerScreen;
 import com.nstut.openui.state.Signal;
 import com.nstut.openui.state.Signals;
+import com.nstut.openui.theme.ColorScheme;
+import com.nstut.openui.theme.Radii;
+import com.nstut.openui.theme.Theme;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.AbstractContainerMenu;
@@ -13,9 +18,9 @@ import net.minecraft.world.inventory.AbstractContainerMenu;
 import java.util.function.Supplier;
 
 /**
- * Small base class for every Economy container screen. Owns the persisted
- * theme signal and applies it through the OpenUI runtime so a live toggle
- * repaints without restarting the screen.
+ * Base class for every Economy container screen. Owns the persisted
+ * theme signal, applies it through the OpenUI runtime, and provides
+ * theme-aware shell rendering without mutating container dimensions.
  */
 public abstract class EconomyUiContainerScreen<M extends AbstractContainerMenu> extends UiContainerScreen<M> {
     protected final Signal<EconomyUiThemeMode> themeMode =
@@ -29,17 +34,38 @@ public abstract class EconomyUiContainerScreen<M extends AbstractContainerMenu> 
 
     @Override
     protected void init() {
-        int margin = 16;
-        if (this.width > 0) {
-            int maxW = this.width - margin;
-            if (imageWidth > maxW) imageWidth = Math.max(280, maxW);
-            int maxH = this.height - margin;
-            if (imageHeight > maxH) imageHeight = Math.max(160, maxH);
-        }
         super.init();
         if (uiRuntime() != null) {
             uiRuntime().theme(themeMode.get().toOpenUiTheme());
         }
+    }
+
+    public Theme currentUiTheme() {
+        return uiRuntime() != null ? uiRuntime().theme() : themeMode.get().toOpenUiTheme();
+    }
+
+    public ColorScheme colors() {
+        return currentUiTheme().colors();
+    }
+
+    public Radii radii() {
+        return currentUiTheme().radii();
+    }
+
+    protected void renderBaseShell(GuiGraphics g) {
+        renderBackground(g);
+        int x = leftPos;
+        int y = topPos;
+        int r = radii().card();
+        ColorScheme c = colors();
+        UiRender.shadow(g, x, y, imageWidth, imageHeight, r, c);
+        UiRender.surface(g, x, y, imageWidth, imageHeight, r, c.surface(), c.borderSubtle(), c);
+    }
+
+    @Override
+    protected void renderLabels(GuiGraphics g, int mouseX, int mouseY) {
+        // Suppress default vanilla black text title/inventory rendering.
+        // Headers and titles are cleanly composed in the OpenUI tree.
     }
 
     protected ButtonWidget buildThemeToggle() {
