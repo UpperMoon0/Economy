@@ -29,6 +29,13 @@ public abstract class EconomyUiContainerScreen<M extends AbstractContainerMenu> 
 
     @Override
     protected void init() {
+        int margin = 16;
+        if (this.width > 0) {
+            int maxW = this.width - margin;
+            if (imageWidth > maxW) imageWidth = Math.max(280, maxW);
+            int maxH = this.height - margin;
+            if (imageHeight > maxH) imageHeight = Math.max(160, maxH);
+        }
         super.init();
         if (uiRuntime() != null) {
             uiRuntime().theme(themeMode.get().toOpenUiTheme());
@@ -36,10 +43,14 @@ public abstract class EconomyUiContainerScreen<M extends AbstractContainerMenu> 
     }
 
     protected ButtonWidget buildThemeToggle() {
-        themeToggle = Ui.button((Supplier<Component>) () ->
-                        Component.literal(themeMode.get() == EconomyUiThemeMode.DARK ? "\u2600 Light" : "\u263E Dark"),
+        themeToggle = Ui.button((Supplier<Component>) () -> themeToggleLabel(themeMode.get()),
                 this::toggleTheme).ghost();
         return themeToggle;
+    }
+
+    private static Component themeToggleLabel(EconomyUiThemeMode mode) {
+        return Component.translatable(mode == EconomyUiThemeMode.DARK
+                ? "ui.economy.theme.light_label" : "ui.economy.theme.dark_label");
     }
 
     private void toggleTheme() {
@@ -50,8 +61,7 @@ public abstract class EconomyUiContainerScreen<M extends AbstractContainerMenu> 
             uiRuntime().theme(next.toOpenUiTheme());
         }
         if (themeToggle != null) {
-            themeToggle.setLabel(Component.literal(
-                    next == EconomyUiThemeMode.DARK ? "\u2600 Light" : "\u263E Dark"));
+            themeToggle.setLabel(themeToggleLabel(next));
         }
     }
 

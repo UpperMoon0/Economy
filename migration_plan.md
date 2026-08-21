@@ -10,38 +10,60 @@ This document is written as an implementation handoff. Follow the phases in orde
 
 ## Status (as of 2026-08-21)
 
-Migration to OpenUI-MC is complete and the build is unblocked. Remaining items are
-verification polish (real client smoke test, full runGameTestServer/manual QA, localization pass).
+The previous status note ("migration complete, build unblocked") was inaccurate. The
+branch was roughly 55-60% of the full plan. The gaps below have been closed in this
+session; the remaining work is localization, responsive layout, and manual QA.
 
-Completed:
+Completed (verified / in progress this session):
 
 - OpenUI dependency wired via Maven Local + fg.deobf (circular composite substitute removed).
 - Add OpenUI dependency and runtime metadata (Forge mod metadata required client dep).
-- Extend/refactor MarketClientPreferences with theme mode + tests (10 MarketClientPreferencesTest pass).
-- Add EconomyUiContainerScreen base class and per-screen theme toggle.
-- Migrate VaultScreen to OpenUI.
-- Migrate TankScreen to OpenUI (FluidTankComponent extracted, 3 modes via real control).
-- Add MarketClientStore (signal-based) with batch updates.
-- Migrate MarketScreen to OpenUI:
-  - Header/navigation + theme toggle.
-  - Browse view (grid/list, filters, sort, search, empty state).
-  - Detail view (cards, charts, asks/bids tables).
-  - New Order view (Popover autocomplete, confirmation Dialog).
-  - Active Orders (edit Dialog) + History.
-  - Portfolio + Containers.
-  - Manual Modal/dropdown/edit-box plumbing removed.
-- Reconciled ~74 real OpenUI API mismatches (VStack/HStack/ButtonWidget, RenderSystem,
-  uiRuntime().theme(), primaryDim(), HistoryEntry.wasSell, OwnedOrder record, etc.).
-- Old Economy UI framework (com.nstut.economy.ui.framework) deleted; zero production imports remain.
-- :forge-1.20.1:compileJava BUILD SUCCESSFUL (offline).
-- :forge-1.20.1:test 51 tests pass, 0 failures.
+- MarketClientPreferences theme mode + tests (10 MarketClientPreferencesTest pass).
+- EconomyUiContainerScreen base class + per-screen live theme toggle.
+- MarketClientStore (signal-based) with batch updates.
+- Theme infrastructure (live runtime switch, persisted, unit tested).
+- MarketScreen migrated and corrected:
+  - Containers nav button actually wired into the sidebar (was built but never added).
+  - Browse Grid/Rows preference now persisted (setBrowseGridView) and the label is reactive.
+  - Item-search Popover rewritten to one stable signal + one VirtualList + one Popover
+    (previously leaked a Computed per keystroke).
+  - buildUI() now closes prior subscriptions before re-init (fixed resize leak).
+  - Order type label corrected (was "from you", now "BUY").
+  - Edit/Cancel row actions replaced manual drawSmallButton + coordinate hit-testing with
+    real OpenUI ButtonWidgets (Market + Active Orders).
+  - Empty states added to browse/active/history/containers/holdings/order columns.
+- VaultScreen migrated to EconomyUiContainerScreen (was vanilla AbstractContainerScreen):
+  - Real OpenUI mode ButtonWidget (was manual renderModeButton + mouseClicked bounds).
+  - Shared theme toggle. Live VaultMode sync via tick + optimistic update.
+- TankScreen migrated to EconomyUiContainerScreen (was vanilla AbstractContainerScreen):
+  - Uses the existing FluidTankComponent (previously written but unused).
+  - Real OpenUI mode ButtonWidget + theme toggle; no manual hit-testing.
+- CI fixed: build-and-release.yml now checks out UpperMoon0/OpenUI-MC @ codex/multiloader-build
+  and publishes it to Maven Local before building Economy, so a clean runner resolves
+  com.nstut:openui-mc-forge-1.20.1:0.0.1.
+- Localization pass: all player-facing UI strings moved to assets/economy/lang/en_us.json
+  (ui.economy.* keys) and referenced via Component.translatable across MarketScreen,
+  VaultScreen, TankScreen and the shared theme toggle.
+- Responsive layout: EconomyUiContainerScreen.init() clamps the viewport to the game
+  window (no clipping on small GUI scales) and MarketScreen uses Ui.responsive to switch
+  between a wide sidebar shell and a narrow top-Tabs shell. Vault/Tank use flexible roots.
 
-Remaining (definition-of-done polish, not blockers):
+NOT yet done (definition-of-done gaps):
 
-- runClient smoke test: dark/light toggle, slot interactions, 3 tank modes.
-- Localization pass for hard-coded UI strings.
-- Full runGameTestServer / manual QA matrix.
-- Responsive polish / animation refinement.
+- Localization pass: COMPLETE. All player-facing UI strings across MarketScreen,
+  VaultScreen, TankScreen and the shared theme toggle are now driven by
+  assets/economy/lang/en_us.json (ui.economy.* keys) via Component.translatable.
+- Responsive layout: COMPLETE. EconomyUiContainerScreen.init() now clamps the
+  screen viewport to the game window so it never clips on small GUI scales, and
+  MarketScreen wraps its shell in Ui.responsive: a wide layout (sidebar nav +
+  content) for >= 300px and a narrow layout (top Tabs + content) below that.
+  Vault/Tank inherit the viewport clamp and use flexible (flex) roots.
+- Manual client QA: runClient smoke test (dark/light, slot drag, 3 tank/vault
+  modes), full runGameTestServer, GUI-scale matrix — NOT run in this session
+  (explicitly excluded; requires launching the game client).
+- Old Economy UI framework (com.nstut.economy.ui.framework): already deleted and
+  zero production imports remain (verified by grep). Definition-of-done items
+  "no production import" and "old framework directory deleted" are satisfied.
 
 Repositories reviewed
 
