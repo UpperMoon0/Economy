@@ -2,8 +2,8 @@ package com.nstut.forge.client;
 
 import com.nstut.economy.blocks.VaultBlockEntity;
 import com.nstut.economy.blocks.VaultMenu;
-import com.nstut.economy.ui.framework.UiRender;
-import com.nstut.economy.ui.framework.UiTheme;
+import com.nstut.openui.api.UiRender;
+import com.nstut.openui.api.UiTheme;
 import com.nstut.forge.network.MarketNetwork;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;

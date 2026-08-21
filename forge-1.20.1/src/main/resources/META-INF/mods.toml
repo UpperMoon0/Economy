@@ -13,6 +13,13 @@ A complete in-game economy for trading items and fluids. Use the Market Terminal
 '''
 
 [[dependencies.economy]]
+modId = "openui_mc"
+mandatory = true
+versionRange = "[0.1,1)"
+ordering = "AFTER"
+side = "CLIENT"
+
+[[dependencies.economy]]
 modId = "forge"
 mandatory = true
 versionRange = "${forge_version_range}"

@@ -7,5 +7,7 @@ pluginManagement {
 
 rootProject.name = 'economy'
 
+includeBuild('../OpenUI-MC')
+
 include 'common'
 include 'forge-1.20.1'

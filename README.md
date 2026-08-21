@@ -7,6 +7,10 @@
 
 A modern order-book economy for Minecraft 1.20.1 (Forge), with physical item and fluid storage, automated order matching, portfolio tracking, and a full in-game market terminal.
 
+## Dependency
+
+The client UI is built with [OpenUI MC](https://github.com/UpperMoon0/OpenUI-MC), which must be installed alongside Economy. Economy owns the market-specific screens and logic; reusable layout, widget, rendering, scrolling, and animation primitives live in OpenUI MC.
+
 ---
 
 ## Key Features
