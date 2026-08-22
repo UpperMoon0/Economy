@@ -418,10 +418,8 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
             @Override public void render(GuiGraphics g, Font f, int mx, int my, float pt) {
                 ColorScheme c = uiRuntime().theme().colors();
                 String listingCount = Component.translatable("ui.economy.browse.live_listings", visibleBrowseCards.get().size()).getString();
-                listingCount = fitText(f, listingCount, Math.max(0, width / 2));
+                listingCount = fitText(f, listingCount, Math.max(0, width));
                 int listingX = x + width - f.width(listingCount);
-                String heading = fitText(f, t("ui.economy.browse.heading"), Math.max(0, listingX - x - 6));
-                UiRender.text(g, f, heading, x, y + 2, c.onSurface());
                 UiRender.text(g, f, listingCount, listingX, y + 2, c.onSurfaceMuted());
             }
         });
@@ -1048,8 +1046,10 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
 
         TextField qtyField = Ui.textField(qtySig);
         qtyField.placeholder(t("ui.economy.new_order.qty_field"));
+        qtyField.fillWidth();
         TextField priceField = Ui.textField(priceSig);
         priceField.placeholder(t("ui.economy.new_order.price_field"));
+        priceField.fillWidth();
         ButtonWidget infBtn = Ui.button(t("ui.economy.action.infinite"), () -> infSig.set(!infSig.get())).ghost();
 
         VStack body = new VStack().gap(4);
@@ -1066,7 +1066,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                 if (err != null) UiRender.text(g, f, err, x, y, theme().colors().danger());
             }
         });
-        HStack actions = new HStack().gap(4);
+        HStack actions = new HStack().gap(4).justify(com.nstut.openui.layout.Justification.END);
         actions.addChild(Ui.button(t("ui.economy.action.save"), () -> {
             errSig.set(null);
             String pr = priceSig.get().trim();
