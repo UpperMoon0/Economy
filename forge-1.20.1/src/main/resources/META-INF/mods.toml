@@ -15,7 +15,7 @@ A complete in-game economy for trading items and fluids. Use the Market Terminal
 [[dependencies.economy]]
 modId = "openui_mc"
 mandatory = true
-versionRange = "[0.0.3,1)"
+versionRange = "[0.0.4,1)"
 ordering = "AFTER"
 side = "CLIENT"
 
