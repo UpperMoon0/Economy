@@ -1,6 +1,7 @@
 package com.nstut.economy.blocks;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.NonNullList;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
@@ -12,9 +13,15 @@ import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraftforge.fluids.FluidStack;
+import net.minecraftforge.common.capabilities.Capability;
+import net.minecraftforge.common.capabilities.ForgeCapabilities;
+import net.minecraftforge.common.util.LazyOptional;
+import net.minecraftforge.fluids.capability.IFluidHandler;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.UUID;
 
@@ -55,9 +62,35 @@ public class TankBlockEntity extends BlockEntity implements Container {
     private UUID owner;
     private TankMode mode = TankMode.BOTH;
     private NonNullList<ItemStack> items;
+    private final IFluidHandler fluidHandler = new IFluidHandler() {
+        @Override public int getTanks() { return 1; }
+        @Override public @NotNull FluidStack getFluidInTank(int tank) {
+            return tank == 0 ? fluid.copy() : FluidStack.EMPTY;
+        }
+        @Override public int getTankCapacity(int tank) { return tank == 0 ? capacity : 0; }
+        @Override public boolean isFluidValid(int tank, @NotNull FluidStack stack) {
+            return tank == 0 && !stack.isEmpty() && (fluid.isEmpty() || fluid.isFluidEqual(stack));
+        }
+        @Override public int fill(FluidStack resource, FluidAction action) {
+            return fillInternal(resource, action);
+        }
+        @Override public @NotNull FluidStack drain(FluidStack resource, FluidAction action) {
+            return drainInternal(resource, action);
+        }
+        @Override public @NotNull FluidStack drain(int maxDrain, FluidAction action) {
+            return drainInternal(maxDrain, action);
+        }
+    };
+    private LazyOptional<IFluidHandler> fluidCapability = LazyOptional.of(() -> fluidHandler);
+
+    IFluidHandler fluidHandlerForTesting() { return fluidHandler; }
 
     public TankBlockEntity(BlockPos pos, BlockState state) {
-        super(BlockRegistries.TANK_BE.get(), pos, state);
+        this(BlockRegistries.TANK_BE.get(), pos, state);
+    }
+
+    TankBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
+        super(type, pos, state);
         this.items = NonNullList.withSize(CONTAINER_SIZE, ItemStack.EMPTY);
     }
 
@@ -90,36 +123,67 @@ public class TankBlockEntity extends BlockEntity implements Container {
     }
 
     public int fill(FluidStack resource) {
+        return fillInternal(resource, IFluidHandler.FluidAction.EXECUTE);
+    }
+
+    private int fillInternal(FluidStack resource, IFluidHandler.FluidAction action) {
         if (resource.isEmpty()) return 0;
+        if (!fluid.isEmpty() && !fluid.isFluidEqual(resource)) return 0;
+        int amount = Math.min(resource.getAmount(), capacity - fluid.getAmount());
+        if (amount <= 0 || action.simulate()) return Math.max(0, amount);
         if (fluid.isEmpty()) {
-            int amount = Math.min(resource.getAmount(), capacity);
             fluid = resource.copy();
             fluid.setAmount(amount);
             syncStateToClients("fill-empty");
             return amount;
         }
-        if (fluid.isFluidEqual(resource)) {
-            int amount = Math.min(resource.getAmount(), capacity - fluid.getAmount());
-            fluid.grow(amount);
-            syncStateToClients("fill-existing");
-            return amount;
-        }
-        return 0;
+        fluid.grow(amount);
+        syncStateToClients("fill-existing");
+        return amount;
     }
 
     public FluidStack drain(int maxDrain) {
+        return drainInternal(maxDrain, IFluidHandler.FluidAction.EXECUTE);
+    }
+
+    private FluidStack drainInternal(int maxDrain, IFluidHandler.FluidAction action) {
         if (fluid.isEmpty() || maxDrain <= 0) return FluidStack.EMPTY;
         int drained = Math.min(fluid.getAmount(), maxDrain);
         FluidStack result = fluid.copy();
         result.setAmount(drained);
-        fluid.shrink(drained);
-        syncStateToClients("drain");
+        if (action.execute()) {
+            fluid.shrink(drained);
+            if (fluid.getAmount() <= 0) fluid = FluidStack.EMPTY;
+            syncStateToClients("drain");
+        }
         return result;
     }
 
     public FluidStack drain(FluidStack resource) {
+        return drainInternal(resource, IFluidHandler.FluidAction.EXECUTE);
+    }
+
+    private FluidStack drainInternal(FluidStack resource, IFluidHandler.FluidAction action) {
         if (resource.isEmpty() || !resource.isFluidEqual(fluid)) return FluidStack.EMPTY;
-        return drain(resource.getAmount());
+        return drainInternal(resource.getAmount(), action);
+    }
+
+    @Override
+    public <T> @NotNull LazyOptional<T> getCapability(@NotNull Capability<T> cap, @Nullable Direction side) {
+        if (cap == ForgeCapabilities.FLUID_HANDLER) return fluidCapability.cast();
+        return super.getCapability(cap, side);
+    }
+
+    @Override
+    public void invalidateCaps() {
+        super.invalidateCaps();
+        fluidCapability.invalidate();
+    }
+
+    @Override
+    public void reviveCaps() {
+        super.reviveCaps();
+        fluidCapability = LazyOptional.of(() -> fluidHandler);
     }
 
     public void handleBucketTransfer() {

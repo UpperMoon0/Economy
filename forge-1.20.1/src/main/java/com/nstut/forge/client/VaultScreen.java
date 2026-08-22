@@ -22,6 +22,7 @@ import net.minecraft.world.phys.BlockHitResult;
 
 /** Wide 18x3 vault using fixed vanilla slot geometry and theme-native OpenUI chrome. */
 public class VaultScreen extends EconomyUiContainerScreen<VaultMenu> {
+    private static final int INVENTORY_LABEL_Y = 108;
     private ButtonWidget modeBtn;
     private VaultBlockEntity.VaultMode currentMode;
 
@@ -29,7 +30,7 @@ public class VaultScreen extends EconomyUiContainerScreen<VaultMenu> {
         super(menu, playerInventory, title);
         imageWidth = VaultMenu.IMAGE_WIDTH;
         imageHeight = VaultMenu.IMAGE_HEIGHT;
-        inventoryLabelY = VaultMenu.PLAYER_INV_Y - 10;
+        inventoryLabelY = INVENTORY_LABEL_Y;
         titleLabelY = 6;
         currentMode = menu.getMode();
     }

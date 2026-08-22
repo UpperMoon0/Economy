@@ -25,6 +25,7 @@ import net.minecraftforge.fluids.FluidStack;
 
 /** Fixed-geometry vanilla container with OpenUI chrome layered around real slots. */
 public class TankScreen extends EconomyUiContainerScreen<TankMenu> {
+    private static final int INVENTORY_LABEL_Y = 87;
     private static final int TRANSFER_SECTION_WIDTH = 90;
 
     private ButtonWidget modeBtn;
@@ -35,7 +36,7 @@ public class TankScreen extends EconomyUiContainerScreen<TankMenu> {
         super(menu, playerInventory, title);
         imageWidth = TankMenu.IMAGE_WIDTH;
         imageHeight = TankMenu.IMAGE_HEIGHT;
-        inventoryLabelY = TankMenu.PLAYER_INV_Y - 10;
+        inventoryLabelY = INVENTORY_LABEL_Y;
         titleLabelY = 6;
         currentMode = menu.getMode();
     }
@@ -62,7 +63,7 @@ public class TankScreen extends EconomyUiContainerScreen<TankMenu> {
         int x = leftPos, y = topPos;
         int panelRadius = radii().medium();
 
-        UiRender.surface(g, x + 8, y + 31, imageWidth - 16, 61,
+        UiRender.surface(g, x + 8, y + 31, imageWidth - 16, 54,
                 panelRadius, c.surface(), c.borderSubtle(), false, c);
         UiRender.surface(g, x + 51, y + 96, 178, 82,
                 panelRadius, c.surface(), c.borderSubtle(), false, c);
@@ -91,7 +92,7 @@ public class TankScreen extends EconomyUiContainerScreen<TankMenu> {
         FluidStack initial = tank != null ? tank.getFluid() : FluidStack.EMPTY;
         int capacity = tank != null ? tank.getCapacity() : TankBlockEntity.DEFAULT_CAPACITY;
         tankComponent = new FluidTankComponent(initial, capacity);
-        tankComponent.width(40).height(48);
+        tankComponent.width(32).height(48);
         body.addChild(tankComponent);
 
         UIComponent info = new TankInfoText();
@@ -134,7 +135,8 @@ public class TankScreen extends EconomyUiContainerScreen<TankMenu> {
             UiRender.text(g, f, f.plainSubstrByWidth(name, Math.max(1, width)), x, y + 4, c.onSurface());
             String amountText = EconomyFormatUtil.formatFluidAmount(amount) + " / " + EconomyFormatUtil.formatFluidAmount(capacity);
             UiRender.text(g, f, f.plainSubstrByWidth(amountText, Math.max(1, width)), x, y + 18, c.onSurfaceMuted());
-            UiRender.progressTrack(g, x, y + 36, Math.max(1, width), 4, fill, c);
+            String percentText = String.format(java.util.Locale.ROOT, "%.1f%% full", fill * 100.0F);
+            UiRender.text(g, f, percentText, x, y + 32, c.onSurfaceMuted());
         }
     }
 

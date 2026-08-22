@@ -1205,26 +1205,32 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                 UiRender.text(g, f, (e.tank ? t("ui.economy.container.tank_prefix") : t("ui.economy.container.vault_prefix")) + idx, x + 4, y + 3, c.primary());
                 boolean full = e.usedSlots >= e.totalSlots;
                 String badge = full ? t("ui.economy.container.full") : t("ui.economy.container.active");
-                int badgeW = f.width(badge) + 6;
-                int badgeX = x + width - badgeW - 4;
-                UiRender.pill(g, badgeX, y + 2, badgeW, 11, full ? c.dangerDeep() : c.successDeep(), full ? c.danger() : c.success());
-                UiRender.text(g, f, badge, badgeX + 3, y + 3, full ? c.danger() : c.success());
+                drawContainerBadge(g, f, badge, x + width - 4, y + 2,
+                        full ? c.dangerDeep() : c.successDeep(),
+                        full ? c.danger() : c.success(), c);
                 String modeBadge = switch (e.mode) {
                     case 1 -> t("ui.economy.container.mode_input"); case 2 -> t("ui.economy.container.mode_output"); default -> t("ui.economy.container.mode_both");
                 };
-                int modeW = f.width(modeBadge) + 6;
-                int modeX = badgeX - modeW - 4;
-                int modeBg = e.mode == 1 ? c.dangerDeep() : (e.mode == 2 ? c.successDeep() : c.primaryDim());
-                int modeBorder = e.mode == 1 ? c.danger() : (e.mode == 2 ? c.success() : c.primary());
-                UiRender.pill(g, modeX, y + 2, modeW, 11, modeBg, modeBorder);
-                UiRender.text(g, f, modeBadge, modeX + 3, y + 3, modeBorder);
                 String loc = e.dimension.replace("minecraft:", "") + " (" + e.x + ", " + e.y + ", " + e.z + ")";
                 UiRender.text(g, f, loc, x + 4, y + 17, c.onSurfaceMuted());
                 String cap = e.tank ? formatFluidAmount(e.usedSlots) + "/" + formatFluidAmount(e.totalSlots)
                         : formatCompact(e.usedSlots) + "/" + formatCompact(e.totalSlots) + " " + t("ui.economy.containers.slots");
-                UiRender.text(g, f, cap, x + width - f.width(cap) - 4, y + 17, c.onSurface());
+                int capX = x + width - f.width(cap) - 4;
+                UiRender.text(g, f, cap, capX, y + 17, c.onSurface());
+                int modeBg = e.mode == 1 ? c.warning() : (e.mode == 2 ? c.primary() : c.primaryDim());
+                int modeBorder = e.mode == 1 ? c.warningHover() : (e.mode == 2 ? c.primaryHover() : c.primary());
+                drawContainerBadge(g, f, modeBadge, capX - 4, y + 16, modeBg, modeBorder, c);
             }
         };
+    }
+
+    private int drawContainerBadge(GuiGraphics g, Font f, String text, int rightX, int y,
+                                   int background, int border, ColorScheme colors) {
+        int width = f.width(text) + 8;
+        int x = rightX - width;
+        UiRender.pill(g, x, y, width, 12, background, border);
+        UiRender.text(g, f, text, x + 4, y + 2, colors.onPrimary());
+        return x;
     }
 
     // ── Chart component ────────────────────────────────────────────────────
