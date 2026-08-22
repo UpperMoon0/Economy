@@ -652,9 +652,8 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                 String sellerName = e.isServerOrder
                         ? Component.translatable("ui.economy.orders.server_seller", e.sellerName).getString()
                         : e.sellerName;
-                String seller = fitText(f, sellerName,
-                        Math.max(0, lineX - (x + 3) - 6));
-                UiRender.text(g, f, seller, x + 3, y + 4, c.onSurface());
+                int sellerWidth = Math.max(0, lineX - (x + 3) - 6);
+                drawMarqueeText(g, f, sellerName, x + 3, y + 4, sellerWidth, c.onSurface(), false);
                 UiRender.text(g, f, line, lineX, y + 4, clr);
             }
             @Override public boolean mouseClicked(double mx, double my, int button) {
