@@ -14,6 +14,7 @@
   "ui.economy.brand": "ECONOMY",
   "ui.economy.market.subtitle": "MARKET",
   "ui.economy.nav.browse": "Browse",
+  "ui.economy.nav.detail": "Details",
   "ui.economy.nav.new_order": "New Order",
   "ui.economy.nav.orders": "Orders",
   "ui.economy.nav.portfolio": "Portfolio",
@@ -23,6 +24,7 @@
   "ui.economy.browse.live_listings": "%s live listings",
   "ui.economy.browse.grid": "Grid",
   "ui.economy.browse.rows": "Rows",
+  "ui.economy.browse.search_placeholder": "Search products...",
   "ui.economy.card.no_orders": "No active orders",
   "ui.economy.filter.activity": "Activity",
   "ui.economy.filter.product": "Product",
@@ -127,6 +129,10 @@
   "ui.economy.container.mode_input": "INPUT ONLY",
   "ui.economy.container.mode_output": "OUTPUT ONLY",
 
+  "ui.economy.mode.both": "BOTH",
+  "ui.economy.mode.input": "INPUT",
+  "ui.economy.mode.output": "OUTPUT",
+
   "ui.economy.vault.title": "VAULT",
   "ui.economy.vault.subtitle": "SECURE ITEM STORAGE",
   "ui.economy.vault.mode_both": "MODE: BOTH",
@@ -139,7 +145,7 @@
   "ui.economy.tank.mode_input": "MODE: INPUT",
   "ui.economy.tank.mode_output": "MODE: OUTPUT",
   "ui.economy.tank.transfer": "TRANSFER",
-  "ui.economy.tank.transfer_hint": "Use a bucket on the slot",
+  "ui.economy.tank.transfer_hint": "Fluid container",
   "ui.economy.tank.empty": "Empty tank",
 
   "ui.economy.chart.no_data": "Not enough data points yet",
@@ -152,5 +158,7 @@
   "ui.economy.theme.to_light": "Switch to light theme",
   "ui.economy.theme.to_dark": "Switch to dark theme",
   "ui.economy.theme.light_label": "☀ Light",
-  "ui.economy.theme.dark_label": "☾ Dark"
+  "ui.economy.theme.dark_label": "☾ Dark",
+  "ui.economy.theme.light_compact": "☀",
+  "ui.economy.theme.dark_compact": "☾"
 }

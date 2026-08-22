@@ -54,7 +54,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
     private static final int SCREEN_W = 356;
     private static final int SCREEN_H = 248;
     private static final int SIDEBAR_W = 84;
-    private static final int NARROW_THRESHOLD = 300;
+    private static final int NARROW_THRESHOLD = 336;
     private static final int MAX_VISIBLE_CHART_STEPS = 15;
     private static final SimpleDateFormat CHART_TIME_FMT = new SimpleDateFormat("MM/dd HH:mm:ss");
 
@@ -203,11 +203,10 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
 
     @Override
     protected void init() {
-        // Market has no vanilla inventory slots, so we can dynamically resize.
-        this.imageWidth = Math.max(340, Math.min(640, this.width - 16));
-        this.imageHeight = Math.max(220, Math.min(420, this.height - 16));
-        this.leftPos = (this.width - this.imageWidth) / 2;
-        this.topPos = (this.height - this.imageHeight) / 2;
+        // Market has no vanilla inventory slots, so its viewport may resize freely.
+        // Never impose a minimum larger than the current logical window.
+        this.imageWidth = Math.max(1, Math.min(SCREEN_W, this.width - 16));
+        this.imageHeight = Math.max(1, Math.min(SCREEN_H, this.height - 16));
         super.init();
         MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestRefreshPacket());
         MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestPortfolioPacket());
@@ -244,7 +243,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
             if (newOrderSellBtn != null) newOrderSellBtn.setActive(b);
             if (newOrderBuyBtn != null) newOrderBuyBtn.setActive(!b);
         }));
-        return Ui.responsive(ctx -> buildShell(ctx.width()));
+        return Ui.padding(8, Ui.responsive(ctx -> buildShell(ctx.width())));
     }
 
     private UIComponent buildShell(int availableWidth) {
@@ -255,7 +254,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
     }
 
     private UIComponent buildWideShell() {
-        HStack main = new HStack().gap(0);
+        HStack main = new HStack().gap(8);
         main.fillWidth();
         main.fillHeight();
 
@@ -287,12 +286,15 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         top.addChild(buildThemeToggle());
         root.addChild(top);
 
-        root.addChild(Ui.tabs(view)
-                .tab(MarketView.BROWSE, t("ui.economy.nav.browse"))
-                .tab(MarketView.NEW_ORDER, t("ui.economy.nav.new_order"))
-                .tab(MarketView.ORDERS, t("ui.economy.nav.orders"))
-                .tab(MarketView.PORTFOLIO, t("ui.economy.nav.portfolio"))
-                .tab(MarketView.CONTAINERS, t("ui.economy.nav.containers")));
+        Select<MarketView> nav = Ui.select(view);
+        nav.option(Component.translatable("ui.economy.nav.browse"), MarketView.BROWSE);
+        nav.option(Component.translatable("ui.economy.nav.detail"), MarketView.DETAIL);
+        nav.option(Component.translatable("ui.economy.nav.new_order"), MarketView.NEW_ORDER);
+        nav.option(Component.translatable("ui.economy.nav.orders"), MarketView.ORDERS);
+        nav.option(Component.translatable("ui.economy.nav.portfolio"), MarketView.PORTFOLIO);
+        nav.option(Component.translatable("ui.economy.nav.containers"), MarketView.CONTAINERS);
+        nav.fillWidth();
+        root.addChild(nav);
         root.addChild(buildContent());
         return root;
     }
@@ -380,7 +382,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
 
         HStack searchBar = new HStack().gap(4);
         TextField search = Ui.textField(browseQuery);
-        search.placeholder("Search products...");
+        search.placeholder(t("ui.economy.browse.search_placeholder"));
         search.flex();
         searchBar.addChild(search);
         ButtonWidget layoutBtn = Ui.button(
@@ -422,12 +424,16 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         return v;
     }
 
-    private <T extends Enum<T>> Select<T> filterSelect(String label, Signal<T> signal, Map<T, String> labels) {
+    private <T extends Enum<T>> UIComponent filterSelect(String label, Signal<T> signal, Map<T, String> labels) {
+        VStack group = new VStack().gap(1);
+        group.flex();
+        group.addChild(Ui.text(Component.literal(label)).style(TextStyle.CAPTION));
         Select<T> sel = Ui.select(signal);
         for (Map.Entry<T, String> e : labels.entrySet()) {
             sel.option(Component.literal(e.getValue()), e.getKey());
         }
-        return sel;
+        group.addChild(sel);
+        return group;
     }
 
     private UIComponent buildCommodityCard(MarketNetwork.ItemCardData card) {
@@ -440,7 +446,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
             @Override public void render(GuiGraphics g, Font f, int mx, int my, float pt) {
                 ColorScheme c = uiRuntime().theme().colors();
                 boolean hovered = mx >= x && mx < x + width && my >= y && my < y + height;
-                UiRender.surface(g, x, y, width, height, 4, hovered ? c.surfaceRaised() : c.surface(), hovered ? c.primary() : c.borderSubtle(), false);
+                UiRender.surface(g, x, y, width, height, 4, hovered ? c.surfaceRaised() : c.surface(), hovered ? c.primary() : c.borderSubtle(), false, c);
                 CommodityIconComponent.drawIcon(g, card.itemId, x + 6, y + 12, 16, 16);
                 int textX = x + 28;
                 int textWidth = Math.max(1, width - 34);
@@ -516,9 +522,12 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         v.addChild(cols);
 
         v.addChild(Ui.text(Component.translatable("ui.economy.detail.my_orders")).style(TextStyle.HEADING));
-        v.addChild(Ui.switcher(detailOrdersEmpty)
-                .when(false, () -> Ui.list(visibleDetailOrders, this::buildMyOrderRow).itemHeight(18))
-                .when(true, () -> Ui.emptyState(Component.translatable("ui.economy.empty.no_orders_item"))));
+        UIComponent myOrders = Ui.switcher(detailOrdersEmpty)
+                .when(false, () -> Ui.list(visibleDetailOrders, this::buildMyOrderRow)
+                        .key(o -> o.e().orderId)
+                        .itemHeight(18))
+                .when(true, () -> Ui.emptyState(Component.translatable("ui.economy.empty.no_orders_item")));
+        v.addChild(myOrders);
         v.addChild(Ui.button(Component.translatable("ui.economy.action.create_order"), () -> {
             createCommodityQuery.set(selectedItemId.get());
             switchView(MarketView.NEW_ORDER);
@@ -552,9 +561,11 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         v.addChild(Ui.text(Component.translatable(isAsks ? "ui.economy.detail.sell_orders" : "ui.economy.detail.buy_orders")).style(TextStyle.HEADING));
         ReadableSignal<List<MarketNetwork.OrderEntry>> data = isAsks ? visibleAsks : visibleBids;
         Computed<Boolean> colEmpty = isAsks ? asksEmpty : bidsEmpty;
-        v.addChild(Ui.switcher(colEmpty)
-                .when(false, () -> Ui.list(data, e -> buildOtherOrderRow(e, isAsks)).itemHeight(18))
-                .when(true, () -> Ui.emptyState(Component.translatable(isAsks ? "ui.economy.empty.no_sell_orders" : "ui.economy.empty.no_buy_orders"))));
+        UIComponent orders = Ui.switcher(colEmpty)
+                .when(false, () -> Ui.list(data, e -> buildOtherOrderRow(e, isAsks)).itemHeight(18).flex())
+                .when(true, () -> Ui.emptyState(Component.translatable(isAsks ? "ui.economy.empty.no_sell_orders" : "ui.economy.empty.no_buy_orders")));
+        orders.flex();
+        v.addChild(orders);
         return v;
     }
 
@@ -1087,7 +1098,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
     }
 
     private void drawStatBox(GuiGraphics g, Font f, int bx, int by, int bw, int bh, String label, String value, int valueColor, ColorScheme c) {
-        UiRender.surface(g, bx, by, bw, bh, 3, c.surface(), c.borderSubtle(), false);
+        UiRender.surface(g, bx, by, bw, bh, 3, c.surface(), c.borderSubtle(), false, c);
         g.drawString(f, label, bx + (bw - f.width(label)) / 2, by + 3, c.onSurfaceMuted());
         EconomyUiComponents.drawCoin(g, bx + 4, by + 13);
         g.drawString(f, value, bx + 14, by + 13, valueColor);
@@ -1203,7 +1214,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
 
         @Override public void render(GuiGraphics g, Font f, int mx, int my, float pt) {
             ColorScheme c = uiRuntime().theme().colors();
-            UiRender.surface(g, x, y, width, height, 4, c.input(), c.borderSubtle(), false);
+            UiRender.surface(g, x, y, width, height, 4, c.input(), c.borderSubtle(), false, c);
             List<ChartSample> pts = data.get();
             if (pts.size() < 2) {
                 g.drawString(f, t("ui.economy.chart.no_data"), x + (width - f.width(t("ui.economy.chart.no_data"))) / 2, y + height / 2 - 4, c.onSurfaceMuted());
