@@ -9,7 +9,7 @@ version = "${version}"
 displayName = "NsTut Economy"
 authors = "NsTut"
 description = '''
-A complete in-game economy for trading items and fluids. Use the Market Terminal to browse prices, create and manage orders, track your portfolio, send coins to other players, and connect your Vaults and Fluid Tanks to the market.
+A player-driven item and fluid economy with an OpenUI-powered Market Terminal, matched orders, portfolio tracking, payments, and market-connected Vault and Fluid Tank storage.
 '''
 
 [[dependencies.economy]]
