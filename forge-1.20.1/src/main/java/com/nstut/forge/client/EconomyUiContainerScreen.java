@@ -47,8 +47,15 @@ public abstract class EconomyUiContainerScreen<M extends AbstractContainerMenu> 
 
     @Override
     protected void renderLabels(GuiGraphics g, int mouseX, int mouseY) {
-        // OpenUI composes all labels. Suppress vanilla title/inventory strings.
+        if (showInventoryLabel()) {
+            UiRender.text(g, font, playerInventoryTitle.getString(),
+                    economyInventoryLabelX(), inventoryLabelY, colors().onSurfaceMuted());
+        }
     }
+
+    protected boolean showInventoryLabel() { return false; }
+
+    protected int economyInventoryLabelX() { return 8; }
 
     protected ButtonWidget buildThemeToggle() {
         themeToggle = Ui.button((Supplier<Component>) () -> themeToggleLabel(themeMode.get()), this::toggleTheme).ghost();

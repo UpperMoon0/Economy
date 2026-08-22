@@ -20,7 +20,7 @@ import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.phys.BlockHitResult;
 
-/** Compact 9x6 vault using fixed vanilla slot geometry and theme-native OpenUI chrome. */
+/** Wide 18x3 vault using fixed vanilla slot geometry and theme-native OpenUI chrome. */
 public class VaultScreen extends EconomyUiContainerScreen<VaultMenu> {
     private ButtonWidget modeBtn;
     private VaultBlockEntity.VaultMode currentMode;
@@ -50,10 +50,16 @@ public class VaultScreen extends EconomyUiContainerScreen<VaultMenu> {
         ColorScheme c = colors();
         int x = leftPos, y = topPos;
         int panelRadius = radii().medium();
-        UiRender.surface(g, x + 11, y + 30, 174, 114, panelRadius, c.surface(), c.borderSubtle(), false, c);
-        UiRender.surface(g, x + 11, y + 146, 174, 82, panelRadius, c.surface(), c.borderSubtle(), false, c);
+        UiRender.surface(g, x + 10, y + 36, 336, 66, panelRadius, c.surface(), c.borderSubtle(), false, c);
+        UiRender.surface(g, x + 88, y + 120, 180, 84, panelRadius, c.surface(), c.borderSubtle(), false, c);
         for (Slot slot : menu.slots) UiRender.slot(g, x + slot.x - 1, y + slot.y - 1, 18, 18, c);
     }
+
+    @Override
+    protected boolean showInventoryLabel() { return true; }
+
+    @Override
+    protected int economyInventoryLabelX() { return VaultMenu.PLAYER_INV_X; }
 
     @Override
     protected UIComponent buildUI() {

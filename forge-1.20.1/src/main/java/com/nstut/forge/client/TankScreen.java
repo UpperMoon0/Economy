@@ -72,6 +72,12 @@ public class TankScreen extends EconomyUiContainerScreen<TankMenu> {
     }
 
     @Override
+    protected boolean showInventoryLabel() { return true; }
+
+    @Override
+    protected int economyInventoryLabelX() { return TankMenu.PLAYER_INV_X; }
+
+    @Override
     protected UIComponent buildUI() {
         HStack header = new HStack().gap(4).align(Alignment.CENTER);
         header.addChild(Ui.text(Component.translatable("ui.economy.tank.title")).style(TextStyle.TITLE));
@@ -125,9 +131,9 @@ public class TankScreen extends EconomyUiContainerScreen<TankMenu> {
             float fill = Math.min(1f, amount / (float) capacity);
             String name = fluid.isEmpty() ? Component.translatable("ui.economy.tank.empty").getString()
                     : fluid.getDisplayName().getString();
-            g.drawString(f, f.plainSubstrByWidth(name, Math.max(1, width)), x, y + 4, c.onSurface());
+            UiRender.text(g, f, f.plainSubstrByWidth(name, Math.max(1, width)), x, y + 4, c.onSurface());
             String amountText = EconomyFormatUtil.formatFluidAmount(amount) + " / " + EconomyFormatUtil.formatFluidAmount(capacity);
-            g.drawString(f, f.plainSubstrByWidth(amountText, Math.max(1, width)), x, y + 18, c.onSurfaceMuted());
+            UiRender.text(g, f, f.plainSubstrByWidth(amountText, Math.max(1, width)), x, y + 18, c.onSurfaceMuted());
             UiRender.progressTrack(g, x, y + 36, Math.max(1, width), 4, fill, c);
         }
     }

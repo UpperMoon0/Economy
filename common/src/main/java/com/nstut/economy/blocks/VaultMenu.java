@@ -14,13 +14,13 @@ import org.jetbrains.annotations.NotNull;
 public class VaultMenu extends AbstractContainerMenu {
 
     public static final int CONTAINER_SIZE = 54;
-    public static final int IMAGE_WIDTH = 196;
-    public static final int IMAGE_HEIGHT = 234;
-    public static final int VAULT_SLOT_START_X = 17;
-    public static final int VAULT_SLOT_START_Y = 36;
-    public static final int PLAYER_INV_X = 17;
-    public static final int PLAYER_INV_Y = 152;
-    public static final int HOTBAR_Y = 210;
+    public static final int IMAGE_WIDTH = 356;
+    public static final int IMAGE_HEIGHT = 208;
+    public static final int VAULT_SLOT_START_X = 16;
+    public static final int VAULT_SLOT_START_Y = 42;
+    public static final int PLAYER_INV_X = 97;
+    public static final int PLAYER_INV_Y = 126;
+    public static final int HOTBAR_Y = 184;
 
     private final Container container;
     private final ContainerData data;
@@ -40,10 +40,10 @@ public class VaultMenu extends AbstractContainerMenu {
         this.vaultBlockEntity = vault;
         container.startOpen(playerInventory.player);
 
-        // Vault Container Slots (6 rows of 9 = 54 slots)
-        for (int row = 0; row < 6; row++) {
-            for (int col = 0; col < 9; col++) {
-                this.addSlot(new Slot(container, col + row * 9, VAULT_SLOT_START_X + col * 18, VAULT_SLOT_START_Y + row * 18));
+        // Vault Container Slots (3 rows of 18 = 54 slots)
+        for (int row = 0; row < 3; row++) {
+            for (int col = 0; col < 18; col++) {
+                this.addSlot(new Slot(container, col + row * 18, VAULT_SLOT_START_X + col * 18, VAULT_SLOT_START_Y + row * 18));
             }
         }
 

@@ -145,7 +145,7 @@
   "ui.economy.tank.mode_input": "MODE: INPUT",
   "ui.economy.tank.mode_output": "MODE: OUTPUT",
   "ui.economy.tank.transfer": "TRANSFER",
-  "ui.economy.tank.transfer_hint": "Fluid container",
+  "ui.economy.tank.transfer_hint": "Container",
   "ui.economy.tank.empty": "Empty tank",
 
   "ui.economy.chart.no_data": "Not enough data points yet",

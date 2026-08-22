@@ -60,7 +60,7 @@ public final class EconomyUiComponents {
                 } catch (Exception ignored) {
                     bal = balance.get();
                 }
-                g.drawString(f, bal, x + 16, y + 5, c.onSurface());
+                UiRender.text(g, f, bal, x + 16, y + 5, c.onSurface());
             }
         };
     }
