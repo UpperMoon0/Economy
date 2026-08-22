@@ -87,7 +87,7 @@ public class TankMenu extends AbstractContainerMenu {
         String clickedBefore = slotId >= 0 && slotId < slots.size()
                 ? TankBlockEntity.describeStack(slots.get(slotId).getItem())
                 : "OUTSIDE";
-        com.nstut.Economy.LOGGER.info(
+        com.nstut.Economy.LOGGER.debug(
                 "[TankTransfer] menu click start side={} player={} menuId={} slotId={} button={} clickType={} clicked={} carried={} processSlot={} tank={}",
                 side, player.getScoreboardName(), containerId, slotId, button, clickType,
                 clickedBefore, TankBlockEntity.describeStack(getCarried()),
@@ -96,7 +96,7 @@ public class TankMenu extends AbstractContainerMenu {
         String clickedAfter = slotId >= 0 && slotId < slots.size()
                 ? TankBlockEntity.describeStack(slots.get(slotId).getItem())
                 : "OUTSIDE";
-        com.nstut.Economy.LOGGER.info(
+        com.nstut.Economy.LOGGER.debug(
                 "[TankTransfer] menu click complete side={} player={} menuId={} slotId={} clicked={} carried={} processSlot={} tank={}",
                 side, player.getScoreboardName(), containerId, slotId, clickedAfter,
                 TankBlockEntity.describeStack(getCarried()),
@@ -111,7 +111,7 @@ public class TankMenu extends AbstractContainerMenu {
 
     @Override
     public @NotNull ItemStack quickMoveStack(@NotNull Player player, int index) {
-        com.nstut.Economy.LOGGER.info(
+        com.nstut.Economy.LOGGER.debug(
                 "[TankTransfer] quickMove start side={} player={} menuId={} index={} source={} processSlot={} tank={}",
                 player.level().isClientSide ? "CLIENT" : "SERVER", player.getScoreboardName(), containerId,
                 index, index >= 0 && index < slots.size() ? TankBlockEntity.describeStack(slots.get(index).getItem()) : "OUTSIDE",
@@ -134,7 +134,7 @@ public class TankMenu extends AbstractContainerMenu {
                 slot.setChanged();
             }
         }
-        com.nstut.Economy.LOGGER.info(
+        com.nstut.Economy.LOGGER.debug(
                 "[TankTransfer] quickMove complete side={} player={} menuId={} index={} result={} processSlot={} tank={}",
                 player.level().isClientSide ? "CLIENT" : "SERVER", player.getScoreboardName(), containerId,
                 index, TankBlockEntity.describeStack(result),

@@ -221,6 +221,14 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
     public void removed() {
         for (Computed<?> c : computedList) c.close();
         for (Subscription s : subscriptions) s.close();
+        if (itemSearchSubscription != null) {
+            itemSearchSubscription.close();
+            itemSearchSubscription = null;
+        }
+        hideItemSearch();
+        itemSearchHandle = null;
+        itemSearchPopover = null;
+        itemSearchShown = false;
         computedList.clear();
         subscriptions.clear();
         super.removed();
@@ -288,7 +296,6 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
 
         Select<MarketView> nav = Ui.select(view);
         nav.option(Component.translatable("ui.economy.nav.browse"), MarketView.BROWSE);
-        nav.option(Component.translatable("ui.economy.nav.detail"), MarketView.DETAIL);
         nav.option(Component.translatable("ui.economy.nav.new_order"), MarketView.NEW_ORDER);
         nav.option(Component.translatable("ui.economy.nav.orders"), MarketView.ORDERS);
         nav.option(Component.translatable("ui.economy.nav.portfolio"), MarketView.PORTFOLIO);
@@ -620,7 +627,9 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                     UiRender.roundedRect(g, x, y + 1, width, 16, 2, c.surfaceRaised());
                 }
                 g.drawString(f, o.isSell() ? t("ui.economy.opt.sell") : t("ui.economy.opt.buy"), x + 3, y + 4, o.isSell() ? c.danger() : c.success());
-                String line = e.price + " x " + (e.isInfinite ? "∞" : formatItemAmount(e.quantity));
+                String detailItemId = MarketClientStore.detail.get() == null ? "" : MarketClientStore.detail.get().itemId;
+                String line = e.price + " x " + (e.isInfinite ? "∞" : (isFluidCommodity(detailItemId)
+                        ? formatFluidAmount(e.quantity) : formatItemAmount(e.quantity)));
                 g.drawString(f, line, x + width - f.width(line) - 3, y + 4, c.onSurface());
             }
         };
@@ -911,7 +920,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
             @Override public int preferredHeight(Font f) { return 36; }
             @Override public void render(GuiGraphics g, Font f, int mx, int my, float pt) {
                 ColorScheme c = uiRuntime().theme().colors();
-                if (mx >= x && my >= y && my < y + height) {
+                if (mx >= x && mx < x + width && my >= y && my < y + height) {
                     UiRender.roundedRect(g, x, y + 1, width, 34, 3, c.surfaceRaised());
                 }
                 CommodityIconComponent.drawIcon(g, e.itemId, x + 4, y + 10, 16, 16);

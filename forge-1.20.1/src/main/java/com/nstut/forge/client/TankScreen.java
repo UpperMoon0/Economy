@@ -65,7 +65,7 @@ public class TankScreen extends EconomyUiContainerScreen<TankMenu> {
         UiRender.surface(g, x + 8, y + 31, imageWidth - 16, 61,
                 panelRadius, c.surface(), c.borderSubtle(), false, c);
         UiRender.surface(g, x + 51, y + 96, 178, 82,
-                panelRadius, c.input(), c.borderSubtle(), false, c);
+                panelRadius, c.surface(), c.borderSubtle(), false, c);
         for (Slot slot : menu.slots) {
             UiRender.slot(g, x + slot.x - 1, y + slot.y - 1, 18, 18, c);
         }

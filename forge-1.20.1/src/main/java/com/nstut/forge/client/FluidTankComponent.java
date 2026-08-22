@@ -22,15 +22,18 @@ public class FluidTankComponent extends UIComponent {
     private int capacity;
 
     public FluidTankComponent(FluidStack fluid, int capacity) {
-        this.fluid = fluid;
+        this.fluid = fluid == null ? FluidStack.EMPTY : fluid.copy();
         this.capacity = capacity;
         width(48);
         height(48);
     }
 
     public void setFluid(FluidStack fluid) {
-        if (!Objects.equals(this.fluid, fluid)) {
-            this.fluid = fluid;
+        FluidStack next = fluid == null ? FluidStack.EMPTY : fluid;
+        if (!this.fluid.isFluidEqual(next)
+                || !Objects.equals(this.fluid.getTag(), next.getTag())
+                || this.fluid.getAmount() != next.getAmount()) {
+            this.fluid = next.copy();
             invalidatePaint();
         }
     }

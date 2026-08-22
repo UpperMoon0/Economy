@@ -18,23 +18,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Checkout OpenUI-MC
         uses: actions/checkout@v4
         with:
           repository: UpperMoon0/OpenUI-MC
-          ref: fix/openui-fixes
+          ref: main
           path: OpenUI-MC
 
       - name: Set up JDK 21 for OpenUI
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: 'temurin'
           java-version: '21'
 
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v3
+        uses: gradle/actions/setup-gradle@v5
 
       - name: Grant Gradle wrapper permissions
         run: |
@@ -46,7 +46,7 @@ jobs:
         run: ./gradlew :forge-1.20.1:publishToMavenLocal --no-daemon
 
       - name: Set up JDK 17 for Economy
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: 'temurin'
           java-version: '17'
@@ -55,7 +55,7 @@ jobs:
         run: ./gradlew :forge-1.20.1:build --no-daemon
 
       - name: Upload Build Artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: economy-mod-jars
           path: forge-1.20.1/build/libs/*.jar
@@ -68,9 +68,9 @@ jobs:
       contents: write
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Download Build Artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: economy-mod-jars
           path: build/release-libs

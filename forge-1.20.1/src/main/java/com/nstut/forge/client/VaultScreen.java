@@ -50,8 +50,8 @@ public class VaultScreen extends EconomyUiContainerScreen<VaultMenu> {
         ColorScheme c = colors();
         int x = leftPos, y = topPos;
         int panelRadius = radii().medium();
-        UiRender.surface(g, x + 11, y + 30, 174, 114, panelRadius, c.input(), c.borderSubtle(), c);
-        UiRender.surface(g, x + 11, y + 146, 174, 82, panelRadius, c.input(), c.borderSubtle(), c);
+        UiRender.surface(g, x + 11, y + 30, 174, 114, panelRadius, c.surface(), c.borderSubtle(), false, c);
+        UiRender.surface(g, x + 11, y + 146, 174, 82, panelRadius, c.surface(), c.borderSubtle(), false, c);
         for (Slot slot : menu.slots) UiRender.slot(g, x + slot.x - 1, y + slot.y - 1, 18, 18, c);
     }
 
