@@ -7,8 +7,10 @@ import com.nstut.forge.network.HistoryEntry;
 import com.nstut.forge.network.MarketNetwork;
 import com.nstut.openui.api.Ui;
 import com.nstut.openui.api.ButtonWidget;
+import com.nstut.openui.api.ClipStack;
 import com.nstut.openui.api.HStack;
 import com.nstut.openui.api.UIComponent;
+import com.nstut.openui.api.UiAnimationUtil;
 import com.nstut.openui.api.VStack;
 import com.nstut.openui.api.UiRender;
 import com.nstut.openui.controls.Badge;
@@ -632,7 +634,10 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                         ? formatFluidAmount(e.quantity) : formatItemAmount(e.quantity)));
                 line = fitText(f, line, Math.max(0, width - 6));
                 int lineX = x + width - f.width(line) - 3;
-                String seller = fitText(f, (e.isServerOrder ? "[SERVER] " : "") + e.sellerName,
+                String sellerName = e.isServerOrder
+                        ? Component.translatable("ui.economy.orders.server_seller", e.sellerName).getString()
+                        : e.sellerName;
+                String seller = fitText(f, sellerName,
                         Math.max(0, lineX - (x + 3) - 6));
                 UiRender.text(g, f, seller, x + 3, y + 4, c.onSurface());
                 UiRender.text(g, f, line, lineX, y + 4, clr);
@@ -980,9 +985,11 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                         Math.max(0, x + width - nameX - 4));
                 UiRender.text(g, f, name, nameX, y + 4, c.onSurface());
                 EconomyUiComponents.drawCoin(g, x + 24, y + 18);
-                String qty = e.isInfinite ? "Qty: ∞"
-                        : (isFluidCommodity(e.itemId) ? "Qty: " + formatFluidAmount(e.quantity) + " / " + formatFluidAmount(e.initialQuantity)
-                        : "Qty: " + formatItemAmount(e.quantity) + " / " + formatItemAmount(e.initialQuantity));
+                String qty = e.isInfinite
+                        ? t("ui.economy.orders.quantity_infinite")
+                        : Component.translatable("ui.economy.orders.quantity_progress",
+                                isFluidCommodity(e.itemId) ? formatFluidAmount(e.quantity) : formatItemAmount(e.quantity),
+                                isFluidCommodity(e.itemId) ? formatFluidAmount(e.initialQuantity) : formatItemAmount(e.initialQuantity)).getString();
                 int metadataX = x + 35;
                 int metadataWidth = Math.max(0, x + width - metadataX - 4);
                 String price = fitText(f, e.price, metadataWidth);
@@ -1181,9 +1188,25 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
 
     private void drawStatBox(GuiGraphics g, Font f, int bx, int by, int bw, int bh, String label, String value, int valueColor, ColorScheme c) {
         UiRender.surface(g, bx, by, bw, bh, 3, c.surface(), c.borderSubtle(), false, c);
-        UiRender.text(g, f, label, bx + (bw - f.width(label)) / 2, by + 3, c.onSurfaceMuted());
+        drawMarqueeText(g, f, label, bx + 4, by + 3, Math.max(0, bw - 8), c.onSurfaceMuted(), true);
         EconomyUiComponents.drawCoin(g, bx + 4, by + 13);
-        UiRender.text(g, f, value, bx + 14, by + 13, valueColor);
+        drawMarqueeText(g, f, value, bx + 14, by + 13, Math.max(0, bw - 18), valueColor, false);
+    }
+
+    /** Draws text inside a hard clip and ping-pongs it only when it exceeds the available width. */
+    private static void drawMarqueeText(GuiGraphics g, Font f, String text, int tx, int ty,
+                                        int maxWidth, int color, boolean centerWhenFitting) {
+        if (maxWidth <= 0 || text == null || text.isEmpty()) return;
+        int textWidth = f.width(text);
+        int drawX = centerWhenFitting && textWidth <= maxWidth
+                ? tx + (maxWidth - textWidth) / 2
+                : tx - UiAnimationUtil.pingPongOffset(textWidth, maxWidth, System.currentTimeMillis());
+        ClipStack.push(g, tx, ty, maxWidth, f.lineHeight);
+        try {
+            UiRender.text(g, f, text, drawX, ty, color);
+        } finally {
+            ClipStack.pop(g);
+        }
     }
 
     private UIComponent buildHoldingRow(MarketNetwork.AssetHoldingData h) {
@@ -1266,26 +1289,46 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                 }
                 boolean full = e.usedSlots >= e.totalSlots;
                 String badge = full ? t("ui.economy.container.full") : t("ui.economy.container.active");
-                int statusX = EconomyUiComponents.drawBadge(g, f, badge, x + width - 4, y + 2,
-                        full ? Badge.Variant.DANGER : Badge.Variant.SUCCESS, false, c);
-                String title = fitText(f,
-                        (e.tank ? t("ui.economy.container.tank_prefix") : t("ui.economy.container.vault_prefix")) + idx,
-                        Math.max(0, statusX - (x + 4) - 6));
-                UiRender.text(g, f, title, x + 4, y + 3, c.primary());
+                int statusWidth = EconomyUiComponents.badgeWidth(f, badge);
+                int statusX = x + width - 4 - statusWidth;
+                boolean statusHovered = mx >= statusX && mx < statusX + statusWidth
+                        && my >= y + 2 && my < y + 14;
+                EconomyUiComponents.drawBadge(g, f, badge, x + width - 4, y + 2,
+                        full ? Badge.Variant.DANGER : Badge.Variant.SUCCESS, statusHovered, c);
                 String modeBadge = switch (e.mode) {
                     case 1 -> t("ui.economy.container.mode_input"); case 2 -> t("ui.economy.container.mode_output"); default -> t("ui.economy.container.mode_both");
                 };
+                Badge.Variant modeVariant = e.mode == 1 ? Badge.Variant.WARNING : Badge.Variant.PRIMARY;
+                int modeWidth = EconomyUiComponents.badgeWidth(f, modeBadge);
+                int modeX = statusX - 4 - modeWidth;
+                boolean modeHovered = mx >= modeX && mx < modeX + modeWidth
+                        && my >= y + 2 && my < y + 14;
+                EconomyUiComponents.drawBadge(g, f, modeBadge, statusX - 4, y + 2,
+                        modeVariant, modeHovered, c);
+                String title = fitText(f,
+                        (e.tank ? t("ui.economy.container.tank_prefix") : t("ui.economy.container.vault_prefix")) + idx,
+                        Math.max(0, modeX - (x + 4) - 6));
+                UiRender.text(g, f, title, x + 4, y + 3, c.primary());
                 String loc = e.dimension.replace("minecraft:", "") + " (" + e.x + ", " + e.y + ", " + e.z + ")";
                 String cap = e.tank ? formatFluidAmount(e.usedSlots) + "/" + formatFluidAmount(e.totalSlots)
                         : formatCompact(e.usedSlots) + "/" + formatCompact(e.totalSlots) + " " + t("ui.economy.containers.slots");
                 cap = fitText(f, cap, Math.max(0, width / 3));
                 int capX = x + width - f.width(cap) - 4;
                 UiRender.text(g, f, cap, capX, y + 17, c.onSurface());
-                Badge.Variant modeVariant = e.mode == 1 ? Badge.Variant.WARNING : Badge.Variant.PRIMARY;
-                int modeX = EconomyUiComponents.drawBadge(g, f, modeBadge, capX - 4, y + 16,
-                        modeVariant, false, c);
-                loc = fitText(f, loc, Math.max(0, modeX - (x + 4) - 6));
+                loc = fitText(f, loc, Math.max(0, capX - (x + 4) - 6));
                 UiRender.text(g, f, loc, x + 4, y + 17, c.onSurfaceMuted());
+                if (statusHovered) {
+                    g.renderTooltip(f, Component.translatable(full
+                            ? "ui.economy.container.tooltip.full"
+                            : "ui.economy.container.tooltip.active"), mx, my);
+                } else if (modeHovered) {
+                    String tooltipKey = switch (e.mode) {
+                        case 1 -> "ui.economy.container.tooltip.mode_input";
+                        case 2 -> "ui.economy.container.tooltip.mode_output";
+                        default -> "ui.economy.container.tooltip.mode_both";
+                    };
+                    g.renderTooltip(f, Component.translatable(tooltipKey), mx, my);
+                }
             }
         };
     }

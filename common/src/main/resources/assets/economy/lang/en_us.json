@@ -128,6 +128,15 @@
   "ui.economy.container.mode_both": "BOTH",
   "ui.economy.container.mode_input": "INPUT ONLY",
   "ui.economy.container.mode_output": "OUTPUT ONLY",
+  "ui.economy.container.tooltip.active": "This container is available for market storage.",
+  "ui.economy.container.tooltip.full": "This container has no remaining storage capacity.",
+  "ui.economy.container.tooltip.mode_both": "Market automation may both supply and deliver through this container.",
+  "ui.economy.container.tooltip.mode_input": "Market automation may supply stock from this container.",
+  "ui.economy.container.tooltip.mode_output": "Market automation may deliver purchases into this container.",
+
+  "ui.economy.orders.server_seller": "[SERVER] %s",
+  "ui.economy.orders.quantity_infinite": "Qty: ∞",
+  "ui.economy.orders.quantity_progress": "Qty: %s / %s",
 
   "ui.economy.mode.both": "BOTH",
   "ui.economy.mode.input": "INPUT",

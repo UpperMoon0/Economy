@@ -34,6 +34,10 @@ public final class EconomyUiComponents {
     }
 
     /** Draws an absolute-positioned badge with the same semantic contrast contract as OpenUI Badge. */
+    public static int badgeWidth(Font font, String text) {
+        return font.width(text) + 8;
+    }
+
     public static int drawBadge(GuiGraphics g, Font font, String text, int rightX, int y,
                                 Badge.Variant variant, boolean hovered, ColorScheme colors) {
         int background = switch (variant) {
@@ -50,7 +54,7 @@ public final class EconomyUiComponents {
             case DANGER -> colors.danger();
             case NEUTRAL -> colors.border();
         };
-        int width = font.width(text) + 8;
+        int width = badgeWidth(font, text);
         int x = rightX - width;
         UiRender.pill(g, x, y, width, 12, background, border);
         int textColor = variant == Badge.Variant.NEUTRAL ? colors.onSurface() : colors.onPrimary();
