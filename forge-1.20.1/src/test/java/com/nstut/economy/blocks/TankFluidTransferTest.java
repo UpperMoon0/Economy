@@ -8,7 +8,6 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraftforge.fluids.capability.IFluidHandler;
 import net.minecraftforge.fluids.FluidStack;
-import net.minecraftforge.fluids.capability.templates.FluidTank;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -51,10 +50,11 @@ class TankFluidTransferTest extends MinecraftTestBase {
     @Test
     @DisplayName("Draining the final 1,000 mB leaves a truly empty fluid handler")
     void drainsFinalBucketAmountCompletely() {
-        FluidTank tank = new FluidTank(TankBlockEntity.DEFAULT_CAPACITY);
-        tank.setFluid(new FluidStack(Fluids.LAVA, 1000));
+        TankBlockEntity tank = tankEntity();
+        IFluidHandler handler = tank.fluidHandlerForTesting();
+        handler.fill(new FluidStack(Fluids.LAVA, 1000), IFluidHandler.FluidAction.EXECUTE);
 
-        FluidStack drained = tank.drain(1000, IFluidHandler.FluidAction.EXECUTE);
+        FluidStack drained = handler.drain(1000, IFluidHandler.FluidAction.EXECUTE);
 
         assertSame(Fluids.LAVA, drained.getFluid());
         assertEquals(1000, drained.getAmount());
@@ -65,9 +65,10 @@ class TankFluidTransferTest extends MinecraftTestBase {
     @Test
     @DisplayName("Filling a tank deposits exactly 1,000 mB")
     void fillsTankWithBucketAmount() {
-        FluidTank tank = new FluidTank(TankBlockEntity.DEFAULT_CAPACITY);
+        TankBlockEntity tank = tankEntity();
+        IFluidHandler handler = tank.fluidHandlerForTesting();
 
-        int filled = tank.fill(new FluidStack(Fluids.WATER, 1000),
+        int filled = handler.fill(new FluidStack(Fluids.WATER, 1000),
                 IFluidHandler.FluidAction.EXECUTE);
 
         assertEquals(1000, filled);

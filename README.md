@@ -55,6 +55,7 @@ The client UI requires [OpenUI MC](https://github.com/UpperMoon0/OpenUI-MC), whi
 - Uses a centered custom screen with a tiled/cropped fluid texture and a single `current / maximum` amount display.
 - Renders its fluid on the Tank's front face using the fluid's true texture proportions.
 - Supports the same `BOTH`, `INPUT ONLY`, and `OUTPUT ONLY` market behavior as Vaults.
+- Storage modes govern market supply and delivery; direct inventory and fluid automation remains available independently.
 - Includes its block/item model, texture, recipe, loot table, mining tags, and creative-tab entry.
 
 #### Containers Tab

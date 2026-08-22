@@ -16,8 +16,8 @@ class ContainerScreenGeometryTest {
                 TankMenu.IMAGE_WIDTH - 16, TankScreen.FLUID_PANEL_HEIGHT);
         Rect inventoryLabel = new Rect(TankMenu.PLAYER_INV_X,
                 TankScreen.INVENTORY_LABEL_Y, 60, LABEL_HEIGHT);
-        Rect playerPanel = new Rect(51, TankScreen.PLAYER_PANEL_Y,
-                178, TankScreen.PLAYER_PANEL_HEIGHT);
+        Rect playerPanel = new Rect(TankScreen.PLAYER_PANEL_X, TankScreen.PLAYER_PANEL_Y,
+                TankScreen.PLAYER_PANEL_WIDTH, TankScreen.PLAYER_PANEL_HEIGHT);
         Rect firstPlayerSlot = new Rect(TankMenu.PLAYER_INV_X - 1,
                 TankMenu.PLAYER_INV_Y - 1, SLOT_SIZE, SLOT_SIZE);
         Rect transferSlot = new Rect(TankMenu.TRANSFER_SLOT_X,
@@ -42,8 +42,8 @@ class ContainerScreenGeometryTest {
                 VaultMenu.IMAGE_WIDTH - 20, VaultScreen.STORAGE_PANEL_HEIGHT);
         Rect inventoryLabel = new Rect(VaultMenu.PLAYER_INV_X,
                 VaultScreen.INVENTORY_LABEL_Y, 60, LABEL_HEIGHT);
-        Rect playerPanel = new Rect(88, VaultScreen.PLAYER_PANEL_Y,
-                180, VaultScreen.PLAYER_PANEL_HEIGHT);
+        Rect playerPanel = new Rect(VaultScreen.PLAYER_PANEL_X, VaultScreen.PLAYER_PANEL_Y,
+                VaultScreen.PLAYER_PANEL_WIDTH, VaultScreen.PLAYER_PANEL_HEIGHT);
         Rect firstPlayerSlot = new Rect(VaultMenu.PLAYER_INV_X - 1,
                 VaultMenu.PLAYER_INV_Y - 1, SLOT_SIZE, SLOT_SIZE);
 

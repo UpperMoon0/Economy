@@ -132,7 +132,7 @@ jobs:
               changelog: $changelog,
               changelogType: "markdown",
               displayName: $displayName,
-              gameVersionNames: ["1.20.1", "Forge", "Java 17", "Client"],
+              gameVersionNames: ["1.20.1", "Forge", "Java 17", "Client", "Server"],
               releaseType: "release",
               relations: {
                 projects: [{

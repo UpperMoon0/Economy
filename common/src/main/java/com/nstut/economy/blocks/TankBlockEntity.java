@@ -5,8 +5,6 @@ import net.minecraft.core.Direction;
 import net.minecraft.core.NonNullList;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
-import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.Container;
 import net.minecraft.world.ContainerHelper;
 import net.minecraft.world.SimpleContainer;
@@ -99,7 +97,7 @@ public class TankBlockEntity extends BlockEntity implements Container {
         if (this.fluid.getAmount() > this.capacity) {
             this.fluid.setAmount(this.capacity);
         }
-        syncStateToClients("setCapacity");
+        syncStateToClients();
     }
 
     public int getCapacity() {
@@ -119,7 +117,7 @@ public class TankBlockEntity extends BlockEntity implements Container {
         if (this.fluid.getAmount() > capacity) {
             this.fluid.setAmount(capacity);
         }
-        syncStateToClients("setFluid");
+        syncStateToClients();
     }
 
     public int fill(FluidStack resource) {
@@ -134,11 +132,11 @@ public class TankBlockEntity extends BlockEntity implements Container {
         if (fluid.isEmpty()) {
             fluid = resource.copy();
             fluid.setAmount(amount);
-            syncStateToClients("fill-empty");
+            syncStateToClients();
             return amount;
         }
         fluid.grow(amount);
-        syncStateToClients("fill-existing");
+        syncStateToClients();
         return amount;
     }
 
@@ -154,7 +152,7 @@ public class TankBlockEntity extends BlockEntity implements Container {
         if (action.execute()) {
             fluid.shrink(drained);
             if (fluid.getAmount() <= 0) fluid = FluidStack.EMPTY;
-            syncStateToClients("drain");
+            syncStateToClients();
         }
         return result;
     }
@@ -188,43 +186,18 @@ public class TankBlockEntity extends BlockEntity implements Container {
 
     public void handleBucketTransfer() {
         ItemStack bucketStack = items.get(0);
-        com.nstut.Economy.LOGGER.debug(
-                "[TankTransfer] handle start side={} pos={} slot={} tank={}",
-                sideName(), worldPosition, describeStack(bucketStack), describeFluid(fluid));
-        if (level == null) {
-            com.nstut.Economy.LOGGER.debug("[TankTransfer] handle stop: block entity has no level");
-            return;
-        }
-        if (level.isClientSide) {
-            com.nstut.Economy.LOGGER.debug("[TankTransfer] handle stop: client prediction only; waiting for server");
-            return;
-        }
-        if (bucketStack.isEmpty()) {
-            com.nstut.Economy.LOGGER.debug("[TankTransfer] handle stop: processing slot is empty");
-            return;
-        }
+        if (level == null || level.isClientSide || bucketStack.isEmpty()) return;
 
         net.minecraftforge.fluids.capability.IFluidHandlerItem itemHandler = net.minecraftforge.fluids.FluidUtil.getFluidHandler(bucketStack).orElse(null);
-        if (itemHandler == null) {
-            com.nstut.Economy.LOGGER.debug("[TankTransfer] handle stop: slot item has no fluid capability");
-            return;
-        }
-        com.nstut.Economy.LOGGER.debug(
-                "[TankTransfer] item capability tanks={} contents={}",
-                itemHandler.getTanks(), describeHandler(itemHandler));
+        if (itemHandler == null) return;
 
         net.minecraftforge.fluids.capability.templates.FluidTank tankHandler =
                 new net.minecraftforge.fluids.capability.templates.FluidTank(capacity);
         tankHandler.setFluid(fluid.copy());
 
-        int beforeEmptyAttempt = tankHandler.getFluidAmount();
         net.minecraftforge.fluids.FluidActionResult emptyResult =
                 net.minecraftforge.fluids.FluidUtil.tryEmptyContainer(
                         bucketStack.copy(), tankHandler, Integer.MAX_VALUE, null, true);
-        com.nstut.Economy.LOGGER.debug(
-                "[TankTransfer] empty-container attempt success={} input={} result={} tankBefore={} tankAfter={} tankFluid={}",
-                emptyResult.isSuccess(), describeStack(bucketStack), describeStack(emptyResult.getResult()),
-                beforeEmptyAttempt, tankHandler.getFluidAmount(), describeFluid(tankHandler.getFluid()));
         if (emptyResult.isSuccess()) {
             commitContainerTransfer(emptyResult.getResult(), tankHandler.getFluid());
             return;
@@ -233,89 +206,28 @@ public class TankBlockEntity extends BlockEntity implements Container {
         if (!fluid.isEmpty()) {
             tankHandler = new net.minecraftforge.fluids.capability.templates.FluidTank(capacity);
             tankHandler.setFluid(fluid.copy());
-            int beforeFillAttempt = tankHandler.getFluidAmount();
             net.minecraftforge.fluids.FluidActionResult fillResult =
                     net.minecraftforge.fluids.FluidUtil.tryFillContainer(
                             bucketStack.copy(), tankHandler, Integer.MAX_VALUE, null, true);
-            com.nstut.Economy.LOGGER.debug(
-                    "[TankTransfer] fill-container attempt success={} input={} result={} tankBefore={} tankAfter={} tankFluid={}",
-                    fillResult.isSuccess(), describeStack(bucketStack), describeStack(fillResult.getResult()),
-                    beforeFillAttempt, tankHandler.getFluidAmount(), describeFluid(tankHandler.getFluid()));
             if (fillResult.isSuccess()) {
                 commitContainerTransfer(fillResult.getResult(), tankHandler.getFluid());
-            } else {
-                com.nstut.Economy.LOGGER.debug("[TankTransfer] handle stop: neither empty nor fill operation succeeded");
             }
-        } else {
-            com.nstut.Economy.LOGGER.debug("[TankTransfer] fill-container skipped: tank is empty");
         }
     }
 
     private void commitContainerTransfer(ItemStack resultContainer, FluidStack resultingFluid) {
-        ItemStack previousContainer = items.get(0).copy();
-        FluidStack previousFluid = fluid.copy();
-        com.nstut.Economy.LOGGER.debug(
-                "[TankTransfer] commit start side={} pos={} slot {} -> {} tank {} -> {}",
-                sideName(), worldPosition, describeStack(previousContainer), describeStack(resultContainer),
-                describeFluid(previousFluid), describeFluid(resultingFluid));
         fluid = resultingFluid.copy();
         items.set(0, resultContainer.copy());
-        syncStateToClients("container-transfer");
-        com.nstut.Economy.LOGGER.debug(
-                "[TankTransfer] commit complete slot={} tank={} changed=true blockUpdate=true",
-                describeStack(items.get(0)), describeFluid(fluid));
+        syncStateToClients();
     }
 
-    private void syncStateToClients(String reason) {
+    private void syncStateToClients() {
         setChanged();
         if (!(level instanceof net.minecraft.server.level.ServerLevel serverLevel)) {
             return;
         }
 
         serverLevel.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 3);
-        ClientboundBlockEntityDataPacket packet = getUpdatePacket();
-        int recipients = 0;
-        for (net.minecraft.server.level.ServerPlayer player : serverLevel.players()) {
-            player.connection.send(packet);
-            recipients++;
-        }
-        com.nstut.Economy.LOGGER.debug(
-                "[TankTransfer] explicit sync reason={} pos={} recipients={} slot={} tank={}",
-                reason, worldPosition, recipients, describeStack(items.get(0)), describeFluid(fluid));
-    }
-
-    private String sideName() {
-        if (level == null) return "NO_LEVEL";
-        return level.isClientSide ? "CLIENT" : "SERVER";
-    }
-
-    public static String describeStack(ItemStack stack) {
-        if (stack == null || stack.isEmpty()) return "EMPTY";
-        ResourceLocation itemId = BuiltInRegistries.ITEM.getKey(stack.getItem());
-        StringBuilder result = new StringBuilder(String.valueOf(itemId))
-                .append(" x").append(stack.getCount());
-        net.minecraftforge.fluids.capability.IFluidHandlerItem handler =
-                net.minecraftforge.fluids.FluidUtil.getFluidHandler(stack).orElse(null);
-        if (handler != null) {
-            result.append(" fluid=").append(describeHandler(handler));
-        }
-        return result.toString();
-    }
-
-    private static String describeHandler(net.minecraftforge.fluids.capability.IFluidHandler handler) {
-        if (handler == null || handler.getTanks() <= 0) return "[]";
-        StringBuilder result = new StringBuilder("[");
-        for (int tank = 0; tank < handler.getTanks(); tank++) {
-            if (tank > 0) result.append(", ");
-            result.append(describeFluid(handler.getFluidInTank(tank)))
-                    .append("/cap=").append(handler.getTankCapacity(tank));
-        }
-        return result.append(']').toString();
-    }
-
-    public static String describeFluid(FluidStack stack) {
-        if (stack == null || stack.isEmpty()) return "EMPTY";
-        return BuiltInRegistries.FLUID.getKey(stack.getFluid()) + " " + stack.getAmount() + "mB";
     }
 
     public TankMode getMode() {
@@ -324,7 +236,7 @@ public class TankBlockEntity extends BlockEntity implements Container {
 
     public void setMode(TankMode mode) {
         this.mode = mode != null ? mode : TankMode.BOTH;
-        syncStateToClients("setMode");
+        syncStateToClients();
     }
 
     public void cycleMode() {
@@ -354,47 +266,30 @@ public class TankBlockEntity extends BlockEntity implements Container {
 
     @Override
     public @NotNull ItemStack removeItem(int slot, int amount) {
-        ItemStack before = items.get(slot).copy();
         ItemStack result = ContainerHelper.removeItem(items, slot, amount);
         if (!result.isEmpty()) {
             setChanged();
-            com.nstut.Economy.LOGGER.debug(
-                    "[TankTransfer] removeItem side={} pos={} slot={} requested={} before={} removed={} after={} tank={}",
-                    sideName(), worldPosition, slot, amount, describeStack(before), describeStack(result),
-                    describeStack(items.get(slot)), describeFluid(fluid));
         }
         return result;
     }
 
     @Override
     public @NotNull ItemStack removeItemNoUpdate(int slot) {
-        ItemStack before = items.get(slot).copy();
         ItemStack result = ContainerHelper.takeItem(items, slot);
         if (!result.isEmpty()) {
             setChanged();
-            com.nstut.Economy.LOGGER.debug(
-                    "[TankTransfer] removeItemNoUpdate side={} pos={} slot={} before={} removed={} after={} tank={}",
-                    sideName(), worldPosition, slot, describeStack(before), describeStack(result),
-                    describeStack(items.get(slot)), describeFluid(fluid));
         }
         return result;
     }
 
     @Override
     public void setItem(int slot, @NotNull ItemStack stack) {
-        ItemStack before = items.get(slot).copy();
-        com.nstut.Economy.LOGGER.debug(
-                "[TankTransfer] setItem side={} pos={} slot={} before={} incoming={} tank={}",
-                sideName(), worldPosition, slot, describeStack(before), describeStack(stack), describeFluid(fluid));
         items.set(slot, stack);
         if (stack.getCount() > getMaxStackSize()) {
             stack.setCount(getMaxStackSize());
         }
         setChanged();
         handleBucketTransfer();
-        com.nstut.Economy.LOGGER.debug(
-                "[TankTransfer] setItem complete side={} pos={} slot={} stored={} tank={}",
-                sideName(), worldPosition, slot, describeStack(items.get(slot)), describeFluid(fluid));
     }
 
     @Override
@@ -482,10 +377,6 @@ public class TankBlockEntity extends BlockEntity implements Container {
 
     @Override
     public void handleUpdateTag(CompoundTag tag) {
-        com.nstut.Economy.LOGGER.debug(
-                "[TankTransfer] handleUpdateTag start side={} pos={} slot={} tank={} tagHasItems={} tagHasFluid={}",
-                sideName(), worldPosition, describeStack(items.get(0)), describeFluid(fluid),
-                tag.contains("Items"), tag.contains("Fluid"));
         super.handleUpdateTag(tag);
         items = NonNullList.withSize(CONTAINER_SIZE, ItemStack.EMPTY);
         ContainerHelper.loadAllItems(tag, items);
@@ -499,9 +390,6 @@ public class TankBlockEntity extends BlockEntity implements Container {
         if (tag.contains("Mode")) {
             mode = TankMode.byId(tag.getInt("Mode"));
         }
-        com.nstut.Economy.LOGGER.debug(
-                "[TankTransfer] handleUpdateTag complete side={} pos={} slot={} tank={}",
-                sideName(), worldPosition, describeStack(items.get(0)), describeFluid(fluid));
     }
 
     static FluidStack loadFluidFromTag(CompoundTag tag) {

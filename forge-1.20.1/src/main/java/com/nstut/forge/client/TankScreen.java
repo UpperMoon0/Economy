@@ -28,6 +28,8 @@ public class TankScreen extends EconomyUiContainerScreen<TankMenu> {
     static final int FLUID_PANEL_Y = 31;
     static final int FLUID_PANEL_HEIGHT = 54;
     static final int INVENTORY_LABEL_Y = 87;
+    static final int PLAYER_PANEL_X = TankMenu.PLAYER_INV_X - 8;
+    static final int PLAYER_PANEL_WIDTH = 9 * 18 + 16;
     static final int PLAYER_PANEL_Y = 99;
     static final int PLAYER_PANEL_HEIGHT = 79;
     static final int TRANSFER_TITLE_X = TankMenu.TRANSFER_SLOT_X;
@@ -73,7 +75,7 @@ public class TankScreen extends EconomyUiContainerScreen<TankMenu> {
 
         UiRender.surface(g, x + 8, y + FLUID_PANEL_Y, imageWidth - 16, FLUID_PANEL_HEIGHT,
                 panelRadius, c.surface(), c.borderSubtle(), false, c);
-        UiRender.surface(g, x + 51, y + PLAYER_PANEL_Y, 178, PLAYER_PANEL_HEIGHT,
+        UiRender.surface(g, x + PLAYER_PANEL_X, y + PLAYER_PANEL_Y, PLAYER_PANEL_WIDTH, PLAYER_PANEL_HEIGHT,
                 panelRadius, c.surface(), c.borderSubtle(), false, c);
         for (Slot slot : menu.slots) {
             UiRender.slot(g, x + slot.x - 1, y + slot.y - 1, 18, 18, c);
@@ -84,7 +86,7 @@ public class TankScreen extends EconomyUiContainerScreen<TankMenu> {
         String hint = Component.translatable("ui.economy.tank.transfer_hint").getString();
         int hintX = x + TRANSFER_HINT_X;
         int hintWidth = Math.max(1, x + imageWidth - 10 - hintX);
-        hint = font.plainSubstrByWidth(hint, hintWidth);
+        hint = MarketScreen.fitText(font, hint, hintWidth);
         UiRender.text(g, font, hint, hintX, y + TRANSFER_HINT_Y, c.onSurface());
     }
 
@@ -141,7 +143,8 @@ public class TankScreen extends EconomyUiContainerScreen<TankMenu> {
             UiRender.text(g, f, f.plainSubstrByWidth(name, Math.max(1, width)), x, y + 4, c.onSurface());
             String amountText = EconomyFormatUtil.formatFluidAmount(amount) + " / " + EconomyFormatUtil.formatFluidAmount(capacity);
             UiRender.text(g, f, f.plainSubstrByWidth(amountText, Math.max(1, width)), x, y + 18, c.onSurfaceMuted());
-            String percentText = String.format(java.util.Locale.ROOT, "%.1f%% full", fill * 100.0F);
+            String percentText = Component.translatable("ui.economy.tank.percent_full",
+                    String.format(java.util.Locale.ROOT, "%.1f%%", fill * 100.0F)).getString();
             UiRender.text(g, f, percentText, x, y + 32, c.onSurfaceMuted());
         }
     }

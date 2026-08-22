@@ -82,6 +82,8 @@ Every Vault and Fluid Tank can be assigned a market mode:
 
 Use these modes to control exactly how each storage block participates in your market network.
 
+Storage modes govern market supply and delivery. Compatible direct inventory and fluid automation remains available regardless of market mode.
+
 ---
 
 ## Containers Overview

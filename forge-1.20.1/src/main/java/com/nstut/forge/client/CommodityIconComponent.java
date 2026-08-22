@@ -28,7 +28,6 @@ import java.util.Map;
 public class CommodityIconComponent extends UIComponent {
     private String commodityId;
     private static final Map<String, ItemStack> ITEM_CACHE = new HashMap<>();
-    private static final Map<String, TextureAtlasSprite> FLUID_CACHE = new HashMap<>();
 
     public CommodityIconComponent(String commodityId) {
         this.commodityId = commodityId;
@@ -62,10 +61,9 @@ public class CommodityIconComponent extends UIComponent {
         if (commodityId == null || commodityId.isEmpty()) return;
         Fluid fluid = BuiltInRegistries.FLUID.get(new ResourceLocation(commodityId));
         if (fluid != net.minecraft.world.level.material.Fluids.EMPTY && !fluid.getFluidType().isAir()) {
-            TextureAtlasSprite sprite = FLUID_CACHE.computeIfAbsent(commodityId, id -> {
-                ResourceLocation still = IClientFluidTypeExtensions.of(fluid).getStillTexture();
-                return Minecraft.getInstance().getTextureAtlas(TextureAtlas.LOCATION_BLOCKS).apply(still);
-            });
+            ResourceLocation still = IClientFluidTypeExtensions.of(fluid).getStillTexture();
+            TextureAtlasSprite sprite = Minecraft.getInstance()
+                    .getTextureAtlas(TextureAtlas.LOCATION_BLOCKS).apply(still);
             int tint = IClientFluidTypeExtensions.of(fluid).getTintColor();
             float r = ((tint >> 16) & 0xFF) / 255f;
             float gr = ((tint >> 8) & 0xFF) / 255f;
@@ -81,7 +79,15 @@ public class CommodityIconComponent extends UIComponent {
                 Item item = BuiltInRegistries.ITEM.get(new ResourceLocation(id));
                 return new ItemStack(item);
             });
-            g.renderItem(icon, x, y);
+            float scale = Math.min(w, h) / 16.0F;
+            if (scale <= 0.0F) return;
+            float drawWidth = 16.0F * scale;
+            float drawHeight = 16.0F * scale;
+            g.pose().pushPose();
+            g.pose().translate(x + (w - drawWidth) / 2.0F, y + (h - drawHeight) / 2.0F, 0.0F);
+            g.pose().scale(scale, scale, 1.0F);
+            g.renderItem(icon, 0, 0);
+            g.pose().popPose();
         }
     }
 }

@@ -82,40 +82,7 @@ public class TankMenu extends AbstractContainerMenu {
     }
 
     @Override
-    public void clicked(int slotId, int button, @NotNull ClickType clickType, @NotNull Player player) {
-        String side = player.level().isClientSide ? "CLIENT" : "SERVER";
-        String clickedBefore = slotId >= 0 && slotId < slots.size()
-                ? TankBlockEntity.describeStack(slots.get(slotId).getItem())
-                : "OUTSIDE";
-        com.nstut.Economy.LOGGER.debug(
-                "[TankTransfer] menu click start side={} player={} menuId={} slotId={} button={} clickType={} clicked={} carried={} processSlot={} tank={}",
-                side, player.getScoreboardName(), containerId, slotId, button, clickType,
-                clickedBefore, TankBlockEntity.describeStack(getCarried()),
-                TankBlockEntity.describeStack(slots.get(0).getItem()), describeTankFluid());
-        super.clicked(slotId, button, clickType, player);
-        String clickedAfter = slotId >= 0 && slotId < slots.size()
-                ? TankBlockEntity.describeStack(slots.get(slotId).getItem())
-                : "OUTSIDE";
-        com.nstut.Economy.LOGGER.debug(
-                "[TankTransfer] menu click complete side={} player={} menuId={} slotId={} clicked={} carried={} processSlot={} tank={}",
-                side, player.getScoreboardName(), containerId, slotId, clickedAfter,
-                TankBlockEntity.describeStack(getCarried()),
-                TankBlockEntity.describeStack(slots.get(0).getItem()), describeTankFluid());
-    }
-
-    private String describeTankFluid() {
-        return tankBlockEntity == null
-                ? "NO_BLOCK_ENTITY"
-                : TankBlockEntity.describeFluid(tankBlockEntity.getFluid());
-    }
-
-    @Override
     public @NotNull ItemStack quickMoveStack(@NotNull Player player, int index) {
-        com.nstut.Economy.LOGGER.debug(
-                "[TankTransfer] quickMove start side={} player={} menuId={} index={} source={} processSlot={} tank={}",
-                player.level().isClientSide ? "CLIENT" : "SERVER", player.getScoreboardName(), containerId,
-                index, index >= 0 && index < slots.size() ? TankBlockEntity.describeStack(slots.get(index).getItem()) : "OUTSIDE",
-                TankBlockEntity.describeStack(slots.get(0).getItem()), describeTankFluid());
         ItemStack result = ItemStack.EMPTY;
         Slot slot = this.slots.get(index);
         if (slot.hasItem()) {
@@ -134,11 +101,6 @@ public class TankMenu extends AbstractContainerMenu {
                 slot.setChanged();
             }
         }
-        com.nstut.Economy.LOGGER.debug(
-                "[TankTransfer] quickMove complete side={} player={} menuId={} index={} result={} processSlot={} tank={}",
-                player.level().isClientSide ? "CLIENT" : "SERVER", player.getScoreboardName(), containerId,
-                index, TankBlockEntity.describeStack(result),
-                TankBlockEntity.describeStack(slots.get(0).getItem()), describeTankFluid());
         return result;
     }
 

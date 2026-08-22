@@ -110,6 +110,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
     private final List<Subscription> subscriptions = new ArrayList<>();
     private final Signal<List<ItemSearchResult>> searchResults = Signals.of(List.of());
     private Subscription itemSearchSubscription;
+    private boolean initialDataRequested;
 
     private <T> Computed<T> computed(java.util.function.Supplier<T> s) {
         Computed<T> c = Signals.computed(s);
@@ -129,7 +130,9 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         if (d != null && d.chart != null) {
             for (MarketNetwork.ChartPoint p : d.chart) {
                 out.add(new ChartSample(p.price, CHART_TIME_FMT.format(new Date(p.timestamp))
-                        + "\nPrice: $" + p.price + "\nVolume: " + formatQty(p.quantity, isFluidCommodity(d.itemId))));
+                        + "\n" + Component.translatable("ui.economy.chart.tooltip.price", p.price).getString()
+                        + "\n" + Component.translatable("ui.economy.chart.tooltip.volume",
+                        formatQty(p.quantity, isFluidCommodity(d.itemId))).getString()));
             }
         }
         return out;
@@ -139,9 +142,12 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         List<ChartSample> out = new ArrayList<>();
         for (MarketNetwork.PortfolioPointData p : pts) {
             out.add(new ChartSample(Double.parseDouble(p.netWorth),
-                    "Net Worth: " + formatCompact(Double.parseDouble(p.netWorth))
-                            + "\nCash: " + formatCompact(Double.parseDouble(p.balance))
-                            + "  |  Assets: " + formatCompact(Double.parseDouble(p.assets))));
+                    Component.translatable("ui.economy.chart.tooltip.net_worth",
+                            formatCompact(Double.parseDouble(p.netWorth))).getString()
+                            + "\n" + Component.translatable("ui.economy.chart.tooltip.cash",
+                            formatCompact(Double.parseDouble(p.balance))).getString()
+                            + "  |  " + Component.translatable("ui.economy.chart.tooltip.assets",
+                            formatCompact(Double.parseDouble(p.assets))).getString()));
         }
         return out;
     });
@@ -217,8 +223,11 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         this.imageWidth = Math.max(1, Math.min(SCREEN_W, this.width - 16));
         this.imageHeight = Math.max(1, Math.min(SCREEN_H, this.height - 16));
         super.init();
-        MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestRefreshPacket());
-        MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestPortfolioPacket());
+        if (!initialDataRequested) {
+            initialDataRequested = true;
+            MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestRefreshPacket());
+            MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestPortfolioPacket());
+        }
     }
 
     @Override

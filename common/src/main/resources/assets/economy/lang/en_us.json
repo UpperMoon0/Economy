@@ -147,10 +147,16 @@
   "ui.economy.tank.transfer": "TRANSFER",
   "ui.economy.tank.transfer_hint": "Container",
   "ui.economy.tank.empty": "Empty tank",
+  "ui.economy.tank.percent_full": "%s full",
 
   "ui.economy.chart.no_data": "Not enough data points yet",
   "ui.economy.chart.live": "LIVE",
   "ui.economy.chart.live_scroll": "▶ LIVE",
+  "ui.economy.chart.tooltip.price": "Price: %s",
+  "ui.economy.chart.tooltip.volume": "Volume: %s",
+  "ui.economy.chart.tooltip.net_worth": "Net Worth: %s",
+  "ui.economy.chart.tooltip.cash": "Cash: %s",
+  "ui.economy.chart.tooltip.assets": "Assets: %s",
 
   "ui.economy.direction.to": "to",
   "ui.economy.direction.from": "from",
