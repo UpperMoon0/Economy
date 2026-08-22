@@ -25,6 +25,8 @@ import net.minecraftforge.fluids.FluidStack;
 
 /** Fixed-geometry vanilla container with OpenUI chrome layered around real slots. */
 public class TankScreen extends EconomyUiContainerScreen<TankMenu> {
+    private static final int TRANSFER_SECTION_WIDTH = 90;
+
     private ButtonWidget modeBtn;
     private FluidTankComponent tankComponent;
     private TankBlockEntity.TankMode currentMode;
@@ -61,9 +63,9 @@ public class TankScreen extends EconomyUiContainerScreen<TankMenu> {
         int panelRadius = radii().medium();
 
         UiRender.surface(g, x + 8, y + 31, imageWidth - 16, 61,
-                panelRadius, c.input(), c.borderSubtle(), c);
+                panelRadius, c.surface(), c.borderSubtle(), false, c);
         UiRender.surface(g, x + 51, y + 96, 178, 82,
-                panelRadius, c.input(), c.borderSubtle(), c);
+                panelRadius, c.input(), c.borderSubtle(), false, c);
         for (Slot slot : menu.slots) {
             UiRender.slot(g, x + slot.x - 1, y + slot.y - 1, 18, 18, c);
         }
@@ -83,25 +85,31 @@ public class TankScreen extends EconomyUiContainerScreen<TankMenu> {
         FluidStack initial = tank != null ? tank.getFluid() : FluidStack.EMPTY;
         int capacity = tank != null ? tank.getCapacity() : TankBlockEntity.DEFAULT_CAPACITY;
         tankComponent = new FluidTankComponent(initial, capacity);
-        tankComponent.width(48).height(48);
+        tankComponent.width(40).height(48);
         body.addChild(tankComponent);
 
         UIComponent info = new TankInfoText();
         info.flex();
         body.addChild(info);
 
-        VStack transfer = new VStack().gap(1);
-        transfer.width(78);
+        VStack transfer = new VStack().gap(2);
+        transfer.width(TRANSFER_SECTION_WIDTH);
         transfer.addChild(Ui.text(Component.translatable("ui.economy.tank.transfer")).style(TextStyle.CAPTION));
-        transfer.addChild(Ui.spacer().height(18)); // reserved for the real vanilla transfer slot
-        transfer.addChild(Ui.text(Component.translatable("ui.economy.tank.transfer_hint")).style(TextStyle.CAPTION));
+        HStack transferRow = new HStack().gap(5).align(Alignment.CENTER);
+        transferRow.height(18);
+        // The first 18px corresponds to the fixed vanilla transfer slot.
+        transferRow.addChild(Ui.spacer().width(18));
+        UIComponent hint = Ui.text(Component.translatable("ui.economy.tank.transfer_hint")).style(TextStyle.CAPTION);
+        hint.flex();
+        transferRow.addChild(hint);
+        transfer.addChild(transferRow);
         body.addChild(transfer);
 
         VStack root = new VStack().gap(2);
         root.addChild(header);
         root.addChild(Ui.text(Component.translatable("ui.economy.tank.subtitle")).style(TextStyle.CAPTION));
         root.addChild(body);
-        return Ui.padding(Insets.of(5, 10, 6, 10), root);
+        return Ui.padding(Insets.only(5, 10, 6, 10), root);
     }
 
     private final class TankInfoText extends UIComponent {

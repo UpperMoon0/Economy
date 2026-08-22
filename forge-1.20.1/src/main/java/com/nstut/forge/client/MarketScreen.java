@@ -1025,8 +1025,8 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                         HistorySort.HIGHEST_TOTAL, t("ui.economy.opt.highest_total"))));
         v.addChild(bar);
         UIComponent historyList = Ui.switcher(historyEmpty)
-                .when(false, () -> Ui.list(visibleHistory, this::buildHistoryRow)
-                        .key(e -> e.orderId)
+                        .when(false, () -> Ui.list(visibleHistory, this::buildHistoryRow)
+                        .key(e -> e.itemId + ":" + e.timestamp + ":" + e.counterparty)
                         .itemHeight(28)
                         .flex())
                 .when(true, () -> Ui.emptyState(Component.translatable("ui.economy.empty.no_trades")));
@@ -1212,6 +1212,74 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         @Override public int preferredWidth(Font f) { return 0; }
         @Override public int preferredHeight(Font f) { return showBalance ? 48 : 40; }
 
+        private final class ChartLayout {
+            final double min, max, graphMin, graphRange;
+            final int plotLeft, plotRight, plotTop, plotBottom;
+            final int liveX, liveY, liveW, liveH, badgeX, badgeY, badgeW, badgeH;
+            final String liveText, currentText;
+
+            ChartLayout(Font f, List<ChartSample> points, int off) {
+                double low = Double.POSITIVE_INFINITY;
+                double high = Double.NEGATIVE_INFINITY;
+                for (ChartSample point : points) {
+                    low = Math.min(low, point.value);
+                    high = Math.max(high, point.value);
+                }
+                min = low;
+                max = high;
+                double rawRange = max - min;
+                double padding = rawRange <= 0.0
+                        ? Math.max(1.0, Math.abs(max) * 0.05)
+                        : Math.max(1.0, rawRange * 0.08);
+                graphMin = min >= 0 ? Math.max(0.0, min - padding) : min - padding;
+                double graphMax = max + padding;
+                graphRange = Math.max(1.0, graphMax - graphMin);
+
+                currentText = formatCompact(points.get(points.size() - 1).value);
+                badgeW = f.width(currentText) + 8;
+                badgeH = 12;
+                badgeX = x + width - badgeW - 4;
+                liveText = off == 0 ? t("ui.economy.chart.live") : t("ui.economy.chart.live_scroll");
+                liveW = f.width(liveText) + 6;
+                liveH = 11;
+                liveX = badgeX - liveW - 4;
+                liveY = y + 2;
+                int axisWidth = Math.max(f.width(formatCompact(max)), f.width(formatCompact(min))) + 8;
+                plotLeft = x + axisWidth;
+                plotRight = Math.max(plotLeft + 1, liveX - 6);
+                plotTop = y + 14;
+                plotBottom = Math.max(plotTop + 1, y + height - 9);
+                int latestY = valueToY(points.get(points.size() - 1).value);
+                badgeY = Math.max(y + 2, Math.min(y + height - badgeH - 2, latestY - badgeH / 2));
+            }
+
+            int pointX(int index, int count) {
+                return plotLeft + index * (plotRight - plotLeft) / Math.max(1, count - 1);
+            }
+
+            int valueToY(double value) {
+                return plotBottom - (int) Math.round((value - graphMin) / graphRange * (plotBottom - plotTop));
+            }
+        }
+
+        private List<ChartSample> visiblePoints(List<ChartSample> points, int off) {
+            int end = Math.min(points.size(), Math.max(MAX_VISIBLE_CHART_STEPS, points.size() - off));
+            return points.subList(Math.max(0, end - MAX_VISIBLE_CHART_STEPS), end);
+        }
+
+        private static void drawChartLine(GuiGraphics g, int x0, int y0, int x1, int y1, int color) {
+            int dx = Math.abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
+            int dy = -Math.abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
+            int error = dx + dy;
+            while (true) {
+                g.fill(x0, y0, x0 + 1, y0 + 1, color);
+                if (x0 == x1 && y0 == y1) return;
+                int twiceError = error * 2;
+                if (twiceError >= dy) { error += dy; x0 += sx; }
+                if (twiceError <= dx) { error += dx; y0 += sy; }
+            }
+        }
+
         @Override public void render(GuiGraphics g, Font f, int mx, int my, float pt) {
             ColorScheme c = uiRuntime().theme().colors();
             UiRender.surface(g, x, y, width, height, 4, c.input(), c.borderSubtle(), false, c);
@@ -1223,49 +1291,38 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
             int total = pts.size();
             int maxOff = Math.max(0, total - MAX_VISIBLE_CHART_STEPS);
             int off = Math.min(offset.get(), maxOff);
-            int end = Math.min(total, Math.max(MAX_VISIBLE_CHART_STEPS, total - off));
-            int start = Math.max(0, end - MAX_VISIBLE_CHART_STEPS);
-            List<ChartSample> vis = pts.subList(start, end);
-            double max = Double.MIN_VALUE, min = Double.MAX_VALUE;
-            for (ChartSample s : vis) { if (s.value > max) max = s.value; if (s.value < min) min = s.value; }
-            if (max == min) { max += 10; min = Math.max(0, min - 10); }
-            double range = max - min;
-            g.drawString(f, formatCompact(max), x + 3, y + 3, c.onSurfaceMuted());
-            g.drawString(f, formatCompact(min), x + 3, y + height - 11, c.onSurfaceMuted());
-            double cur = vis.get(vis.size() - 1).value;
-            String curStr = formatCompact(cur);
-            int badgeW = f.width(curStr) + 8, badgeH = 12;
-            int badgeX = x + width - badgeW - 4;
-            int rawY = y + height - 6 - (int) ((cur - min) / range * (height - 12));
-            int badgeY = Math.max(y + 2, Math.min(y + height - badgeH - 2, rawY - 5));
-            String liveStr = off == 0 ? t("ui.economy.chart.live") : t("ui.economy.chart.live_scroll");
-            int liveW = f.width(liveStr) + 6, liveX = badgeX - liveW - 4, liveY = y + 2, liveH = 11;
-            boolean liveHov = mx >= liveX && mx < liveX + liveW && my >= liveY && my < liveY + liveH;
-            UiRender.pill(g, liveX, liveY, liveW, liveH, off > 0 ? (liveHov ? c.successHover() : c.successDeep()) : (liveHov ? c.surfaceRaised() : c.primaryDim()), off > 0 ? c.success() : c.primary());
-            g.drawString(f, liveStr, liveX + 3, liveY + 2, off > 0 ? 0xFFFFFFFF : c.primary());
-            int chartLeft = x + 26, chartRight = liveX - 4;
+            List<ChartSample> vis = visiblePoints(pts, off);
+            ChartLayout layout = new ChartLayout(f, vis, off);
+            g.drawString(f, formatCompact(layout.max), x + 3, y + 3, c.onSurfaceMuted());
+            g.drawString(f, formatCompact(layout.min), x + 3, y + height - 11, c.onSurfaceMuted());
+            boolean liveHov = mx >= layout.liveX && mx < layout.liveX + layout.liveW && my >= layout.liveY && my < layout.liveY + layout.liveH;
+            UiRender.pill(g, layout.liveX, layout.liveY, layout.liveW, layout.liveH, off > 0 ? (liveHov ? c.successHover() : c.successDeep()) : (liveHov ? c.surfaceRaised() : c.primaryDim()), off > 0 ? c.success() : c.primary());
+            g.drawString(f, layout.liveText, layout.liveX + 3, layout.liveY + 2, off > 0 ? 0xFFFFFFFF : c.primary());
+            int guide = UiRender.alpha(c.borderSubtle(), 90);
+            int middle = (layout.plotTop + layout.plotBottom) / 2;
+            g.fill(layout.plotLeft, layout.plotTop, layout.plotRight, layout.plotTop + 1, guide);
+            g.fill(layout.plotLeft, middle, layout.plotRight, middle + 1, guide);
+            g.fill(layout.plotLeft, layout.plotBottom, layout.plotRight, layout.plotBottom + 1, guide);
             int n = vis.size();
             for (int i = 0; i < n; i++) {
                 double val = vis.get(i).value;
-                int x0 = chartLeft + i * (chartRight - chartLeft) / Math.max(1, n - 1);
-                int y0 = y + height - 6 - (int) ((val - min) / range * (height - 12));
+                int x0 = layout.pointX(i, n), y0 = layout.valueToY(val);
                 if (i > 0) {
-                    double prev = vis.get(i - 1).value;
-                    int xPrev = chartLeft + (i - 1) * (chartRight - chartLeft) / Math.max(1, n - 1);
-                    int yPrev = y + height - 6 - (int) ((prev - min) / range * (height - 12));
-                    g.fill(xPrev, yPrev, xPrev + 1, yPrev + 1, c.primary());
-                    g.fill(x0, y0, x0 + 1, y0 + 1, c.primary());
+                    drawChartLine(g, layout.pointX(i - 1, n), layout.valueToY(vis.get(i - 1).value), x0, y0, c.primary());
                 }
-                boolean nodeHov = mx >= x0 - 3 && mx <= x0 + 3 && my >= y0 - 3 && my <= y0 + 3;
-                g.fill(x0 - 1, y0 - 1, x0 + 2, y0 + 2, nodeHov ? 0xFFFFFFFF : c.primary());
+                boolean nodeHov = mx >= x0 - 4 && mx <= x0 + 4 && my >= y0 - 4 && my <= y0 + 4;
+                if (i == n - 1 || nodeHov) {
+                    int radius = nodeHov ? 2 : 1;
+                    g.fill(x0 - radius, y0 - radius, x0 + radius + 1, y0 + radius + 1, nodeHov ? 0xFFFFFFFF : c.primary());
+                }
                 if (nodeHov) {
                     List<net.minecraft.util.FormattedCharSequence> lines = new ArrayList<>();
                     for (String ln : vis.get(i).tooltip.split("\n")) lines.addAll(f.split(Component.literal(ln), 160));
                     g.renderTooltip(f, lines, mx, my);
                 }
             }
-            UiRender.pill(g, badgeX, badgeY, badgeW, badgeH, c.primaryDim(), c.primary());
-            g.drawString(f, curStr, badgeX + 4, badgeY + 2, c.primary());
+            UiRender.pill(g, layout.badgeX, layout.badgeY, layout.badgeW, layout.badgeH, c.primaryDim(), c.primary());
+            g.drawString(f, layout.currentText, layout.badgeX + 4, layout.badgeY + 2, c.primary());
         }
 
         @Override public boolean mouseClicked(double mx, double my, int button) {
@@ -1274,12 +1331,8 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
             int total = pts.size();
             int maxOff = Math.max(0, total - MAX_VISIBLE_CHART_STEPS);
             int off = Math.min(offset.get(), maxOff);
-            int end = Math.min(total, Math.max(MAX_VISIBLE_CHART_STEPS, total - off));
-            int start = Math.max(0, end - MAX_VISIBLE_CHART_STEPS);
-            int badgeW = font.width(formatCompact(pts.get(Math.min(end, pts.size()) - 1).value)) + 8;
-            int badgeX = x + width - badgeW - 4;
-            int liveW = font.width(t("ui.economy.chart.live_scroll")) + 10, liveX = badgeX - liveW - 4, liveY = y + 2, liveH = 11;
-            if (mx >= liveX && mx < liveX + liveW && my >= liveY && my < liveY + liveH) {
+            ChartLayout layout = new ChartLayout(font, visiblePoints(pts, off), off);
+            if (mx >= layout.liveX && mx < layout.liveX + layout.liveW && my >= layout.liveY && my < layout.liveY + layout.liveH) {
                 if (offset.get() > 0) offset.set(0);
                 return true;
             }
@@ -1292,10 +1345,9 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
             int total = pts.size();
             int maxOff = Math.max(0, total - MAX_VISIBLE_CHART_STEPS);
             if (maxOff == 0) return false;
-            int chartLeft = x + 26;
-            int chartRight = x + width - (font.width(formatCompact(pts.get(pts.size() - 1).value)) + 12) - 8;
-            if (mx >= chartLeft && mx < chartRight && my >= y && my < y + height) {
-                int off = offset.get();
+            int off = Math.min(offset.get(), maxOff);
+            ChartLayout layout = new ChartLayout(font, visiblePoints(pts, off), off);
+            if (mx >= layout.plotLeft && mx < layout.plotRight && my >= layout.plotTop && my < layout.plotBottom) {
                 if (delta < 0) offset.set(Math.min(maxOff, off + 1));
                 else if (delta > 0) offset.set(Math.max(0, off - 1));
                 return true;

@@ -67,7 +67,7 @@ public class VaultScreen extends EconomyUiContainerScreen<VaultMenu> {
         VStack root = new VStack().gap(1);
         root.addChild(header);
         root.addChild(Ui.text(Component.translatable("ui.economy.vault.subtitle")).style(TextStyle.CAPTION));
-        return Ui.padding(Insets.of(5, 10, 5, 10), root);
+        return Ui.padding(Insets.only(5, 10, 5, 10), root);
     }
 
     private Component modeLabel(VaultBlockEntity.VaultMode mode) {

@@ -24,14 +24,14 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: UpperMoon0/OpenUI-MC
-          ref: codex/multiloader-build
+          ref: fix/openui-fixes
           path: OpenUI-MC
 
-      - name: Set up JDK 17
+      - name: Set up JDK 21 for OpenUI
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '17'
+          java-version: '21'
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
@@ -44,6 +44,12 @@ jobs:
       - name: Publish OpenUI-MC to Maven Local
         working-directory: OpenUI-MC
         run: ./gradlew :forge-1.20.1:publishToMavenLocal --no-daemon
+
+      - name: Set up JDK 17 for Economy
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
 
       - name: Build with Gradle
         run: ./gradlew :forge-1.20.1:build --no-daemon
