@@ -1550,15 +1550,20 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         if (itemId != null && !itemId.isEmpty()) {
             try {
                 ResourceLocation rl = new ResourceLocation(itemId);
+                Fluid fluid = BuiltInRegistries.FLUID.get(rl);
+                if (fluid != net.minecraft.world.level.material.Fluids.EMPTY && !fluid.getFluidType().isAir()) {
+                    String name = new FluidStack(fluid, 1000).getDisplayName().getString();
+                    if (isResolvedDisplayName(name, itemId)) return name;
+                    if (rawName != null) {
+                        String translated = Component.translatable(rawName).getString();
+                        if (isResolvedDisplayName(translated, itemId)) return translated;
+                    }
+                    return humanizeResourcePath(rl.getPath());
+                }
                 Item item = BuiltInRegistries.ITEM.get(rl);
                 if (item != net.minecraft.world.item.Items.AIR) {
                     String name = new ItemStack(item).getHoverName().getString();
                     if (name != null && !name.isEmpty() && !name.startsWith("tagprefix.") && !name.startsWith("item.")) return name;
-                }
-                Fluid fluid = BuiltInRegistries.FLUID.get(rl);
-                if (fluid != net.minecraft.world.level.material.Fluids.EMPTY) {
-                    String name = new FluidStack(fluid, 1000).getDisplayName().getString();
-                    if (name != null && !name.isEmpty()) return name;
                 }
             } catch (Exception ignored) {}
         }
@@ -1570,6 +1575,22 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
             return rawName;
         }
         return itemId != null ? itemId : "";
+    }
+
+    private static boolean isResolvedDisplayName(String name, String resourceId) {
+        return name != null && !name.isBlank() && !name.equals(resourceId)
+                && !name.startsWith("fluid.") && !name.startsWith("block.");
+    }
+
+    private static String humanizeResourcePath(String path) {
+        String[] words = path.replace('-', '_').split("_");
+        StringBuilder result = new StringBuilder();
+        for (String word : words) {
+            if (word.isEmpty()) continue;
+            if (!result.isEmpty()) result.append(' ');
+            result.append(Character.toUpperCase(word.charAt(0))).append(word.substring(1));
+        }
+        return result.isEmpty() ? path : result.toString();
     }
 
     private static boolean matchesCommodityTypeFilter(String itemId, String commodityType, CommodityTypeFilter mode) {
