@@ -19,6 +19,7 @@ import net.minecraft.world.level.block.DirectionalBlock;
 import net.minecraft.world.level.block.EntityBlock;
 import net.minecraft.world.level.block.SoundType;
 import net.minecraftforge.network.NetworkHooks;
+import net.minecraftforge.fluids.FluidUtil;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockBehaviour;
 import net.minecraft.world.level.block.state.BlockState;
@@ -64,6 +65,10 @@ public class TankBlock extends DirectionalBlock implements EntityBlock {
             if (level.getBlockEntity(pos) instanceof TankBlockEntity tank) {
                 if (tank.getOwner() != null && !tank.getOwner().equals(player.getUUID())) {
                     sp.displayClientMessage(Component.translatable("message.economy.tank.not_owner"), true);
+                    return InteractionResult.CONSUME;
+                }
+                if (FluidUtil.getFluidHandler(player.getItemInHand(hand)).isPresent()
+                        && FluidUtil.interactWithFluidHandler(player, hand, level, pos, hit.getDirection())) {
                     return InteractionResult.CONSUME;
                 }
                 NetworkHooks.openScreen(sp, new SimpleMenuProvider(

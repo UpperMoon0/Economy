@@ -13,7 +13,15 @@ import org.jetbrains.annotations.NotNull;
 
 public class TankMenu extends AbstractContainerMenu {
 
-    private static final int CONTAINER_SIZE = 1;
+    public static final int CONTAINER_SIZE = 1;
+    public static final int IMAGE_WIDTH = 280;
+    public static final int IMAGE_HEIGHT = 186;
+    public static final int TRANSFER_SLOT_X = 180;
+    public static final int TRANSFER_SLOT_Y = 50;
+    public static final int PLAYER_INV_X = (IMAGE_WIDTH - 162) / 2; // 59
+    public static final int PLAYER_INV_Y = 102;
+    public static final int HOTBAR_Y = 160;
+
     private final net.minecraft.world.Container container;
     private final ContainerData data;
     private final TankBlockEntity tankBlockEntity;
@@ -36,7 +44,7 @@ public class TankMenu extends AbstractContainerMenu {
         this.tankBlockEntity = tank;
         container.startOpen(playerInventory.player);
 
-        this.addSlot(new Slot(container, 0, 180, 50) {
+        this.addSlot(new Slot(container, 0, TRANSFER_SLOT_X, TRANSFER_SLOT_Y) {
             @Override
             public boolean mayPlace(@NotNull ItemStack stack) {
                 return net.minecraftforge.fluids.FluidUtil.getFluidHandler(stack).isPresent();
@@ -48,17 +56,14 @@ public class TankMenu extends AbstractContainerMenu {
             }
         });
 
-        int playerInvX = (280 - 162) / 2;
-        int playerInvY = 102;
         for (int row = 0; row < 3; row++) {
             for (int col = 0; col < 9; col++) {
-                this.addSlot(new Slot(playerInventory, col + row * 9 + 9, playerInvX + col * 18, playerInvY + row * 18));
+                this.addSlot(new Slot(playerInventory, col + row * 9 + 9, PLAYER_INV_X + col * 18, PLAYER_INV_Y + row * 18));
             }
         }
 
-        int hotbarY = 160;
         for (int col = 0; col < 9; col++) {
-            this.addSlot(new Slot(playerInventory, col, playerInvX + col * 18, hotbarY));
+            this.addSlot(new Slot(playerInventory, col, PLAYER_INV_X + col * 18, HOTBAR_Y));
         }
 
         this.addDataSlots(data);
@@ -77,40 +82,7 @@ public class TankMenu extends AbstractContainerMenu {
     }
 
     @Override
-    public void clicked(int slotId, int button, @NotNull ClickType clickType, @NotNull Player player) {
-        String side = player.level().isClientSide ? "CLIENT" : "SERVER";
-        String clickedBefore = slotId >= 0 && slotId < slots.size()
-                ? TankBlockEntity.describeStack(slots.get(slotId).getItem())
-                : "OUTSIDE";
-        com.nstut.Economy.LOGGER.info(
-                "[TankTransfer] menu click start side={} player={} menuId={} slotId={} button={} clickType={} clicked={} carried={} processSlot={} tank={}",
-                side, player.getScoreboardName(), containerId, slotId, button, clickType,
-                clickedBefore, TankBlockEntity.describeStack(getCarried()),
-                TankBlockEntity.describeStack(slots.get(0).getItem()), describeTankFluid());
-        super.clicked(slotId, button, clickType, player);
-        String clickedAfter = slotId >= 0 && slotId < slots.size()
-                ? TankBlockEntity.describeStack(slots.get(slotId).getItem())
-                : "OUTSIDE";
-        com.nstut.Economy.LOGGER.info(
-                "[TankTransfer] menu click complete side={} player={} menuId={} slotId={} clicked={} carried={} processSlot={} tank={}",
-                side, player.getScoreboardName(), containerId, slotId, clickedAfter,
-                TankBlockEntity.describeStack(getCarried()),
-                TankBlockEntity.describeStack(slots.get(0).getItem()), describeTankFluid());
-    }
-
-    private String describeTankFluid() {
-        return tankBlockEntity == null
-                ? "NO_BLOCK_ENTITY"
-                : TankBlockEntity.describeFluid(tankBlockEntity.getFluid());
-    }
-
-    @Override
     public @NotNull ItemStack quickMoveStack(@NotNull Player player, int index) {
-        com.nstut.Economy.LOGGER.info(
-                "[TankTransfer] quickMove start side={} player={} menuId={} index={} source={} processSlot={} tank={}",
-                player.level().isClientSide ? "CLIENT" : "SERVER", player.getScoreboardName(), containerId,
-                index, index >= 0 && index < slots.size() ? TankBlockEntity.describeStack(slots.get(index).getItem()) : "OUTSIDE",
-                TankBlockEntity.describeStack(slots.get(0).getItem()), describeTankFluid());
         ItemStack result = ItemStack.EMPTY;
         Slot slot = this.slots.get(index);
         if (slot.hasItem()) {
@@ -129,11 +101,6 @@ public class TankMenu extends AbstractContainerMenu {
                 slot.setChanged();
             }
         }
-        com.nstut.Economy.LOGGER.info(
-                "[TankTransfer] quickMove complete side={} player={} menuId={} index={} result={} processSlot={} tank={}",
-                player.level().isClientSide ? "CLIENT" : "SERVER", player.getScoreboardName(), containerId,
-                index, TankBlockEntity.describeStack(result),
-                TankBlockEntity.describeStack(slots.get(0).getItem()), describeTankFluid());
         return result;
     }
 

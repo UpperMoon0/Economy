@@ -2,136 +2,103 @@ package com.nstut.forge.client;
 
 import com.nstut.economy.blocks.VaultBlockEntity;
 import com.nstut.economy.blocks.VaultMenu;
-import com.nstut.economy.ui.framework.UiRender;
-import com.nstut.economy.ui.framework.UiTheme;
 import com.nstut.forge.network.MarketNetwork;
+import com.nstut.openui.api.ButtonWidget;
+import com.nstut.openui.api.HStack;
+import com.nstut.openui.api.UIComponent;
+import com.nstut.openui.api.Ui;
+import com.nstut.openui.api.UiRender;
+import com.nstut.openui.api.VStack;
+import com.nstut.openui.layout.Alignment;
+import com.nstut.openui.layout.Insets;
+import com.nstut.openui.theme.ColorScheme;
+import com.nstut.openui.theme.TextStyle;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.phys.BlockHitResult;
-import org.jetbrains.annotations.NotNull;
 
-/** Premium, texture-free vault surface built from the shared Economy UI theme. */
-public class VaultScreen extends AbstractContainerScreen<VaultMenu> {
+/** Wide 18x3 vault using fixed vanilla slot geometry and theme-native OpenUI chrome. */
+public class VaultScreen extends EconomyUiContainerScreen<VaultMenu> {
+    static final int STORAGE_PANEL_Y = 36;
+    static final int STORAGE_PANEL_HEIGHT = 66;
+    static final int INVENTORY_LABEL_Y = 108;
+    static final int PLAYER_PANEL_X = VaultMenu.PLAYER_INV_X - 9;
+    static final int PLAYER_PANEL_WIDTH = 9 * 18 + 18;
+    static final int PLAYER_PANEL_Y = 122;
+    static final int PLAYER_PANEL_HEIGHT = 82;
+    private ButtonWidget modeBtn;
+    private VaultBlockEntity.VaultMode currentMode;
 
     public VaultScreen(VaultMenu menu, Inventory playerInventory, Component title) {
         super(menu, playerInventory, title);
-        this.imageWidth = 348;
-        this.imageHeight = 200;
-        this.inventoryLabelY = 102;
-        this.titleLabelY = 8;
+        imageWidth = VaultMenu.IMAGE_WIDTH;
+        imageHeight = VaultMenu.IMAGE_HEIGHT;
+        inventoryLabelY = INVENTORY_LABEL_Y;
+        titleLabelY = 6;
+        currentMode = menu.getMode();
     }
 
     @Override
-    protected void renderBg(@NotNull GuiGraphics g, float partialTick, int mouseX, int mouseY) {
-        renderBackground(g);
-        int x = leftPos;
-        int y = topPos;
-
-        UiRender.surface(g, x, y, imageWidth, imageHeight, UiTheme.RADIUS_LG,
-                UiTheme.SHELL, UiTheme.BORDER, true);
-
-        // A restrained warm highlight echoes the reference UI without
-        // competing with Economy's mint interaction accent.
-        UiRender.roundedRect(g, x + 108, y + 3, 126, 2, 1,
-                UiRender.alpha(UiTheme.AMBIENT_WARM, 95));
-
-        UiRender.surface(g, x + 7, y + 31, imageWidth - 14, 65, UiTheme.RADIUS_MD,
-                UiTheme.SURFACE, UiTheme.BORDER_SUBTLE, false);
-        UiRender.surface(g, x + 85, y + 99, 178, 97, UiTheme.RADIUS_MD,
-                UiTheme.SURFACE, UiTheme.BORDER_SUBTLE, false);
-
-        for (Slot slot : menu.slots) {
-            UiRender.slot(g, x + slot.x - 1, y + slot.y - 1, 18, 18);
-        }
-
-        renderModeButton(g, mouseX, mouseY);
-    }
-
-    private String modeLabel() {
-        return switch (menu.getMode()) {
-            case BOTH -> "BOTH";
-            case INPUT -> "INPUT";
-            case OUTPUT -> "OUTPUT";
-        };
-    }
-
-    private int modeButtonWidth() {
-        return font.width("MODE  " + modeLabel()) + 18;
-    }
-
-    private void renderModeButton(GuiGraphics g, int mouseX, int mouseY) {
+    protected void containerTick() {
+        super.containerTick();
         VaultBlockEntity.VaultMode mode = menu.getMode();
-        String label = "MODE  " + modeLabel();
-        int buttonWidth = modeButtonWidth();
-        int buttonHeight = 17;
-        int buttonX = leftPos + imageWidth - buttonWidth - 10;
-        int buttonY = topPos + 7;
-        boolean hovered = mouseX >= buttonX && mouseX < buttonX + buttonWidth
-                && mouseY >= buttonY && mouseY < buttonY + buttonHeight;
-
-        int accent = switch (mode) {
-            case BOTH -> UiTheme.ACCENT;
-            case INPUT -> UiTheme.DANGER;
-            case OUTPUT -> UiTheme.SUCCESS;
-        };
-        int background = switch (mode) {
-            case BOTH -> UiTheme.ACCENT_DEEP;
-            case INPUT -> UiTheme.DANGER_DEEP;
-            case OUTPUT -> UiTheme.SUCCESS_DEEP;
-        };
-        if (hovered) background = UiRender.mix(background, accent, 0.18F);
-
-        UiRender.pill(g, buttonX, buttonY, buttonWidth, buttonHeight, background, accent);
-        UiRender.roundedRect(g, buttonX + 6, buttonY + 7, 3, 3, 2, accent);
-        g.drawString(font, label, buttonX + 13, buttonY + 4, accent, false);
-
-        if (hovered) {
-            String tooltip = switch (mode) {
-                case BOTH -> "Both way: contributes to sell orders and receives purchased items.";
-                case INPUT -> "Input only: contributes items to sell orders.";
-                case OUTPUT -> "Output only: receives purchased items.";
-            };
-            g.renderTooltip(font, font.split(Component.literal(tooltip), 190), mouseX, mouseY);
+        if (modeBtn != null && mode != currentMode) {
+            currentMode = mode;
+            modeBtn.setLabel(modeLabel(mode));
         }
     }
 
     @Override
-    protected void renderLabels(@NotNull GuiGraphics g, int mouseX, int mouseY) {
-        g.drawString(font, "VAULT", 12, 7, UiTheme.TEXT_PRIMARY, false);
-        g.drawString(font, "SECURE ITEM STORAGE", 12, 18, UiTheme.TEXT_MUTED, false);
-        g.drawString(font, "PLAYER INVENTORY", 93, 102, UiTheme.TEXT_MUTED, false);
+    protected void renderBackgroundLayer(GuiGraphics g, float partialTick, int mouseX, int mouseY) {
+        renderBaseShell(g);
+        ColorScheme c = colors();
+        int x = leftPos, y = topPos;
+        int panelRadius = radii().medium();
+        UiRender.surface(g, x + 10, y + STORAGE_PANEL_Y, imageWidth - 20, STORAGE_PANEL_HEIGHT, panelRadius, c.surface(), c.borderSubtle(), false, c);
+        UiRender.surface(g, x + PLAYER_PANEL_X, y + PLAYER_PANEL_Y, PLAYER_PANEL_WIDTH, PLAYER_PANEL_HEIGHT, panelRadius, c.surface(), c.borderSubtle(), false, c);
+        for (Slot slot : menu.slots) UiRender.slot(g, x + slot.x - 1, y + slot.y - 1, 18, 18, c);
     }
 
     @Override
-    public boolean mouseClicked(double mouseX, double mouseY, int button) {
-        if (button == 0) {
-            int buttonWidth = modeButtonWidth();
-            int buttonX = leftPos + imageWidth - buttonWidth - 10;
-            int buttonY = topPos + 7;
-            if (mouseX >= buttonX && mouseX < buttonX + buttonWidth
-                    && mouseY >= buttonY && mouseY < buttonY + 17) {
-                BlockPos targetPos = null;
-                if (menu.getVaultBlockEntity() != null) {
-                    targetPos = menu.getVaultBlockEntity().getBlockPos();
-                } else if (minecraft != null && minecraft.hitResult instanceof BlockHitResult hit) {
-                    targetPos = hit.getBlockPos();
-                }
-                if (targetPos != null) {
-                    MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.ToggleVaultModePacket(targetPos));
-                    return true;
-                }
-            }
+    protected boolean showInventoryLabel() { return true; }
+
+    @Override
+    protected int economyInventoryLabelX() { return VaultMenu.PLAYER_INV_X; }
+
+    @Override
+    protected UIComponent buildUI() {
+        HStack header = new HStack().gap(4).align(Alignment.CENTER);
+        header.addChild(Ui.text(Component.translatable("ui.economy.vault.title")).style(TextStyle.TITLE));
+        header.addChild(Ui.spacer().flex());
+        modeBtn = Ui.button(modeLabel(currentMode), this::cycleMode).ghost().small();
+        header.addChild(modeBtn);
+        header.addChild(buildCompactThemeToggle());
+
+        VStack root = new VStack().gap(1);
+        root.addChild(header);
+        root.addChild(Ui.text(Component.translatable("ui.economy.vault.subtitle")).style(TextStyle.CAPTION));
+        return Ui.padding(Insets.only(5, 10, 5, 10), root);
+    }
+
+    private Component modeLabel(VaultBlockEntity.VaultMode mode) {
+        return Component.translatable(switch (mode) {
+            case BOTH -> "ui.economy.mode.both";
+            case INPUT -> "ui.economy.mode.input";
+            case OUTPUT -> "ui.economy.mode.output";
+        });
+    }
+
+    private void cycleMode() {
+        VaultBlockEntity.VaultMode next = VaultBlockEntity.VaultMode.byId((menu.getMode().id + 1) % 3);
+        BlockPos targetPos = menu.getVaultBlockEntity() != null ? menu.getVaultBlockEntity().getBlockPos() : null;
+        if (targetPos == null && minecraft != null && minecraft.hitResult instanceof BlockHitResult hit) targetPos = hit.getBlockPos();
+        if (targetPos != null) {
+            MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.ToggleVaultModePacket(targetPos));
+            currentMode = next;
+            if (modeBtn != null) modeBtn.setLabel(modeLabel(next));
         }
-        return super.mouseClicked(mouseX, mouseY, button);
-    }
-
-    @Override
-    public void render(@NotNull GuiGraphics g, int mouseX, int mouseY, float partialTick) {
-        super.render(g, mouseX, mouseY, partialTick);
-        renderTooltip(g, mouseX, mouseY);
     }
 }

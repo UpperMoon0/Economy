@@ -11,38 +11,30 @@ java.toolchain.languageVersion = JavaLanguageVersion.of(17)
 
 minecraft {
     mappings channel: 'official', version: project.minecraft_version
-
     runs {
         client {
             workingDirectory project.file('run')
             property 'forge.logging.markers', 'REGISTRIES'
             property 'forge.logging.console.level', 'debug'
-            mods {
-                "${rootProject.archives_name}" {
-                    source sourceSets.main
-                }
-            }
+            mods { "${rootProject.archives_name}" { source sourceSets.main } }
         }
-
         server {
             workingDirectory project.file('run')
             property 'forge.logging.markers', 'REGISTRIES'
             property 'forge.logging.console.level', 'debug'
-            mods {
-                "${rootProject.archives_name}" {
-                    source sourceSets.main
-                }
-            }
+            mods { "${rootProject.archives_name}" { source sourceSets.main } }
         }
     }
 }
 
 repositories {
+    mavenLocal()
     mavenCentral()
 }
 
 dependencies {
     minecraft "net.minecraftforge:forge:${project.minecraft_version}-${project.forge_version}"
+    implementation fg.deobf('com.nstut:openui-mc-forge-1.20.1:0.0.4')
     testImplementation platform('org.junit:junit-bom:5.10.2')
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
@@ -54,7 +46,6 @@ tasks.named('test', Test).configure {
 }
 
 def resourceTargets = ['META-INF/mods.toml']
-
 tasks.named('processResources', ProcessResources).configure {
     def replaceProperties = [
         minecraft_version_range: project.minecraft_version_range,
@@ -63,9 +54,7 @@ tasks.named('processResources', ProcessResources).configure {
         version                : rootProject.mod_version
     ]
     inputs.properties replaceProperties
-    filesMatching(resourceTargets) {
-        expand replaceProperties
-    }
+    filesMatching(resourceTargets) { expand replaceProperties }
 }
 
 tasks.named('jar', Jar).configure {

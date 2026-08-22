@@ -2,10 +2,13 @@
 
 ![Minecraft Version](https://img.shields.io/badge/Minecraft-1.20.1-brightgreen)
 ![Forge Version](https://img.shields.io/badge/Forge-47.4.21-orange)
-![Version](https://img.shields.io/badge/Version-0.0.6-blue)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
 A modern order-book economy for Minecraft 1.20.1 (Forge), with physical item and fluid storage, automated order matching, portfolio tracking, and a full in-game market terminal.
+
+## Dependency
+
+The client UI requires [OpenUI MC](https://github.com/UpperMoon0/OpenUI-MC), which must be installed alongside Economy. Economy owns the market-specific screens and logic; reusable layout, widget, rendering, scrolling, and animation primitives live in OpenUI MC. Use the dependency version declared by the Economy jar or its release page.
 
 ---
 
@@ -48,9 +51,11 @@ A modern order-book economy for Minecraft 1.20.1 (Forge), with physical item and
 
 - Stores up to `128,000 mB` of one compatible fluid.
 - Accepts Forge fluid containers such as buckets and cells through its processing slot.
+- Exposes the standard Forge fluid capability for compatible pipes and automation.
 - Uses a centered custom screen with a tiled/cropped fluid texture and a single `current / maximum` amount display.
 - Renders its fluid on the Tank's front face using the fluid's true texture proportions.
 - Supports the same `BOTH`, `INPUT ONLY`, and `OUTPUT ONLY` market behavior as Vaults.
+- Storage modes govern market supply and delivery; direct inventory and fluid automation remains available independently.
 - Includes its block/item model, texture, recipe, loot table, mining tags, and creative-tab entry.
 
 #### Containers Tab

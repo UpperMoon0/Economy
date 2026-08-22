@@ -650,7 +650,7 @@ public class MarketNetwork {
             if (fluid != net.minecraft.world.level.material.Fluids.EMPTY && !fluid.getFluidType().isAir()) {
                 isFluid = true;
                 displayName = new net.minecraftforge.fluids.FluidStack(fluid, 1000).getDisplayName().getString();
-                com.nstut.Economy.LOGGER.info("[sendItemList] Detected FLUID: id={}, name={}", commodityId, displayName);
+                com.nstut.Economy.LOGGER.debug("[sendItemList] Detected FLUID: id={}, name={}", commodityId, displayName);
             } else if (item != net.minecraft.world.item.Items.AIR) {
                 displayName = new net.minecraft.world.item.ItemStack(item).getHoverName().getString();
             } else {

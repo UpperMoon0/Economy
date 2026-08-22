@@ -4,6 +4,10 @@
 
 Buy and sell items or fluids through an in-game Market Terminal, build storage that connects directly to the market, follow changing prices, manage your orders, track your wealth, and send coins to other players.
 
+## Required dependency
+
+Economy requires **OpenUI MC 0.0.4 or newer** on the client. Install the Forge 1.20.1 OpenUI MC file alongside Economy. CurseForge marks it as a required dependency for automatic installation.
+
 ---
 
 ## Market Terminal
@@ -20,6 +24,7 @@ The Market Terminal brings the economy together in one screen:
 - Track your balance, stored assets, and total portfolio value.
 - Filter products and orders by items or fluids.
 - Switch between compact Grid and Row layouts.
+- Use responsive, clipped controls with semantic status badges and readable dark/light-theme contrast.
 
 Open the Market Terminal by using a Market block or running `/economy balance`.
 
@@ -45,6 +50,7 @@ Vaults connect your stored items to the market.
 - Sell Orders can draw items from connected Vaults.
 - Bought items can be delivered directly into Vaults.
 - The custom Vault screen uses a compact 18×3 layout.
+- Inventory labels and decoration stay clear of native Minecraft slots.
 - Multiple Vaults can work together as one storage network.
 
 ---
@@ -56,6 +62,8 @@ Fluid Tanks provide market-connected storage for fluids.
 - Each Tank stores up to `128,000 mB`.
 - A Tank holds one compatible fluid at a time.
 - Use buckets, cells, and other compatible fluid containers in the Tank slot.
+- Connect compatible Forge pipes and automation through the Tank's fluid capability.
+- Transfer guidance is anchored to the processing slot so it remains aligned with the actual interaction area.
 - Fluid Sell Orders draw from connected Tanks.
 - Bought fluids are delivered into Tanks with compatible free space.
 - The stored fluid is visible in both the Tank screen and on the front of the block.
@@ -73,6 +81,8 @@ Every Vault and Fluid Tank can be assigned a market mode:
 - `OUTPUT ONLY` — receives purchases but does not supply Sell Orders.
 
 Use these modes to control exactly how each storage block participates in your market network.
+
+Storage modes govern market supply and delivery. Compatible direct inventory and fluid automation remains available regardless of market mode.
 
 ---
 
