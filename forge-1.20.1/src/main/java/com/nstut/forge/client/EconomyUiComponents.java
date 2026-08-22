@@ -4,6 +4,7 @@ import com.nstut.Economy;
 import com.nstut.economy.util.EconomyFormatUtil;
 import com.nstut.openui.api.UIComponent;
 import com.nstut.openui.api.UiRender;
+import com.nstut.openui.controls.Badge;
 import com.nstut.openui.state.ReadableSignal;
 import com.nstut.openui.theme.ColorScheme;
 import net.minecraft.client.gui.Font;
@@ -30,6 +31,31 @@ public final class EconomyUiComponents {
         g.pose().scale(0.5f, 0.5f, 0.5f);
         g.renderItem(COIN_ICON, 0, 0);
         g.pose().popPose();
+    }
+
+    /** Draws an absolute-positioned badge with the same semantic contrast contract as OpenUI Badge. */
+    public static int drawBadge(GuiGraphics g, Font font, String text, int rightX, int y,
+                                Badge.Variant variant, boolean hovered, ColorScheme colors) {
+        int background = switch (variant) {
+            case PRIMARY -> hovered ? colors.primaryHover() : colors.primaryDim();
+            case SUCCESS -> hovered ? colors.successHover() : colors.successDeep();
+            case WARNING -> hovered ? colors.warningHover() : colors.warning();
+            case DANGER -> hovered ? colors.dangerHover() : colors.dangerDeep();
+            case NEUTRAL -> hovered ? colors.surfaceRaised() : colors.surfaceVariant();
+        };
+        int border = switch (variant) {
+            case PRIMARY -> colors.primary();
+            case SUCCESS -> colors.success();
+            case WARNING -> colors.warningHover();
+            case DANGER -> colors.danger();
+            case NEUTRAL -> colors.border();
+        };
+        int width = font.width(text) + 8;
+        int x = rightX - width;
+        UiRender.pill(g, x, y, width, 12, background, border);
+        int textColor = variant == Badge.Variant.NEUTRAL ? colors.onSurface() : colors.onPrimary();
+        UiRender.text(g, font, text, x + 4, y + 2, textColor);
+        return x;
     }
 
     /** Coin + compacted balance pill that fills the width of its parent. */

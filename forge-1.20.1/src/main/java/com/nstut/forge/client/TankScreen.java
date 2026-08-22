@@ -25,7 +25,15 @@ import net.minecraftforge.fluids.FluidStack;
 
 /** Fixed-geometry vanilla container with OpenUI chrome layered around real slots. */
 public class TankScreen extends EconomyUiContainerScreen<TankMenu> {
-    private static final int INVENTORY_LABEL_Y = 87;
+    static final int FLUID_PANEL_Y = 31;
+    static final int FLUID_PANEL_HEIGHT = 54;
+    static final int INVENTORY_LABEL_Y = 87;
+    static final int PLAYER_PANEL_Y = 99;
+    static final int PLAYER_PANEL_HEIGHT = 79;
+    static final int TRANSFER_TITLE_X = TankMenu.TRANSFER_SLOT_X;
+    static final int TRANSFER_TITLE_Y = TankMenu.TRANSFER_SLOT_Y - 12;
+    static final int TRANSFER_HINT_X = TankMenu.TRANSFER_SLOT_X + 23;
+    static final int TRANSFER_HINT_Y = TankMenu.TRANSFER_SLOT_Y + 5;
     private static final int TRANSFER_SECTION_WIDTH = 90;
 
     private ButtonWidget modeBtn;
@@ -63,13 +71,21 @@ public class TankScreen extends EconomyUiContainerScreen<TankMenu> {
         int x = leftPos, y = topPos;
         int panelRadius = radii().medium();
 
-        UiRender.surface(g, x + 8, y + 31, imageWidth - 16, 54,
+        UiRender.surface(g, x + 8, y + FLUID_PANEL_Y, imageWidth - 16, FLUID_PANEL_HEIGHT,
                 panelRadius, c.surface(), c.borderSubtle(), false, c);
-        UiRender.surface(g, x + 51, y + 96, 178, 82,
+        UiRender.surface(g, x + 51, y + PLAYER_PANEL_Y, 178, PLAYER_PANEL_HEIGHT,
                 panelRadius, c.surface(), c.borderSubtle(), false, c);
         for (Slot slot : menu.slots) {
             UiRender.slot(g, x + slot.x - 1, y + slot.y - 1, 18, 18, c);
         }
+        int slotX = x + TankMenu.TRANSFER_SLOT_X;
+        UiRender.text(g, font, Component.translatable("ui.economy.tank.transfer"),
+                slotX, y + TRANSFER_TITLE_Y, c.onSurface());
+        String hint = Component.translatable("ui.economy.tank.transfer_hint").getString();
+        int hintX = x + TRANSFER_HINT_X;
+        int hintWidth = Math.max(1, x + imageWidth - 10 - hintX);
+        hint = font.plainSubstrByWidth(hint, hintWidth);
+        UiRender.text(g, font, hint, hintX, y + TRANSFER_HINT_Y, c.onSurface());
     }
 
     @Override
@@ -99,18 +115,8 @@ public class TankScreen extends EconomyUiContainerScreen<TankMenu> {
         info.flex();
         body.addChild(info);
 
-        VStack transfer = new VStack().gap(2);
-        transfer.width(TRANSFER_SECTION_WIDTH);
-        transfer.addChild(Ui.text(Component.translatable("ui.economy.tank.transfer")).style(TextStyle.CAPTION));
-        HStack transferRow = new HStack().gap(5).align(Alignment.CENTER);
-        transferRow.height(18);
-        // The first 18px corresponds to the fixed vanilla transfer slot.
-        transferRow.addChild(Ui.spacer().width(18));
-        UIComponent hint = Ui.text(Component.translatable("ui.economy.tank.transfer_hint")).style(TextStyle.CAPTION);
-        hint.flex();
-        transferRow.addChild(hint);
-        transfer.addChild(transferRow);
-        body.addChild(transfer);
+        // Native slot annotations are rendered from TankMenu coordinates.
+        body.addChild(Ui.spacer().width(TRANSFER_SECTION_WIDTH));
 
         VStack root = new VStack().gap(2);
         root.addChild(header);

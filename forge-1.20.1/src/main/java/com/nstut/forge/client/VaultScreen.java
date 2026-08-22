@@ -22,7 +22,11 @@ import net.minecraft.world.phys.BlockHitResult;
 
 /** Wide 18x3 vault using fixed vanilla slot geometry and theme-native OpenUI chrome. */
 public class VaultScreen extends EconomyUiContainerScreen<VaultMenu> {
-    private static final int INVENTORY_LABEL_Y = 108;
+    static final int STORAGE_PANEL_Y = 36;
+    static final int STORAGE_PANEL_HEIGHT = 66;
+    static final int INVENTORY_LABEL_Y = 108;
+    static final int PLAYER_PANEL_Y = 122;
+    static final int PLAYER_PANEL_HEIGHT = 82;
     private ButtonWidget modeBtn;
     private VaultBlockEntity.VaultMode currentMode;
 
@@ -51,8 +55,8 @@ public class VaultScreen extends EconomyUiContainerScreen<VaultMenu> {
         ColorScheme c = colors();
         int x = leftPos, y = topPos;
         int panelRadius = radii().medium();
-        UiRender.surface(g, x + 10, y + 36, 336, 66, panelRadius, c.surface(), c.borderSubtle(), false, c);
-        UiRender.surface(g, x + 88, y + 120, 180, 84, panelRadius, c.surface(), c.borderSubtle(), false, c);
+        UiRender.surface(g, x + 10, y + STORAGE_PANEL_Y, 336, STORAGE_PANEL_HEIGHT, panelRadius, c.surface(), c.borderSubtle(), false, c);
+        UiRender.surface(g, x + 88, y + PLAYER_PANEL_Y, 180, PLAYER_PANEL_HEIGHT, panelRadius, c.surface(), c.borderSubtle(), false, c);
         for (Slot slot : menu.slots) UiRender.slot(g, x + slot.x - 1, y + slot.y - 1, 18, 18, c);
     }
 

@@ -1205,9 +1205,8 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                 UiRender.text(g, f, (e.tank ? t("ui.economy.container.tank_prefix") : t("ui.economy.container.vault_prefix")) + idx, x + 4, y + 3, c.primary());
                 boolean full = e.usedSlots >= e.totalSlots;
                 String badge = full ? t("ui.economy.container.full") : t("ui.economy.container.active");
-                drawContainerBadge(g, f, badge, x + width - 4, y + 2,
-                        full ? c.dangerDeep() : c.successDeep(),
-                        full ? c.danger() : c.success(), c);
+                EconomyUiComponents.drawBadge(g, f, badge, x + width - 4, y + 2,
+                        full ? Badge.Variant.DANGER : Badge.Variant.SUCCESS, false, c);
                 String modeBadge = switch (e.mode) {
                     case 1 -> t("ui.economy.container.mode_input"); case 2 -> t("ui.economy.container.mode_output"); default -> t("ui.economy.container.mode_both");
                 };
@@ -1217,20 +1216,11 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                         : formatCompact(e.usedSlots) + "/" + formatCompact(e.totalSlots) + " " + t("ui.economy.containers.slots");
                 int capX = x + width - f.width(cap) - 4;
                 UiRender.text(g, f, cap, capX, y + 17, c.onSurface());
-                int modeBg = e.mode == 1 ? c.warning() : (e.mode == 2 ? c.primary() : c.primaryDim());
-                int modeBorder = e.mode == 1 ? c.warningHover() : (e.mode == 2 ? c.primaryHover() : c.primary());
-                drawContainerBadge(g, f, modeBadge, capX - 4, y + 16, modeBg, modeBorder, c);
+                Badge.Variant modeVariant = e.mode == 1 ? Badge.Variant.WARNING : Badge.Variant.PRIMARY;
+                EconomyUiComponents.drawBadge(g, f, modeBadge, capX - 4, y + 16,
+                        modeVariant, false, c);
             }
         };
-    }
-
-    private int drawContainerBadge(GuiGraphics g, Font f, String text, int rightX, int y,
-                                   int background, int border, ColorScheme colors) {
-        int width = f.width(text) + 8;
-        int x = rightX - width;
-        UiRender.pill(g, x, y, width, 12, background, border);
-        UiRender.text(g, f, text, x + 4, y + 2, colors.onPrimary());
-        return x;
     }
 
     // ── Chart component ────────────────────────────────────────────────────
@@ -1273,8 +1263,8 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                 badgeH = 12;
                 badgeX = x + width - badgeW - 4;
                 liveText = off == 0 ? t("ui.economy.chart.live") : t("ui.economy.chart.live_scroll");
-                liveW = f.width(liveText) + 6;
-                liveH = 11;
+                liveW = f.width(liveText) + 8;
+                liveH = 12;
                 liveX = badgeX - liveW - 4;
                 liveY = y + 2;
                 int axisWidth = Math.max(f.width(formatCompact(max)), f.width(formatCompact(min))) + 8;
@@ -1329,8 +1319,9 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
             UiRender.text(g, f, formatCompact(layout.max), x + 3, y + 3, c.onSurfaceMuted());
             UiRender.text(g, f, formatCompact(layout.min), x + 3, y + height - 11, c.onSurfaceMuted());
             boolean liveHov = mx >= layout.liveX && mx < layout.liveX + layout.liveW && my >= layout.liveY && my < layout.liveY + layout.liveH;
-            UiRender.pill(g, layout.liveX, layout.liveY, layout.liveW, layout.liveH, off > 0 ? (liveHov ? c.successHover() : c.successDeep()) : (liveHov ? c.surfaceRaised() : c.primaryDim()), off > 0 ? c.success() : c.primary());
-            UiRender.text(g, f, layout.liveText, layout.liveX + 3, layout.liveY + 2, off > 0 ? 0xFFFFFFFF : c.primary());
+            EconomyUiComponents.drawBadge(g, f, layout.liveText,
+                    layout.liveX + layout.liveW, layout.liveY,
+                    off > 0 ? Badge.Variant.SUCCESS : Badge.Variant.PRIMARY, liveHov, c);
             int guide = UiRender.alpha(c.borderSubtle(), 90);
             int middle = (layout.plotTop + layout.plotBottom) / 2;
             g.fill(layout.plotLeft, layout.plotTop, layout.plotRight, layout.plotTop + 1, guide);
@@ -1354,8 +1345,9 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                     g.renderTooltip(f, lines, mx, my);
                 }
             }
-            UiRender.pill(g, layout.badgeX, layout.badgeY, layout.badgeW, layout.badgeH, c.primaryDim(), c.primary());
-            UiRender.text(g, f, layout.currentText, layout.badgeX + 4, layout.badgeY + 2, c.primary());
+            EconomyUiComponents.drawBadge(g, f, layout.currentText,
+                    layout.badgeX + layout.badgeW, layout.badgeY,
+                    Badge.Variant.PRIMARY, false, c);
         }
 
         @Override public boolean mouseClicked(double mx, double my, int button) {
