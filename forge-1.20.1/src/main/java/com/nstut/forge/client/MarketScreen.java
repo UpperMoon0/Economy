@@ -28,13 +28,14 @@ import com.nstut.openui.state.Signals;
 import com.nstut.openui.state.Subscription;
 import com.nstut.openui.theme.ColorScheme;
 import com.nstut.openui.theme.TextStyle;
-import net.minecraft.client.Minecraft;
 import net.minecraft.Util;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.util.FormattedCharSequence;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.material.Fluid;
@@ -59,6 +60,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
     private static final int SIDEBAR_W = 84;
     private static final int NARROW_THRESHOLD = 336;
     private static final int MAX_VISIBLE_CHART_STEPS = 15;
+    private static final int TOOLTIP_MAX_WIDTH = 140;
     private static final SimpleDateFormat CHART_TIME_FMT = new SimpleDateFormat("MM/dd HH:mm:ss");
 
     enum MarketView { BROWSE, DETAIL, NEW_ORDER, ORDERS, PORTFOLIO, CONTAINERS }
@@ -114,6 +116,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
     private final Signal<List<ItemSearchResult>> searchResults = Signals.of(List.of());
     private Subscription itemSearchSubscription;
     private boolean initialDataRequested;
+    private Component deferredTooltip;
 
     private <T> Computed<T> computed(java.util.function.Supplier<T> s) {
         Computed<T> c = Signals.computed(s);
@@ -235,7 +238,19 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
 
     @Override
     protected void renderBackgroundLayer(GuiGraphics g, float partialTick, int mouseX, int mouseY) {
+        deferredTooltip = null;
         renderBaseShell(g);
+    }
+
+    @Override
+    protected void renderForegroundLayer(GuiGraphics g, float partialTick, int mouseX, int mouseY) {
+        if (deferredTooltip == null) return;
+        List<FormattedCharSequence> lines = new ArrayList<>();
+        for (String line : deferredTooltip.getString().split("\\n", -1)) {
+            lines.addAll(font.split(Component.literal(line), TOOLTIP_MAX_WIDTH));
+        }
+        g.renderTooltip(font, lines, mouseX, mouseY);
+        deferredTooltip = null;
     }
 
     @Override
@@ -557,7 +572,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         v.addChild(new TrendChartComponent(detailChartSamples, detailChartOffset, false));
 
         HStack cols = new HStack().gap(6);
-        cols.flex();
+        cols.height(58);
         cols.addChild(buildOrderColumn(true));
         cols.addChild(buildOrderColumn(false));
         v.addChild(cols);
@@ -568,6 +583,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                         .key(o -> o.e().orderId)
                         .itemHeight(18))
                 .when(true, () -> Ui.emptyState(Component.translatable("ui.economy.empty.no_orders_item")));
+        myOrders.flex();
         v.addChild(myOrders);
         v.addChild(Ui.button(Component.translatable("ui.economy.action.create_order"), () -> {
             createCommodityQuery.set(selectedItemId.get());
@@ -1319,16 +1335,16 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                 loc = fitText(f, loc, Math.max(0, capX - (x + 4) - 6));
                 UiRender.text(g, f, loc, x + 4, y + 17, c.onSurfaceMuted());
                 if (statusHovered) {
-                    g.renderTooltip(f, Component.translatable(full
+                    deferredTooltip = Component.translatable(full
                             ? "ui.economy.container.tooltip.full"
-                            : "ui.economy.container.tooltip.active"), mx, my);
+                            : "ui.economy.container.tooltip.active");
                 } else if (modeHovered) {
                     String tooltipKey = switch (e.mode) {
                         case 1 -> "ui.economy.container.tooltip.mode_input";
                         case 2 -> "ui.economy.container.tooltip.mode_output";
                         default -> "ui.economy.container.tooltip.mode_both";
                     };
-                    g.renderTooltip(f, Component.translatable(tooltipKey), mx, my);
+                    deferredTooltip = Component.translatable(tooltipKey);
                 }
             }
         };
@@ -1451,9 +1467,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                     g.fill(x0 - radius, y0 - radius, x0 + radius + 1, y0 + radius + 1, nodeHov ? 0xFFFFFFFF : c.primary());
                 }
                 if (nodeHov) {
-                    List<net.minecraft.util.FormattedCharSequence> lines = new ArrayList<>();
-                    for (String ln : vis.get(i).tooltip.split("\n")) lines.addAll(f.split(Component.literal(ln), 160));
-                    g.renderTooltip(f, lines, mx, my);
+                    deferredTooltip = Component.literal(vis.get(i).tooltip);
                 }
             }
             EconomyUiComponents.drawBadge(g, f, layout.currentText,
