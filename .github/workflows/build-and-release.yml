@@ -91,3 +91,68 @@ jobs:
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish to CurseForge
+        shell: bash
+        env:
+          CURSEFORGE_API_TOKEN: ${{ secrets.CURSEFORGE_API_TOKEN }}
+          CURSEFORGE_PROJECT_ID: ${{ secrets.CURSEFORGE_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${CURSEFORGE_API_TOKEN:-}" ]]; then
+            echo "Missing required secret: CURSEFORGE_API_TOKEN" >&2
+            exit 1
+          fi
+          if [[ ! "${CURSEFORGE_PROJECT_ID:-}" =~ ^[0-9]+$ ]]; then
+            echo "Missing or invalid required secret: CURSEFORGE_PROJECT_ID" >&2
+            exit 1
+          fi
+
+          mapfile -t jars < <(find build/release-libs -maxdepth 1 -type f -name '*.jar' \
+            ! -name '*-sources.jar' ! -name '*-dev.jar' | sort)
+          if [[ ${#jars[@]} -ne 1 ]]; then
+            echo "Expected exactly one runnable Economy jar, found ${#jars[@]}" >&2
+            printf '  %s\n' "${jars[@]}" >&2
+            exit 1
+          fi
+
+          mod_version="$(sed -n 's/^mod_version[[:space:]]*=[[:space:]]*//p' gradle.properties | head -n1 | tr -d '\r' | xargs)"
+          changelog="$(<CURSEFORGE.md)"
+          metadata="$(jq -cn \
+            --arg changelog "$changelog" \
+            --arg displayName "NsTut Economy ${mod_version} - Forge 1.20.1" \
+            '{
+              changelog: $changelog,
+              changelogType: "markdown",
+              displayName: $displayName,
+              gameVersionNames: ["1.20.1", "Forge", "Java 17", "Client"],
+              releaseType: "release",
+              relations: {
+                projects: [{
+                  slug: "openui-mc",
+                  projectID: "1661978",
+                  type: "requiredDependency"
+                }]
+              }
+            }')"
+
+          response_file="$(mktemp)"
+          trap 'rm -f "$response_file"' EXIT
+          http_status="$(curl --silent --show-error \
+            --output "$response_file" \
+            --write-out '%{http_code}' \
+            --request POST \
+            --header "X-Api-Token: ${CURSEFORGE_API_TOKEN}" \
+            --form-string "metadata=${metadata}" \
+            --form "file=@${jars[0]}" \
+            "https://minecraft.curseforge.com/api/projects/${CURSEFORGE_PROJECT_ID}/upload-file")"
+          response="$(<"$response_file")"
+          if [[ "$http_status" =~ ^2 ]]; then
+            file_id="$(jq -er '.id' <<< "$response")"
+            echo "Published Economy to CurseForge as file ID ${file_id}."
+          elif grep -Eqi 'already|duplicate' <<< "$response"; then
+            echo "CurseForge already has this Economy artifact; treating retry as successful."
+          else
+            echo "CurseForge upload failed with HTTP ${http_status}: ${response}" >&2
+            exit 1
+          fi
