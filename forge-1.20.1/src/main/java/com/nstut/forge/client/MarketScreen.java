@@ -170,6 +170,15 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
 
     private static String t(String key) { return Component.translatable(key).getString(); }
 
+    static String fitText(Font font, String text, int maxWidth) {
+        if (text == null || maxWidth <= 0) return "";
+        if (font.width(text) <= maxWidth) return text;
+        String ellipsis = "...";
+        int ellipsisWidth = font.width(ellipsis);
+        if (maxWidth <= ellipsisWidth) return font.plainSubstrByWidth(ellipsis, maxWidth);
+        return font.plainSubstrByWidth(text, maxWidth - ellipsisWidth) + ellipsis;
+    }
+
     public MarketScreen(MarketMenu menu, net.minecraft.world.entity.player.Inventory inv, Component title) {
         super(menu, inv, title);
         this.imageWidth = SCREEN_W;
@@ -381,9 +390,12 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
             @Override public int preferredHeight(Font f) { return 15; }
             @Override public void render(GuiGraphics g, Font f, int mx, int my, float pt) {
                 ColorScheme c = uiRuntime().theme().colors();
-                UiRender.text(g, f, t("ui.economy.browse.heading"), x, y + 2, c.onSurface());
                 String listingCount = Component.translatable("ui.economy.browse.live_listings", visibleBrowseCards.get().size()).getString();
-                UiRender.text(g, f, listingCount, x + width - f.width(listingCount), y + 2, c.onSurfaceMuted());
+                listingCount = fitText(f, listingCount, Math.max(0, width / 2));
+                int listingX = x + width - f.width(listingCount);
+                String heading = fitText(f, t("ui.economy.browse.heading"), Math.max(0, listingX - x - 6));
+                UiRender.text(g, f, heading, x, y + 2, c.onSurface());
+                UiRender.text(g, f, listingCount, listingX, y + 2, c.onSurfaceMuted());
             }
         });
 
@@ -457,20 +469,24 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                 CommodityIconComponent.drawIcon(g, card.itemId, x + 6, y + 12, 16, 16);
                 int textX = x + 28;
                 int textWidth = Math.max(1, width - 34);
-                UiRender.text(g, f, f.plainSubstrByWidth(getItemDisplayName(card.itemId, card.displayName), textWidth), textX, y + 4, c.onSurface());
+                UiRender.text(g, f, fitText(f, getItemDisplayName(card.itemId, card.displayName), textWidth), textX, y + 4, c.onSurface());
                 String countText = card.offerCount > 0
                         ? EconomyFormatUtil.formatCount(card.offerCount, "order", "orders")
                         : t("ui.economy.card.no_orders");
                 if (card.globalPrice != null && !card.globalPrice.isEmpty() && !card.globalPrice.equals("--")) {
                     EconomyUiComponents.drawCoin(g, textX, y + 16);
-                    String price = formatCompact(parsePrice(card.globalPrice));
-                    UiRender.text(g, f, price, textX + 9, y + 16, c.primary());
+                    int priceX = textX + 9;
                     String change = formatPriceChange(card.priceChangePercent);
-                    UiRender.text(g, f, change, textX + 9 + f.width(price) + 5, y + 16, changeColor(card.priceChangePercent));
+                    int changeWidth = Math.min(f.width(change), Math.max(0, textWidth / 2));
+                    change = fitText(f, change, changeWidth);
+                    String price = fitText(f, formatCompact(parsePrice(card.globalPrice)),
+                            Math.max(0, textX + textWidth - priceX - f.width(change) - 5));
+                    UiRender.text(g, f, price, priceX, y + 16, c.primary());
+                    UiRender.text(g, f, change, priceX + f.width(price) + 5, y + 16, changeColor(card.priceChangePercent));
                 } else {
                     UiRender.text(g, f, "--", textX, y + 16, c.onSurfaceMuted());
                 }
-                UiRender.text(g, f, f.plainSubstrByWidth(countText, textWidth), textX, y + 28, c.onSurfaceMuted());
+                UiRender.text(g, f, fitText(f, countText, textWidth), textX, y + 28, c.onSurfaceMuted());
             }
             @Override public boolean mouseClicked(double mx, double my, int button) {
                 if (mx >= x && mx < x + width && my >= y && my < y + height) {
@@ -505,17 +521,23 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                 ColorScheme c = uiRuntime().theme().colors();
                 MarketNetwork.SyncItemDetailPacket d = MarketClientStore.detail.get();
                 if (d != null) {
-                    String title = getItemDisplayName(d.itemId, d.displayName);
-                    UiRender.text(g, f, title, x, y + 4, c.onSurface());
                     double change = detailChangePercent(d);
                     String changeStr = formatPriceChange(change);
-                    UiRender.text(g, f, changeStr, x + f.width(title) + 8, y + 4, changeColor(change));
                     boolean fluid = isFluidCommodity(d.itemId);
                     String stock = fluid ? Component.translatable("ui.economy.detail.in_tank", formatFluidAmountDetailed(d.vaultCount)).getString()
                             : Component.translatable("ui.economy.detail.in_vault", formatItemAmount(d.vaultCount)).getString();
-                    UiRender.text(g, f, stock, x + width - f.width(stock), y + 4, c.primary());
+                    stock = fitText(f, stock, Math.max(1, width / 2));
+                    int stockX = x + width - f.width(stock);
+                    int leftWidth = Math.max(0, stockX - x - 6);
+                    changeStr = fitText(f, changeStr, Math.max(0, leftWidth / 3));
+                    String title = fitText(f, getItemDisplayName(d.itemId, d.displayName),
+                            Math.max(0, leftWidth - f.width(changeStr) - 8));
+                    int changeGap = title.isEmpty() || changeStr.isEmpty() ? 0 : 8;
+                    UiRender.text(g, f, title, x, y + 4, c.onSurface());
+                    UiRender.text(g, f, changeStr, x + f.width(title) + changeGap, y + 4, changeColor(change));
+                    UiRender.text(g, f, stock, stockX, y + 4, c.primary());
                 } else if (selectedItemId.get() != null) {
-                    UiRender.text(g, f, selectedItemId.get(), x, y + 4, c.onSurfaceMuted());
+                    UiRender.text(g, f, fitText(f, selectedItemId.get(), width), x, y + 4, c.onSurfaceMuted());
                 }
             }
         });
@@ -597,10 +619,14 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                     UiRender.roundedRect(g, x, y + 1, width, 16, 2, c.surfaceRaised());
                 }
                 int clr = e.isServerOrder ? c.primary() : (isAsks ? c.danger() : c.success());
-                UiRender.text(g, f, (e.isServerOrder ? "[SERVER] " : "") + e.sellerName, x + 3, y + 4, c.onSurface());
                 String line = e.price + " x " + (e.isInfinite ? "∞" : (isFluidCommodity(MarketClientStore.detail.get() == null ? "" : MarketClientStore.detail.get().itemId)
                         ? formatFluidAmount(e.quantity) : formatItemAmount(e.quantity)));
-                UiRender.text(g, f, line, x + width - f.width(line) - 3, y + 4, clr);
+                line = fitText(f, line, Math.max(0, width - 6));
+                int lineX = x + width - f.width(line) - 3;
+                String seller = fitText(f, (e.isServerOrder ? "[SERVER] " : "") + e.sellerName,
+                        Math.max(0, lineX - (x + 3) - 6));
+                UiRender.text(g, f, seller, x + 3, y + 4, c.onSurface());
+                UiRender.text(g, f, line, lineX, y + 4, clr);
             }
             @Override public boolean mouseClicked(double mx, double my, int button) {
                 if (mx >= x && mx < x + width && my >= y && my < y + height) {
@@ -626,11 +652,15 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                 if (mx >= x && mx < x + width && my >= y && my < y + height) {
                     UiRender.roundedRect(g, x, y + 1, width, 16, 2, c.surfaceRaised());
                 }
-                UiRender.text(g, f, o.isSell() ? t("ui.economy.opt.sell") : t("ui.economy.opt.buy"), x + 3, y + 4, o.isSell() ? c.danger() : c.success());
                 String detailItemId = MarketClientStore.detail.get() == null ? "" : MarketClientStore.detail.get().itemId;
                 String line = e.price + " x " + (e.isInfinite ? "∞" : (isFluidCommodity(detailItemId)
                         ? formatFluidAmount(e.quantity) : formatItemAmount(e.quantity)));
-                UiRender.text(g, f, line, x + width - f.width(line) - 3, y + 4, c.onSurface());
+                line = fitText(f, line, Math.max(0, width - 6));
+                int lineX = x + width - f.width(line) - 3;
+                String side = fitText(f, o.isSell() ? t("ui.economy.opt.sell") : t("ui.economy.opt.buy"),
+                        Math.max(0, lineX - (x + 3) - 6));
+                UiRender.text(g, f, side, x + 3, y + 4, o.isSell() ? c.danger() : c.success());
+                UiRender.text(g, f, line, lineX, y + 4, c.onSurface());
             }
         };
         info.flex();
@@ -933,15 +963,23 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                         hovered ? c.surfaceRaised() : c.surface(),
                         hovered ? c.border() : c.borderSubtle());
                 CommodityIconComponent.drawIcon(g, e.itemId, x + 4, y + 9, 16, 16);
-                UiRender.text(g, f, e.isSell ? t("ui.economy.opt.sell") : t("ui.economy.opt.buy"), x + 24, y + 4, e.isSell ? c.danger() : c.success());
-                String name = f.plainSubstrByWidth(getItemDisplayName(e.itemId, e.displayName), Math.max(30, width - 120));
-                UiRender.text(g, f, name, x + 56, y + 4, c.onSurface());
+                String side = e.isSell ? t("ui.economy.opt.sell") : t("ui.economy.opt.buy");
+                side = fitText(f, side, Math.max(0, width / 4));
+                UiRender.text(g, f, side, x + 24, y + 4, e.isSell ? c.danger() : c.success());
+                int nameX = x + 24 + f.width(side) + 6;
+                String name = fitText(f, getItemDisplayName(e.itemId, e.displayName),
+                        Math.max(0, x + width - nameX - 4));
+                UiRender.text(g, f, name, nameX, y + 4, c.onSurface());
                 EconomyUiComponents.drawCoin(g, x + 24, y + 18);
                 String qty = e.isInfinite ? "Qty: ∞"
                         : (isFluidCommodity(e.itemId) ? "Qty: " + formatFluidAmount(e.quantity) + " / " + formatFluidAmount(e.initialQuantity)
                         : "Qty: " + formatItemAmount(e.quantity) + " / " + formatItemAmount(e.initialQuantity));
-                UiRender.text(g, f, e.price, x + 35, y + 17, c.primary());
-                UiRender.text(g, f, " • " + qty, x + 35 + f.width(e.price), y + 17, c.onSurfaceMuted());
+                int metadataX = x + 35;
+                int metadataWidth = Math.max(0, x + width - metadataX - 4);
+                String price = fitText(f, e.price, metadataWidth);
+                UiRender.text(g, f, price, metadataX, y + 17, c.primary());
+                String quantity = fitText(f, " • " + qty, Math.max(0, metadataWidth - f.width(price)));
+                UiRender.text(g, f, quantity, metadataX + f.width(price), y + 17, c.onSurfaceMuted());
             }
         };
         info.flex();
@@ -1077,16 +1115,24 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                     UiRender.roundedRect(g, x, y + 1, width, 26, 3, c.surfaceRaised());
                 }
                 CommodityIconComponent.drawIcon(g, e.itemId, x + 4, y + 6, 16, 16);
-                UiRender.text(g, f, e.wasSell ? t("ui.economy.opt.sell") : t("ui.economy.opt.buy"), x + 24, y + 4, e.wasSell ? c.danger() : c.success());
-                String date = DATE_FMT.format(new Date(e.timestamp));
-                String name = f.plainSubstrByWidth(getItemDisplayName(e.itemId, e.displayName), Math.max(30, width - f.width(date) - 40));
-                UiRender.text(g, f, name, x + 56, y + 4, c.onSurface());
-                UiRender.text(g, f, date, x + width - f.width(date) - 4, y + 4, c.onSurfaceMuted());
+                String side = e.wasSell ? t("ui.economy.opt.sell") : t("ui.economy.opt.buy");
+                side = fitText(f, side, Math.max(0, width / 4));
+                UiRender.text(g, f, side, x + 24, y + 4, e.wasSell ? c.danger() : c.success());
+                String date = fitText(f, DATE_FMT.format(new Date(e.timestamp)), Math.max(0, width / 2));
+                int dateX = x + width - f.width(date) - 4;
+                int nameX = x + 24 + f.width(side) + 6;
+                String name = fitText(f, getItemDisplayName(e.itemId, e.displayName),
+                        Math.max(0, dateX - nameX - 6));
+                UiRender.text(g, f, name, nameX, y + 4, c.onSurface());
+                UiRender.text(g, f, date, dateX, y + 4, c.onSurfaceMuted());
                 EconomyUiComponents.drawCoin(g, x + 24, y + 17);
                 String pq = e.price + " x " + (isFluidCommodity(e.itemId) ? formatFluidAmount(e.quantity) : formatItemAmount(e.quantity));
-                UiRender.text(g, f, pq, x + 35, y + 16, c.primary());
                 String dir = e.wasSell ? t("ui.economy.direction.to") + " " : t("ui.economy.direction.from") + " ";
-                UiRender.text(g, f, dir + e.counterparty, x + width - f.width(dir + e.counterparty) - 4, y + 16, c.onSurfaceMuted());
+                String counterparty = fitText(f, dir + e.counterparty, Math.max(0, width / 2));
+                int counterpartyX = x + width - f.width(counterparty) - 4;
+                pq = fitText(f, pq, Math.max(0, counterpartyX - (x + 35) - 6));
+                UiRender.text(g, f, pq, x + 35, y + 16, c.primary());
+                UiRender.text(g, f, counterparty, counterpartyX, y + 16, c.onSurfaceMuted());
             }
         };
     }
@@ -1144,12 +1190,19 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                     UiRender.roundedRect(g, x, y + 1, width, 24, 3, c.surfaceRaised());
                 }
                 CommodityIconComponent.drawIcon(g, h.itemId, x + 4, y + 5, 16, 16);
-                UiRender.text(g, f, f.plainSubstrByWidth(getItemDisplayName(h.itemId, h.displayName), width - 110), x + 24, y + 8, c.onSurface());
                 String qty = isFluidCommodity(h.itemId) ? formatFluidAmount(h.quantity) : "x" + formatCompact(h.quantity);
-                UiRender.text(g, f, qty, x + width - 110, y + 8, c.onSurfaceMuted());
-                String val = formatCompact(h.totalValue);
-                EconomyUiComponents.drawCoin(g, x + width - f.width(val) - 14, y + 8);
-                UiRender.text(g, f, val, x + width - f.width(val) - 4, y + 8, c.primary());
+                String val = fitText(f, formatCompact(h.totalValue), Math.max(0, width / 3));
+                int valueX = x + width - f.width(val) - 4;
+                int coinX = valueX - 10;
+                qty = fitText(f, qty, Math.max(0, width / 3));
+                int qtyX = coinX - f.width(qty) - 8;
+                int nameX = x + 24;
+                String name = fitText(f, getItemDisplayName(h.itemId, h.displayName),
+                        Math.max(0, qtyX - nameX - 6));
+                UiRender.text(g, f, name, nameX, y + 8, c.onSurface());
+                UiRender.text(g, f, qty, qtyX, y + 8, c.onSurfaceMuted());
+                EconomyUiComponents.drawCoin(g, coinX, y + 8);
+                UiRender.text(g, f, val, valueX, y + 8, c.primary());
             }
         };
     }
@@ -1202,23 +1255,28 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                     if (o == e) break;
                     if (o.tank == e.tank) idx++;
                 }
-                UiRender.text(g, f, (e.tank ? t("ui.economy.container.tank_prefix") : t("ui.economy.container.vault_prefix")) + idx, x + 4, y + 3, c.primary());
                 boolean full = e.usedSlots >= e.totalSlots;
                 String badge = full ? t("ui.economy.container.full") : t("ui.economy.container.active");
-                EconomyUiComponents.drawBadge(g, f, badge, x + width - 4, y + 2,
+                int statusX = EconomyUiComponents.drawBadge(g, f, badge, x + width - 4, y + 2,
                         full ? Badge.Variant.DANGER : Badge.Variant.SUCCESS, false, c);
+                String title = fitText(f,
+                        (e.tank ? t("ui.economy.container.tank_prefix") : t("ui.economy.container.vault_prefix")) + idx,
+                        Math.max(0, statusX - (x + 4) - 6));
+                UiRender.text(g, f, title, x + 4, y + 3, c.primary());
                 String modeBadge = switch (e.mode) {
                     case 1 -> t("ui.economy.container.mode_input"); case 2 -> t("ui.economy.container.mode_output"); default -> t("ui.economy.container.mode_both");
                 };
                 String loc = e.dimension.replace("minecraft:", "") + " (" + e.x + ", " + e.y + ", " + e.z + ")";
-                UiRender.text(g, f, loc, x + 4, y + 17, c.onSurfaceMuted());
                 String cap = e.tank ? formatFluidAmount(e.usedSlots) + "/" + formatFluidAmount(e.totalSlots)
                         : formatCompact(e.usedSlots) + "/" + formatCompact(e.totalSlots) + " " + t("ui.economy.containers.slots");
+                cap = fitText(f, cap, Math.max(0, width / 3));
                 int capX = x + width - f.width(cap) - 4;
                 UiRender.text(g, f, cap, capX, y + 17, c.onSurface());
                 Badge.Variant modeVariant = e.mode == 1 ? Badge.Variant.WARNING : Badge.Variant.PRIMARY;
-                EconomyUiComponents.drawBadge(g, f, modeBadge, capX - 4, y + 16,
+                int modeX = EconomyUiComponents.drawBadge(g, f, modeBadge, capX - 4, y + 16,
                         modeVariant, false, c);
+                loc = fitText(f, loc, Math.max(0, modeX - (x + 4) - 6));
+                UiRender.text(g, f, loc, x + 4, y + 17, c.onSurfaceMuted());
             }
         };
     }
