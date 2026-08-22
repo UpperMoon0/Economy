@@ -29,6 +29,7 @@ import com.nstut.openui.state.Subscription;
 import com.nstut.openui.theme.ColorScheme;
 import com.nstut.openui.theme.TextStyle;
 import net.minecraft.client.Minecraft;
+import net.minecraft.Util;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -1200,7 +1201,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         int textWidth = f.width(text);
         int drawX = centerWhenFitting && textWidth <= maxWidth
                 ? tx + (maxWidth - textWidth) / 2
-                : tx - UiAnimationUtil.pingPongOffset(textWidth, maxWidth, System.currentTimeMillis());
+                : tx - UiAnimationUtil.pingPongOffset(textWidth, maxWidth, Util.getMillis());
         ClipStack.push(g, tx, ty, maxWidth, f.lineHeight);
         try {
             UiRender.text(g, f, text, drawX, ty, color);
@@ -1292,7 +1293,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                 int statusWidth = EconomyUiComponents.badgeWidth(f, badge);
                 int statusX = x + width - 4 - statusWidth;
                 boolean statusHovered = mx >= statusX && mx < statusX + statusWidth
-                        && my >= y + 2 && my < y + 14;
+                        && my >= y + 2 && my < y + 2 + EconomyUiComponents.BADGE_HEIGHT;
                 EconomyUiComponents.drawBadge(g, f, badge, x + width - 4, y + 2,
                         full ? Badge.Variant.DANGER : Badge.Variant.SUCCESS, statusHovered, c);
                 String modeBadge = switch (e.mode) {
@@ -1302,7 +1303,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                 int modeWidth = EconomyUiComponents.badgeWidth(f, modeBadge);
                 int modeX = statusX - 4 - modeWidth;
                 boolean modeHovered = mx >= modeX && mx < modeX + modeWidth
-                        && my >= y + 2 && my < y + 14;
+                        && my >= y + 2 && my < y + 2 + EconomyUiComponents.BADGE_HEIGHT;
                 EconomyUiComponents.drawBadge(g, f, modeBadge, statusX - 4, y + 2,
                         modeVariant, modeHovered, c);
                 String title = fitText(f,

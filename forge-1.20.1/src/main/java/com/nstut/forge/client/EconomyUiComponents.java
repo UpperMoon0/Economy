@@ -20,6 +20,7 @@ import java.math.BigDecimal;
  * small: only constructs that more than one screen needs.
  */
 public final class EconomyUiComponents {
+    public static final int BADGE_HEIGHT = 12;
     public static final ItemStack COIN_ICON =
             new ItemStack(BuiltInRegistries.ITEM.get(new ResourceLocation(Economy.MOD_ID, "coin")));
 
@@ -56,7 +57,7 @@ public final class EconomyUiComponents {
         };
         int width = badgeWidth(font, text);
         int x = rightX - width;
-        UiRender.pill(g, x, y, width, 12, background, border);
+        UiRender.pill(g, x, y, width, BADGE_HEIGHT, background, border);
         int textColor = variant == Badge.Variant.NEUTRAL ? colors.onSurface() : colors.onPrimary();
         UiRender.text(g, font, text, x + 4, y + 2, textColor);
         return x;
