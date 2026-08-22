@@ -650,10 +650,10 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                 line = fitText(f, line, Math.max(0, width - 6));
                 int lineX = x + width - f.width(line) - 3;
                 String sellerName = e.isServerOrder
-                        ? Component.translatable("ui.economy.orders.server_seller", e.sellerName).getString()
+                        ? t("ui.economy.orders.server_badge")
                         : e.sellerName;
                 int sellerWidth = Math.max(0, lineX - (x + 3) - 6);
-                drawMarqueeText(g, f, sellerName, x + 3, y + 4, sellerWidth, c.onSurface(), false);
+                drawSellerBadge(g, f, sellerName, x + 3, y + 3, sellerWidth, e.isServerOrder, c);
                 UiRender.text(g, f, line, lineX, y + 4, clr);
             }
             @Override public boolean mouseClicked(double mx, double my, int button) {
@@ -1223,6 +1223,18 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         } finally {
             ClipStack.pop(g);
         }
+    }
+
+    private static void drawSellerBadge(GuiGraphics g, Font f, String text, int bx, int by,
+                                        int maxWidth, boolean serverOrder, ColorScheme colors) {
+        if (maxWidth <= 0 || text == null || text.isEmpty()) return;
+        int badgeWidth = Math.min(maxWidth, EconomyUiComponents.badgeWidth(f, text));
+        if (badgeWidth <= 4) return;
+        int background = serverOrder ? colors.primaryDim() : colors.surfaceVariant();
+        int border = serverOrder ? colors.primary() : colors.border();
+        int textColor = serverOrder ? colors.onPrimary() : colors.onSurface();
+        UiRender.pill(g, bx, by, badgeWidth, EconomyUiComponents.BADGE_HEIGHT, background, border);
+        drawMarqueeText(g, f, text, bx + 4, by + 2, Math.max(0, badgeWidth - 8), textColor, false);
     }
 
     private UIComponent buildHoldingRow(MarketNetwork.AssetHoldingData h) {

@@ -134,7 +134,7 @@
   "ui.economy.container.tooltip.mode_input": "Market automation may supply stock from this container.",
   "ui.economy.container.tooltip.mode_output": "Market automation may deliver purchases into this container.",
 
-  "ui.economy.orders.server_seller": "[SERVER] %s",
+  "ui.economy.orders.server_badge": "SERVER",
   "ui.economy.orders.quantity_infinite": "Qty: ∞",
   "ui.economy.orders.quantity_progress": "Qty: %s / %s",
 
