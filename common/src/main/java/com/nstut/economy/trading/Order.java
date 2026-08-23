@@ -330,8 +330,7 @@ public class Order implements IOrder {
             delivered = commitDelivery(level, buyer, deliverItems, deliverFluids, tradeQty);
             if (delivered < tradeQty) {
                 BigDecimal shortfallRefund = pricePerUnit.multiply(BigDecimal.valueOf((long) tradeQty - delivered));
-                sellerAccount.transferTo(buyerAccount, shortfallRefund,
-                        TransactionContext.transfer("Refund - partial delivery", buyer));
+                refund(sellerAccount, buyerAccount, buyer, shortfallRefund, "Refund - partial delivery");
                 Economy.LOGGER.warn("Partial delivery on sell order {}: {}/{} units delivered; refunded {}",
                         orderId, delivered, tradeQty, shortfallRefund.toPlainString());
             }
@@ -419,18 +418,22 @@ public class Order implements IOrder {
             totalPrice = pricePerUnit.multiply(BigDecimal.valueOf(tradeQty));
         }
 
-        int delivered;
-        if (level == null || serverOrder) {
+        int delivered = tradeQty;
+        if (level == null) {
             delivered = tradeQty;
         } else if (commodity instanceof ItemCommodity ic && ic.getItem() != null) {
             NonNullList<ItemStack> extracted = NonNullList.create();
             if (!VaultManager.extractItemFromVaults(level, seller, ic.getItem(), tradeQty, extracted)) {
                 return TransactionResult.failure("Failed to extract items from vault(s)");
             }
-            NonNullList<ItemStack> leftover = VaultManager.insertItemStacksToVaults(level, owner, extracted);
-            delivered = VaultInventoryOps.total(extracted) - VaultInventoryOps.total(leftover);
-            if (!leftover.isEmpty()) {
-                VaultManager.insertItemStacksToVaults(level, seller, leftover);
+            if (serverOrder) {
+                delivered = VaultInventoryOps.total(extracted);
+            } else {
+                NonNullList<ItemStack> leftover = VaultManager.insertItemStacksToVaults(level, owner, extracted);
+                delivered = VaultInventoryOps.total(extracted) - VaultInventoryOps.total(leftover);
+                if (!leftover.isEmpty()) {
+                    returnLeftoverToSeller(level, seller, leftover);
+                }
             }
         } else if (commodity instanceof FluidCommodity fc) {
             List<FluidStack> extracted = new ArrayList<>();
@@ -441,15 +444,17 @@ public class Order implements IOrder {
                 }
                 return TransactionResult.failure("Failed to extract fluid from tank(s)");
             }
-            delivered = 0;
-            for (FluidStack fs : extracted) {
-                delivered += TankManager.insertFluidToTanks(level, owner, fs);
+            if (serverOrder) {
+                delivered = drained;
+            } else {
+                delivered = 0;
+                for (FluidStack fs : extracted) {
+                    delivered += TankManager.insertFluidToTanks(level, owner, fs);
+                }
+                if (delivered < drained) {
+                    TankManager.restoreFluidToTanks(level, seller, new FluidStack(fc.getFluid(), drained - delivered));
+                }
             }
-            if (delivered < drained) {
-                TankManager.restoreFluidToTanks(level, seller, new FluidStack(fc.getFluid(), drained - delivered));
-            }
-        } else {
-            delivered = tradeQty;
         }
 
         BigDecimal chargeTotal = pricePerUnit.multiply(BigDecimal.valueOf(delivered));
@@ -460,7 +465,12 @@ public class Order implements IOrder {
         if (!buyerAccount.transferTo(sellerAccount, chargeTotal,
                 TransactionContext.transfer("Sale of " + commodity.getDisplayName().getString(), owner))) {
             Economy.LOGGER.error("Payment failed after goods were delivered for buy order {}; attempting rollback", orderId);
-            rollbackDelivery(level, seller, owner, commodity, delivered);
+            if (!serverOrder) {
+                rollbackDelivery(level, seller, owner, commodity, delivered);
+            } else {
+                Economy.LOGGER.error("Server buy order {}: delivered goods were consumed by the server; seller {} was not paid for {} units of {}",
+                        orderId, seller, delivered, commodity.getId());
+            }
             return TransactionResult.failure("Payment failed");
         }
 
@@ -471,6 +481,15 @@ public class Order implements IOrder {
         notifyPlayerTrade(level, owner, seller, true, commodity.getDisplayName().getString(), commodity instanceof FluidCommodity, delivered, pricePerUnit, chargeTotal);
         notifyPlayerTrade(level, seller, owner, false, commodity.getDisplayName().getString(), commodity instanceof FluidCommodity, delivered, pricePerUnit, chargeTotal);
         return TransactionResult.success("Sale successful", chargeTotal, delivered);
+    }
+
+    private void returnLeftoverToSeller(ServerLevel level, UUID seller, NonNullList<ItemStack> leftover) {
+        NonNullList<ItemStack> returned = VaultManager.insertItemStacksToVaults(level, seller, leftover);
+        int lost = VaultInventoryOps.total(leftover) - VaultInventoryOps.total(returned);
+        if (lost > 0) {
+            Economy.LOGGER.error("Lost {} units returning undelivered goods to seller {} on buy order {}; seller storage was full",
+                    lost, seller, orderId);
+        }
     }
 
     private void rollbackDelivery(ServerLevel level, UUID seller, UUID buyer, ICommodity commodity, int qty) {
@@ -578,8 +597,7 @@ public class Order implements IOrder {
             delivered = commitDelivery(level, trader, deliverItems, deliverFluids, tradeQty);
             if (delivered < tradeQty) {
                 BigDecimal shortfallRefund = pricePerUnit.multiply(BigDecimal.valueOf((long) tradeQty - delivered));
-                sellerAccount.transferTo(buyerAccount, shortfallRefund,
-                        TransactionContext.transfer("Refund - partial delivery", trader));
+                refund(sellerAccount, buyerAccount, trader, shortfallRefund, "Refund - partial delivery");
                 Economy.LOGGER.warn("Partial delivery on sell order {}: {}/{} units delivered; refunded {}",
                         orderId, delivered, tradeQty, shortfallRefund.toPlainString());
             }
@@ -649,7 +667,7 @@ public class Order implements IOrder {
             if (isItem && item != null) {
                 NonNullList<ItemStack> extracted = NonNullList.create();
                 if (!VaultManager.extractItemFromVaults(level, trader, item, tradeQty, extracted)) {
-                    refund(buyerAccount, sellerAccount, trader, totalPrice, "Refund - extraction failed");
+                    refund(sellerAccount, buyerAccount, trader, totalPrice, "Refund - extraction failed");
                     return TransactionResult.failure("Failed to extract items from seller vault(s)");
                 }
                 if (serverOrder) {
@@ -658,7 +676,7 @@ public class Order implements IOrder {
                     NonNullList<ItemStack> leftover = VaultManager.insertItemStacksToVaults(level, owner, extracted);
                     delivered = VaultInventoryOps.total(extracted) - VaultInventoryOps.total(leftover);
                     if (!leftover.isEmpty()) {
-                        VaultManager.insertItemStacksToVaults(level, trader, leftover);
+                        returnLeftoverToSeller(level, trader, leftover);
                     }
                 }
             } else if (isFluid && fluid != null) {
@@ -668,7 +686,7 @@ public class Order implements IOrder {
                     for (FluidStack fs : extracted) {
                         TankManager.restoreFluidToTanks(level, trader, fs);
                     }
-                    refund(buyerAccount, sellerAccount, trader, totalPrice, "Refund - extraction failed");
+                    refund(sellerAccount, buyerAccount, trader, totalPrice, "Refund - extraction failed");
                     return TransactionResult.failure("Failed to extract fluid from seller tank(s)");
                 }
                 if (serverOrder) {
@@ -686,7 +704,7 @@ public class Order implements IOrder {
 
             if (delivered < tradeQty) {
                 BigDecimal shortfallRefund = pricePerUnit.multiply(BigDecimal.valueOf((long) tradeQty - delivered));
-                refund(buyerAccount, sellerAccount, trader, shortfallRefund, "Refund - partial delivery");
+                refund(sellerAccount, buyerAccount, trader, shortfallRefund, "Refund - partial delivery");
                 Economy.LOGGER.warn("Partial delivery on buy order {}: {}/{} units delivered; refunded {}",
                         orderId, delivered, tradeQty, shortfallRefund.toPlainString());
             }
