@@ -2,6 +2,7 @@ package com.nstut.economy.trading;
 
 import com.nstut.economy.api.IAccountManager;
 import com.nstut.economy.api.IBankAccount;
+import com.nstut.economy.api.IOrder;
 import com.nstut.economy.api.ITransactionContext;
 import com.nstut.economy.api.ITransactionRecord;
 import com.nstut.economy.core.AccountManagerHolder;
@@ -140,7 +141,7 @@ class OrderMoneyFlowTest extends MinecraftTestBase {
         NonNullList<ItemStack> escrow = NonNullList.create();
         escrow.add(new ItemStack(Items.IRON_INGOT, reserved));
         return new Order(seller, ironCommodity(), qty, new BigDecimal(price),
-                OrderType.SELL, null, escrow);
+                IOrder.OrderType.SELL, null, escrow);
     }
 
     @Test
@@ -179,7 +180,7 @@ class OrderMoneyFlowTest extends MinecraftTestBase {
         IBankAccount ownerAccount = accounts.getOrCreatePlayerAccount(buyer);
         ownerAccount.credit(new BigDecimal("100"), null);
         Order order = new Order(buyer, ironCommodity(), 10, new BigDecimal("2"),
-                OrderType.BUY, null);
+                IOrder.OrderType.BUY, null);
 
         IOrder.TransactionResult result = order.executePartial(seller, 10, null);
 
@@ -196,7 +197,7 @@ class OrderMoneyFlowTest extends MinecraftTestBase {
         IBankAccount ownerAccount = accounts.getOrCreatePlayerAccount(buyer);
         ownerAccount.credit(new BigDecimal("6"), null);
         Order order = new Order(buyer, ironCommodity(), 10, new BigDecimal("2"),
-                OrderType.BUY, null);
+                IOrder.OrderType.BUY, null);
 
         IOrder.TransactionResult result = order.executePartial(seller, 10, null);
 
@@ -211,7 +212,7 @@ class OrderMoneyFlowTest extends MinecraftTestBase {
     @DisplayName("Server buy orders pay sellers from the server account")
     void serverBuyOrderPaysFromServerAccount() {
         Order order = new Order(OrderManager.SERVER_ID, ironCommodity(), 10, new BigDecimal("2"),
-                OrderType.BUY, null);
+                IOrder.OrderType.BUY, null);
         order.setServerOrder(true);
 
         IOrder.TransactionResult result = order.executePartial(seller, 4, null);
