@@ -476,7 +476,12 @@ public class MarketNetwork {
                     OrderManager orderManager = Economy.getOrderManager();
                     var opt = orderManager.getOrder(pkt.orderId);
                     BigDecimal price = parsePrice(pkt.pricePerUnit);
-                    boolean valid = price != null && isValidQuantity(pkt.quantity);
+                    // Quantity 0 is only meaningful for infinite buy orders
+                    // (price-only edits); everything else needs a real quantity.
+                    boolean isInfiniteBuyEdit = pkt.quantity == 0 && opt.isPresent()
+                            && opt.get().isInfinite()
+                            && opt.get().getType() == com.nstut.economy.api.IOrder.OrderType.BUY;
+                    boolean valid = price != null && (isValidQuantity(pkt.quantity) || isInfiniteBuyEdit);
                     if (!valid) {
                         com.nstut.Economy.LOGGER.warn("Rejected edit packet with invalid quantity/price from {}", player.getName().getString());
                     } else {

@@ -18,9 +18,19 @@ public final class OrderInputValidator {
         try {
             return new ResourceLocation(raw);
         } catch (Exception e) {
-            com.nstut.Economy.LOGGER.warn("Rejected malformed commodity id from client: {}", raw);
+            com.nstut.Economy.LOGGER.warn("Rejected malformed commodity id from client: {}", sanitizeForLog(raw));
             return null;
         }
+    }
+
+    /**
+     * Strips characters that cannot appear in a resource location and caps the
+     * length so untrusted client input can neither forge log lines nor flood
+     * them.
+     */
+    private static String sanitizeForLog(String raw) {
+        String cleaned = raw.replaceAll("[^a-zA-Z0-9._:\\-/]", "?");
+        return cleaned.length() > 64 ? cleaned.substring(0, 64) + "..." : cleaned;
     }
 
     /**

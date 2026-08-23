@@ -16,11 +16,13 @@ public class OrderManager {
 
     private final Map<UUID, Order> orders;
     private final Map<ICommodity, List<Order>> commodityIndex;
+    private final Map<UUID, EconomyOrderData.OrderSnapshot> quarantinedOrders;
     private EconomyOrderData backingData;
 
     public OrderManager() {
         this.orders = new ConcurrentHashMap<>();
         this.commodityIndex = new ConcurrentHashMap<>();
+        this.quarantinedOrders = new ConcurrentHashMap<>();
     }
 
     public void setOrderData(EconomyOrderData data) {
@@ -30,6 +32,7 @@ public class OrderManager {
     public void loadFrom(EconomyOrderData data) {
         orders.clear();
         commodityIndex.clear();
+        quarantinedOrders.clear();
         this.backingData = data;
         for (EconomyOrderData.OrderSnapshot snap : data.getOrders().values()) {
             try {
@@ -38,22 +41,34 @@ public class OrderManager {
                     orders.put(order.getOrderId(), order);
                     commodityIndex.computeIfAbsent(order.getCommodity(), k -> new ArrayList<>()).add(order);
                 } else if (!snap.reservedItems.isEmpty() || !snap.reservedFluids.isEmpty()) {
-                    Economy.LOGGER.error("Discarding invalid persisted order {} ({}) holding escrow: {} items, {} mB",
-                            snap.orderId, snap.itemId, snap.reservedItems.size(),
-                            snap.reservedFluids.stream().mapToInt(f -> f.getAmount()).sum());
+                    quarantineOrder(snap, "invalid persisted order (likely expired while offline)");
                 }
             } catch (Exception e) {
                 Economy.LOGGER.error("Failed to load persisted order {} for item {}; escrow snapshot preserved in world data",
-                        safeOrderId(snap), snap.itemId, e);
+                        snap.orderId, snap.itemId, e);
+                quarantineOrder(snap, "order failed to deserialize");
             }
         }
     }
 
-    private static UUID safeOrderId(EconomyOrderData.OrderSnapshot snap) {
-        try {
-            return snap.orderId;
-        } catch (Exception e) {
-            return null;
+    /**
+     * Preserves a snapshot of an order that can no longer be active but still
+     * holds escrowed goods. Quarantined snapshots are re-persisted on every
+     * save so escrowed items/fluids are never silently destroyed; an admin
+     * can resolve them manually from the saved data.
+     */
+    private void quarantineOrder(EconomyOrderData.OrderSnapshot snap, String reason) {
+        if (snap == null || (snap.reservedItems.isEmpty() && snap.reservedFluids.isEmpty())) {
+            return;
+        }
+        if (quarantinedOrders.put(snap.orderId, snap) == null) {
+            Economy.LOGGER.error(
+                    "Quarantined {} ({}): {}. Escrow preserved - {} item stack(s), {} mB",
+                    reason, snap.orderId, snap.itemId, snap.reservedItems.size(),
+                    snap.reservedFluids.stream().mapToInt(f -> f.getAmount()).sum());
+        }
+        if (backingData != null) {
+            backingData.putOrder(snap);
         }
     }
 
@@ -63,7 +78,12 @@ public class OrderManager {
         for (Order order : orders.values()) {
             if (order.isValid()) {
                 backingData.putOrder(order.toSnapshot());
+            } else {
+                quarantineOrder(order.toSnapshot(), "order no longer valid at save time");
             }
+        }
+        for (EconomyOrderData.OrderSnapshot snap : quarantinedOrders.values()) {
+            backingData.putOrder(snap);
         }
     }
 
@@ -357,11 +377,7 @@ public class OrderManager {
     }
 
     private static UUID orderIdSafe(Order order) {
-        try {
-            return order.getOrderId();
-        } catch (Exception e) {
-            return null;
-        }
+        return order.getOrderId();
     }
 
     private static NonNullList<ItemStack> copyStacks(NonNullList<ItemStack> original) {
@@ -423,6 +439,11 @@ public class OrderManager {
         if (!order.getOwner().equals(requester)) {
             return false;
         }
+        // Verify the order is actually cancellable before touching escrow;
+        // restoring goods for a failed cancel would duplicate them.
+        if (!order.canCancel()) {
+            return false;
+        }
 
         if (order.getType() == IOrder.OrderType.SELL && !order.isServerOrder()
                 && (!order.getReservedItems().isEmpty() || !order.getReservedFluids().isEmpty())) {
@@ -469,6 +490,7 @@ public class OrderManager {
             removeOrder(order);
             return true;
         }
+        Economy.LOGGER.error("Order {} passed cancellability check but cancel() failed; keeping order intact", orderId);
         return false;
     }
 
@@ -546,7 +568,11 @@ public class OrderManager {
             .filter(order -> !order.isValid())
             .collect(Collectors.toList());
         for (Order order : toRemove) {
+            boolean holdsEscrow = !order.getReservedItems().isEmpty() || !order.getReservedFluids().isEmpty();
             removeOrder(order);
+            if (holdsEscrow) {
+                quarantineOrder(order.toSnapshot(), "invalid order still held escrow");
+            }
         }
     }
 

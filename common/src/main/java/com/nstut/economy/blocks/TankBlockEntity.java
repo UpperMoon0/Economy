@@ -21,8 +21,10 @@ import com.nstut.economy.config.EconomyConfig;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import javax.annotation.ParametersAreNonnullByDefault;
 import java.util.UUID;
 
+@ParametersAreNonnullByDefault
 public class TankBlockEntity extends BlockEntity implements WorldlyContainer {
 
     public enum TankMode {

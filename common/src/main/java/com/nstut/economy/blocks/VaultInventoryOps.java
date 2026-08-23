@@ -41,7 +41,7 @@ public final class VaultInventoryOps {
             for (int i = 0; i < slots.size() && !remainder.isEmpty(); i++) {
                 ItemStack slot = slots.get(i);
                 if (slot.isEmpty()) {
-                    int put = Math.min(remainder.getCount(), Math.max(1, remainder.getMaxStackSize()));
+                    int put = Math.min(remainder.getCount(), remainder.getMaxStackSize());
                     ItemStack placed = remainder.copy();
                     placed.setCount(put);
                     slots.set(i, placed);

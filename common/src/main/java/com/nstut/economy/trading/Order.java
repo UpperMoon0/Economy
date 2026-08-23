@@ -903,9 +903,13 @@ public class Order implements IOrder {
         return reservedFluids;
     }
 
+    public boolean canCancel() {
+        return !cancelled && quantity > 0;
+    }
+
     @Override
     public boolean cancel() {
-        if (cancelled || quantity <= 0) {
+        if (!canCancel()) {
             return false;
         }
         this.cancelled = true;
