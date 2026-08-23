@@ -24,7 +24,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: UpperMoon0/OpenUI-MC
-          ref: codex/openui-0.0.4
+          ref: codex/openui-0.0.5
           path: OpenUI-MC
 
       - name: Set up JDK 21 for OpenUI
