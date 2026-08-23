@@ -19,6 +19,7 @@ import com.nstut.openui.controls.Popover;
 import com.nstut.openui.controls.Select;
 import com.nstut.openui.controls.Tabs;
 import com.nstut.openui.controls.TextField;
+import com.nstut.openui.controls.Tooltip;
 import com.nstut.openui.controls.VirtualList;
 import com.nstut.openui.overlay.OverlayHandle;
 import com.nstut.openui.state.Computed;
@@ -249,7 +250,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         for (String line : deferredTooltip.getString().split("\\n", -1)) {
             lines.addAll(font.split(Component.literal(line), TOOLTIP_MAX_WIDTH));
         }
-        g.renderTooltip(font, lines, mouseX, mouseY);
+        Tooltip.drawHover(g, font, lines, mouseX, mouseY, 0, 0, this.width, this.height);
         deferredTooltip = null;
     }
 
