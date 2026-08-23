@@ -78,18 +78,31 @@ public class VaultManager {
         if (records == null || records.isEmpty()) return Collections.emptyList();
         List<VaultBlockEntity> result = new ArrayList<>();
         for (VaultRecord record : records) {
-            Level targetLevel = level;
-            if (level.getServer() != null) {
-                ResourceLocation dimRl = new ResourceLocation(record.dimension);
-                ResourceKey<Level> key = ResourceKey.create(Registries.DIMENSION, dimRl);
-                ServerLevel serverLevel = level.getServer().getLevel(key);
-                if (serverLevel != null) targetLevel = serverLevel;
-            }
-            if (targetLevel.getBlockEntity(record.pos) instanceof VaultBlockEntity vault) {
+            Level targetLevel = resolveRecordLevel(level, record.dimension);
+            if (targetLevel == null) continue;
+            if (!targetLevel.dimension().location().toString().equals(record.dimension)) continue;
+            if (targetLevel.getBlockEntity(record.pos) instanceof VaultBlockEntity vault
+                    && vault.getOwner() != null && vault.getOwner().equals(owner)) {
                 result.add(vault);
             }
         }
         return result;
+    }
+
+    @Nullable
+    private static Level resolveRecordLevel(Level fallback, String dimension) {
+        if (fallback == null) return null;
+        if (fallback.getServer() != null) {
+            try {
+                ResourceLocation dimRl = new ResourceLocation(dimension);
+                ResourceKey<Level> key = ResourceKey.create(Registries.DIMENSION, dimRl);
+                return fallback.getServer().getLevel(key);
+            } catch (Exception e) {
+                com.nstut.Economy.LOGGER.warn("Ignoring storage record with unresolvable dimension {}", dimension);
+                return null;
+            }
+        }
+        return fallback;
     }
 
     public static int countItemInVaults(Level level, UUID owner, Item item) {
@@ -100,16 +113,6 @@ public class VaultManager {
             }
         }
         return count;
-    }
-
-    public static int countAvailableSpaceInVaults(Level level, UUID owner, ItemStack stack) {
-        int space = 0;
-        for (VaultBlockEntity v : getVaults(level, owner)) {
-            if (v.getMode().canReceiveMarket()) {
-                space += v.countAvailableSpace(stack);
-            }
-        }
-        return space;
     }
 
     public static boolean extractItemFromVaults(Level level, UUID owner, Item item, int amount, NonNullList<ItemStack> destination) {
@@ -131,22 +134,49 @@ public class VaultManager {
         return remaining == 0;
     }
 
-    public static boolean insertItemStacksToVaults(Level level, UUID owner, NonNullList<ItemStack> stacks) {
-        NonNullList<ItemStack> remaining = NonNullList.create();
-        for (ItemStack s : stacks) remaining.add(s.copy());
+    /**
+     * Simulates distributing the payload across all receiving vaults without
+     * mutating any vault. Returns exactly what would not fit; an empty result
+     * means a subsequent {@link #insertItemStacksToVaults} of the same payload
+     * is expected to fully succeed.
+     */
+    public static NonNullList<ItemStack> simulateInsertItemStacksToVaults(Level level, UUID owner, List<ItemStack> stacks) {
+        List<List<ItemStack>> snapshots = new ArrayList<>();
+        for (VaultBlockEntity v : getVaults(level, owner)) {
+            if (!v.getMode().canReceiveMarket()) continue;
+            List<ItemStack> snapshot = new ArrayList<>(v.getContainerSize());
+            for (int i = 0; i < v.getContainerSize(); i++) {
+                snapshot.add(v.getItem(i));
+            }
+            snapshots.add(snapshot);
+        }
+        return VaultInventoryOps.simulateDistribute(snapshots, stacks);
+    }
 
+    /**
+     * Returns how many items of the given payload the receiving vaults can
+     * currently accept, honoring per-stack NBT matching.
+     */
+    public static int countMaxAcceptableItems(Level level, UUID owner, List<ItemStack> payload) {
+        int payloadTotal = VaultInventoryOps.total(payload);
+        NonNullList<ItemStack> leftover = simulateInsertItemStacksToVaults(level, owner, payload);
+        return payloadTotal - VaultInventoryOps.total(leftover);
+    }
+
+    /**
+     * Inserts the payload vault-by-vault, carrying remainders forward. Returns
+     * exactly what did not fit anywhere; an empty result means full success.
+     */
+    public static NonNullList<ItemStack> insertItemStacksToVaults(Level level, UUID owner, List<ItemStack> stacks) {
+        NonNullList<ItemStack> remaining = NonNullList.create();
+        for (ItemStack s : stacks) {
+            if (s != null && !s.isEmpty()) remaining.add(s.copy());
+        }
         for (VaultBlockEntity v : getVaults(level, owner)) {
             if (remaining.isEmpty()) break;
             if (!v.getMode().canReceiveMarket()) continue;
-            NonNullList<ItemStack> toInsert = NonNullList.create();
-            for (ItemStack s : remaining) if (!s.isEmpty()) toInsert.add(s.copy());
-            if (toInsert.isEmpty()) break;
-
-            if (v.insertItemStacks(toInsert)) {
-                remaining.clear();
-                break;
-            }
+            remaining = v.insertItemStacks(remaining);
         }
-        return remaining.stream().allMatch(ItemStack::isEmpty);
+        return remaining;
     }
 }

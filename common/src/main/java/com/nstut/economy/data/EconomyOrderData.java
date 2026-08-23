@@ -18,6 +18,14 @@ public class EconomyOrderData extends SavedData {
 
     private static final String NAME = "economy_orders";
 
+    /**
+     * Bump when the on-disk order format changes incompatibly. Older versions
+     * load with best-effort migration; newer versions refuse to guess.
+     */
+    public static final int DATA_VERSION = 1;
+
+    private final List<CompoundTag> quarantinedOrders = new ArrayList<>();
+
     public static final class OrderSnapshot {
         public final UUID orderId;
         public final UUID owner;
@@ -100,6 +108,15 @@ public class EconomyOrderData extends SavedData {
         setDirty();
     }
 
+    /**
+     * Raw NBT snapshots of orders that failed to load. They are round-tripped
+     * back into the save file so escrowed goods are never silently destroyed by
+     * a corrupt or unreadable record.
+     */
+    public List<CompoundTag> getQuarantinedOrders() {
+        return quarantinedOrders;
+    }
+
     public static EconomyOrderData get(net.minecraft.server.level.ServerLevel level) {
         net.minecraft.server.level.ServerLevel target = (level != null && level.getServer() != null) ? level.getServer().overworld() : level;
         return target.getDataStorage().computeIfAbsent(EconomyOrderData::load, EconomyOrderData::new, NAME);
@@ -107,6 +124,15 @@ public class EconomyOrderData extends SavedData {
 
     public static EconomyOrderData load(CompoundTag tag) {
         EconomyOrderData data = new EconomyOrderData();
+        int version = tag.contains("DataVersion", Tag.TAG_INT) ? tag.getInt("DataVersion") : 0;
+        if (version > DATA_VERSION) {
+            com.nstut.Economy.LOGGER.error("Order data was written by a newer mod version ({} > {}); loading best-effort",
+                    version, DATA_VERSION);
+        }
+        ListTag quarantined = tag.getList("QuarantinedOrders", Tag.TAG_COMPOUND);
+        for (int i = 0; i < quarantined.size(); i++) {
+            data.quarantinedOrders.add(quarantined.getCompound(i).copy());
+        }
         ListTag list = tag.getList("Orders", Tag.TAG_COMPOUND);
         for (int i = 0; i < list.size(); i++) {
             CompoundTag t = list.getCompound(i);
@@ -115,7 +141,8 @@ public class EconomyOrderData extends SavedData {
                 if (t.contains("Reserved", Tag.TAG_LIST)) {
                     ListTag resList = t.getList("Reserved", Tag.TAG_COMPOUND);
                     for (int r = 0; r < resList.size(); r++) {
-                        reserved.add(ItemStack.of(resList.getCompound(r)));
+                        ItemStack stack = ItemStack.of(resList.getCompound(r));
+                        if (!stack.isEmpty()) reserved.add(stack);
                     }
                 }
                 List<FluidStack> reservedFluids = new ArrayList<>();
@@ -151,6 +178,13 @@ public class EconomyOrderData extends SavedData {
                     commodityType
                 ));
             } catch (Exception e) {
+                boolean hasEscrow = (t.contains("Reserved", Tag.TAG_LIST) && !t.getList("Reserved", Tag.TAG_COMPOUND).isEmpty())
+                        || (t.contains("ReservedFluids", Tag.TAG_LIST) && !t.getList("ReservedFluids", Tag.TAG_COMPOUND).isEmpty());
+                com.nstut.Economy.LOGGER.error("Failed to load persisted order; quarantining snapshot (escrowed goods preserved): {}",
+                        t, e);
+                if (hasEscrow) {
+                    data.quarantinedOrders.add(t.copy());
+                }
             }
         }
         return data;
@@ -158,6 +192,7 @@ public class EconomyOrderData extends SavedData {
 
     @Override
     public CompoundTag save(CompoundTag tag) {
+        tag.putInt("DataVersion", DATA_VERSION);
         ListTag list = new ListTag();
         for (OrderSnapshot s : orders.values()) {
             CompoundTag sTag = new CompoundTag();
@@ -202,6 +237,13 @@ public class EconomyOrderData extends SavedData {
             list.add(sTag);
         }
         tag.put("Orders", list);
+        if (!quarantinedOrders.isEmpty()) {
+            ListTag quarantine = new ListTag();
+            for (CompoundTag t : quarantinedOrders) {
+                quarantine.add(t.copy());
+            }
+            tag.put("QuarantinedOrders", quarantine);
+        }
         return tag;
     }
 }

@@ -5,9 +5,8 @@ import net.minecraft.core.Direction;
 import net.minecraft.core.NonNullList;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
-import net.minecraft.world.Container;
 import net.minecraft.world.ContainerHelper;
-import net.minecraft.world.SimpleContainer;
+import net.minecraft.world.WorldlyContainer;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -18,12 +17,13 @@ import net.minecraftforge.common.capabilities.Capability;
 import net.minecraftforge.common.capabilities.ForgeCapabilities;
 import net.minecraftforge.common.util.LazyOptional;
 import net.minecraftforge.fluids.capability.IFluidHandler;
+import com.nstut.economy.config.EconomyConfig;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.UUID;
 
-public class TankBlockEntity extends BlockEntity implements Container {
+public class TankBlockEntity extends BlockEntity implements WorldlyContainer {
 
     public enum TankMode {
         BOTH(0, "Both (Input & Output)"),
@@ -124,6 +124,10 @@ public class TankBlockEntity extends BlockEntity implements Container {
         return fillInternal(resource, IFluidHandler.FluidAction.EXECUTE);
     }
 
+    public int fill(FluidStack resource, IFluidHandler.FluidAction action) {
+        return fillInternal(resource, action);
+    }
+
     private int fillInternal(FluidStack resource, IFluidHandler.FluidAction action) {
         if (resource.isEmpty()) return 0;
         if (!fluid.isEmpty() && !fluid.isFluidEqual(resource)) return 0;
@@ -168,7 +172,12 @@ public class TankBlockEntity extends BlockEntity implements Container {
 
     @Override
     public <T> @NotNull LazyOptional<T> getCapability(@NotNull Capability<T> cap, @Nullable Direction side) {
-        if (cap == ForgeCapabilities.FLUID_HANDLER) return fluidCapability.cast();
+        if (cap == ForgeCapabilities.FLUID_HANDLER) {
+            if (!EconomyConfig.getInstance().isExternalAutomationAllowed()) {
+                return LazyOptional.empty();
+            }
+            return fluidCapability.cast();
+        }
         return super.getCapability(cap, side);
     }
 
@@ -302,6 +311,21 @@ public class TankBlockEntity extends BlockEntity implements Container {
     public void clearContent() {
         items.clear();
         setChanged();
+    }
+
+    @Override
+    public int[] getSlotsForFace(Direction side) {
+        return new int[0];
+    }
+
+    @Override
+    public boolean canPlaceItemThroughFace(int index, ItemStack stack, @Nullable Direction direction) {
+        return false;
+    }
+
+    @Override
+    public boolean canTakeItemThroughFace(int index, ItemStack stack, @Nullable Direction direction) {
+        return false;
     }
 
     @Override
