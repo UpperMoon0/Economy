@@ -24,7 +24,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: UpperMoon0/OpenUI-MC
-          ref: codex/openui-0.0.5
+          ref: main
           path: OpenUI-MC
 
       - name: Set up JDK 21 for OpenUI
@@ -43,7 +43,14 @@ jobs:
 
       - name: Publish OpenUI-MC to Maven Local
         working-directory: OpenUI-MC
-        run: ./gradlew :forge-1.20.1:publishToMavenLocal --no-daemon
+        run: |
+          WANT_VER=$(grep -oE 'openui-mc-forge-1\.20\.1:[0-9.]+' ../forge-1.20.1/build.gradle | head -n1 | cut -d: -f2)
+          CUR_VER=$(grep '^mod_version' gradle.properties | cut -d'=' -f2 | tr -d ' \r')
+          if [[ -n "$WANT_VER" && "$CUR_VER" != "$WANT_VER" ]]; then
+            echo "Pinning published OpenUI version $CUR_VER -> $WANT_VER to match Economy's dependency"
+            sed -i "s/^mod_version[[:space:]]*=.*/mod_version = ${WANT_VER}/" gradle.properties
+          fi
+          ./gradlew :forge-1.20.1:publishToMavenLocal --no-daemon
 
       - name: Set up JDK 17 for Economy
         uses: actions/setup-java@v5
