@@ -1466,7 +1466,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                 graphRange = Math.max(1.0, graphMax - graphMin);
 
                 currentText = formatCompact(points.get(points.size() - 1).value);
-                badgeW = f.width(currentText) + 8;
+                badgeW = EconomyUiComponents.coinBadgeWidth(f, currentText);
                 badgeH = 12;
                 badgeX = x + width - badgeW - 4;
                 liveText = off == 0 ? t("ui.economy.chart.live") : t("ui.economy.chart.live_scroll");
@@ -1474,7 +1474,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                 liveH = 12;
                 liveX = badgeX - liveW - 4;
                 liveY = y + 2;
-                int axisWidth = Math.max(f.width(formatCompact(max)), f.width(formatCompact(min))) + 8;
+                int axisWidth = Math.max(f.width(formatCompact(max)), f.width(formatCompact(min))) + 18;
                 plotLeft = x + axisWidth;
                 plotRight = Math.max(plotLeft + 1, liveX - 6);
                 plotTop = y + 14;
@@ -1523,8 +1523,10 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
             int off = Math.min(offset.get(), maxOff);
             List<ChartSample> vis = visiblePoints(pts, off);
             ChartLayout layout = new ChartLayout(f, vis, off);
-            UiRender.text(g, f, formatCompact(layout.max), x + 3, y + 3, c.onSurfaceMuted());
-            UiRender.text(g, f, formatCompact(layout.min), x + 3, y + height - 11, c.onSurfaceMuted());
+            EconomyUiComponents.drawCoin(g, x + 3, y + 2);
+            UiRender.text(g, f, formatCompact(layout.max), x + 13, y + 3, c.onSurfaceMuted());
+            EconomyUiComponents.drawCoin(g, x + 3, y + height - 12);
+            UiRender.text(g, f, formatCompact(layout.min), x + 13, y + height - 11, c.onSurfaceMuted());
             boolean liveHov = mx >= layout.liveX && mx < layout.liveX + layout.liveW && my >= layout.liveY && my < layout.liveY + layout.liveH;
             EconomyUiComponents.drawBadge(g, f, layout.liveText,
                     layout.liveX + layout.liveW, layout.liveY,
@@ -1550,7 +1552,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                     deferredTooltip = Component.literal(vis.get(i).tooltip);
                 }
             }
-            EconomyUiComponents.drawBadge(g, f, layout.currentText,
+            EconomyUiComponents.drawCoinBadge(g, f, layout.currentText,
                     layout.badgeX + layout.badgeW, layout.badgeY,
                     Badge.Variant.PRIMARY, false, c);
         }
