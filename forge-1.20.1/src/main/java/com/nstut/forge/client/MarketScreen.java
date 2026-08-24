@@ -1126,7 +1126,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
             if (actionTaken[0]) return;
             actionTaken[0] = true;
             if (holder[0] != null) holder[0].close();
-        }).ghost());
+        }).primary());
         actions.addChild(Ui.button(Component.translatable("ui.economy.cancel_order.confirm"), () -> {
             if (actionTaken[0]) return;
             actionTaken[0] = true;
