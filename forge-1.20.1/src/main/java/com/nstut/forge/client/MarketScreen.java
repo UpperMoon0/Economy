@@ -682,11 +682,14 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                 String detailItemId = MarketClientStore.detail.get() == null ? "" : MarketClientStore.detail.get().itemId;
                 String line = e.price + " x " + (e.isInfinite ? "∞" : (isFluidCommodity(detailItemId)
                         ? formatFluidAmount(e.quantity) : formatItemAmount(e.quantity)));
-                line = fitText(f, line, Math.max(0, width - 6));
+                String sideLabel = o.isSell() ? t("ui.economy.opt.sell") : t("ui.economy.opt.buy");
+                int lineWidth = Math.max(0, width - 6 - f.width(sideLabel) - 6 - 10);
+                line = fitText(f, line, lineWidth);
                 int lineX = x + width - f.width(line) - 3;
-                String side = fitText(f, o.isSell() ? t("ui.economy.opt.sell") : t("ui.economy.opt.buy"),
-                        Math.max(0, lineX - (x + 3) - 6));
+                int coinX = lineX - 10;
+                String side = fitText(f, sideLabel, Math.max(0, coinX - (x + 3) - 6));
                 UiRender.text(g, f, side, x + 3, y + 4, o.isSell() ? c.danger() : c.success());
+                EconomyUiComponents.drawCoin(g, coinX, y + 3);
                 UiRender.text(g, f, line, lineX, y + 4, c.onSurface());
             }
         };
@@ -1289,12 +1292,15 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         if (maxWidth <= 0 || seller == null || seller.isEmpty() || orderText == null || orderText.isEmpty()) return;
         int badgeWidth = EconomyUiComponents.badgeWidth(f, seller);
         int gap = 6;
-        int contentWidth = badgeWidth + gap + f.width(orderText);
+        int priceWidth = 10 + f.width(orderText);
+        int contentWidth = badgeWidth + gap + priceWidth;
         int drawX = tx - UiAnimationUtil.pingPongOffset(contentWidth, maxWidth, Util.getMillis());
         ClipStack.push(g, tx, ty - 1, maxWidth, Math.max(EconomyUiComponents.BADGE_HEIGHT + 2, f.lineHeight + 2));
         try {
             drawSellerBadge(g, f, seller, drawX, ty, badgeWidth, serverOrder, colors);
-            UiRender.text(g, f, orderText, drawX + badgeWidth + gap, ty + 1, orderColor);
+            int coinX = drawX + badgeWidth + gap;
+            EconomyUiComponents.drawCoin(g, coinX, ty);
+            UiRender.text(g, f, orderText, coinX + 10, ty + 1, orderColor);
         } finally {
             ClipStack.pop(g);
         }
