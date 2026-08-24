@@ -961,7 +961,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
             MarketClientStore.detail.set(null);
             switchView(MarketView.DETAIL);
             MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestItemDetailPacket(id));
-        }).primary());
+        }).ghost());
 
         VStack body = new VStack().gap(10);
         body.addChild(Ui.heading(Component.translatable("ui.economy.confirm.title")));

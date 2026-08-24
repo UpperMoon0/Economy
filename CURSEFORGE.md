@@ -6,7 +6,7 @@ Buy and sell items or fluids through an in-game Market Terminal, build storage t
 
 ## Required dependency
 
-Economy requires **OpenUI MC 0.0.5 or newer** on the client. Install the Forge 1.20.1 OpenUI MC file alongside Economy. CurseForge marks it as a required dependency for automatic installation.
+Economy requires **OpenUI MC 0.0.6 or newer** on the client. Install the Forge 1.20.1 OpenUI MC file alongside Economy. CurseForge marks it as a required dependency for automatic installation.
 
 ---
 
