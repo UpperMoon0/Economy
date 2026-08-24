@@ -288,6 +288,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         subscriptions.add(createSellMode.subscribe(b -> {
             if (newOrderSellBtn != null) newOrderSellBtn.setActive(b);
             if (newOrderBuyBtn != null) newOrderBuyBtn.setActive(!b);
+            if (b) createInfinite.set(false);
         }));
         return Ui.padding(8, Ui.responsive(ctx -> buildShell(ctx.width())));
     }
@@ -698,7 +699,8 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         ButtonWidget edit = Ui.button(t("ui.economy.action.edit"), () -> openEditOrder(e)).ghost().small();
         edit.height(14);
         ButtonWidget cancel = Ui.button(t("ui.economy.action.cancel"),
-                () -> MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.CancelOrderPacket(e.orderId))).danger().small();
+                () -> confirmOrderCancellation(e.orderId, detailItemId(), detailItemName(), o.isSell(),
+                        e.price, e.quantity, e.isInfinite)).danger().small();
         cancel.height(14);
         row.addChild(edit);
         row.addChild(cancel);
@@ -747,7 +749,10 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
             int stock = getVaultStockForItem(id);
             if (stock > 0) createQty.set(String.valueOf(stock));
         }).ghost());
-        qtyRow.addChild(Ui.button(t("ui.economy.action.infinite"), () -> createInfinite.set(!createInfinite.get())).ghost());
+        qtyRow.addChild(Ui.switcher(createSellMode)
+                .when(true, Ui::spacer)
+                .when(false, () -> Ui.button(t("ui.economy.action.infinite"),
+                        () -> createInfinite.set(!createInfinite.get())).ghost()));
         v.addChild(qtyRow);
 
         TextField priceField = Ui.textField(createPrice);
@@ -784,6 +789,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         VirtualList<ItemSearchResult> list = Ui.list(searchResults, this::buildSearchResultRow).itemHeight(16);
         itemSearchPopover = Ui.popover(anchor, list);
         itemSearchSubscription = createCommodityQuery.subscribe(q -> {
+            requestCommodityDetailIfExact(q);
             if (q != null && q.length() >= 2) {
                 List<ItemSearchResult> results = getItemSearchResults(q);
                 searchResults.set(results);
@@ -836,6 +842,18 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
     private void selectCommodity(String id) {
         createCommodityQuery.set(id);
         hideItemSearch();
+    }
+
+    private void requestCommodityDetailIfExact(String query) {
+        if (query == null || query.isBlank()) return;
+        ResourceLocation id = ResourceLocation.tryParse(query.trim());
+        if (id == null) return;
+        boolean knownItem = BuiltInRegistries.ITEM.containsKey(id);
+        boolean knownFluid = BuiltInRegistries.FLUID.containsKey(id)
+                && CommodityUtil.isCanonicalFluid(BuiltInRegistries.FLUID.get(id));
+        if (knownItem || knownFluid) {
+            MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestItemDetailPacket(id.toString()));
+        }
     }
 
     private void openCreateOrderWithPrefill(boolean isSell, String rawPrice, int qty) {
@@ -1056,11 +1074,79 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         ButtonWidget edit = Ui.button(t("ui.economy.action.edit"), () -> openEditOrder(e)).ghost().small();
         edit.width(40).height(18);
         ButtonWidget cancel = Ui.button(t("ui.economy.action.cancel"),
-                () -> MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.CancelOrderPacket(e.orderId))).danger().small();
+                () -> confirmOrderCancellation(e.orderId, e.itemId, e.displayName, e.isSell,
+                        e.price, e.quantity, e.isInfinite)).danger().small();
         cancel.width(48).height(18);
         row.addChild(edit);
         row.addChild(cancel);
         return row;
+    }
+
+    private String detailItemId() {
+        MarketNetwork.SyncItemDetailPacket detail = MarketClientStore.detail.get();
+        return detail == null ? "" : detail.itemId;
+    }
+
+    private String detailItemName() {
+        MarketNetwork.SyncItemDetailPacket detail = MarketClientStore.detail.get();
+        return detail == null ? "" : detail.displayName;
+    }
+
+    private void confirmOrderCancellation(UUID orderId, String itemId, String itemName, boolean isSell,
+                                          String price, int quantity, boolean infinite) {
+        OverlayHandle[] holder = new OverlayHandle[1];
+        boolean[] actionTaken = new boolean[1];
+        boolean fluid = isFluidCommodity(itemId);
+        String side = t(isSell ? "ui.economy.opt.sell" : "ui.economy.opt.buy");
+        String commodityName = getItemDisplayName(itemId, itemName);
+        String remaining = infinite ? t("ui.economy.orders.quantity_infinite")
+                : EconomyFormatUtil.formatCommodityQuantity(quantity, fluid);
+
+        UIComponent orderSummary = new UIComponent() {
+            @Override public int preferredWidth(Font f) { return 0; }
+            @Override public int preferredHeight(Font f) { return 28; }
+            @Override public void render(GuiGraphics g, Font f, int mx, int my, float pt) {
+                ColorScheme colors = theme().colors();
+                CommodityIconComponent.drawIcon(g, itemId, x, y + 6, 16, 16);
+                String name = fitText(f, commodityName, Math.max(0, width - 24));
+                UiRender.text(g, f, name, x + 22, y + 2, colors.onSurface());
+                String quantityText = Component.translatable(
+                        "ui.economy.cancel_order.remaining", remaining).getString();
+                int priceX = x + width - f.width(price);
+                quantityText = fitText(f, quantityText, Math.max(0, priceX - 14 - (x + 22)));
+                UiRender.text(g, f, quantityText, x + 22, y + 16, colors.onSurfaceMuted());
+                EconomyUiComponents.drawCoin(g, priceX - 10, y + 15);
+                UiRender.text(g, f, price, priceX, y + 16, colors.primary());
+            }
+        };
+        orderSummary.fillWidth();
+
+        HStack actions = new HStack().gap(6).justify(com.nstut.openui.layout.Justification.END);
+        actions.addChild(Ui.button(Component.translatable("ui.economy.cancel_order.keep"), () -> {
+            if (actionTaken[0]) return;
+            actionTaken[0] = true;
+            if (holder[0] != null) holder[0].close();
+        }).ghost());
+        actions.addChild(Ui.button(Component.translatable("ui.economy.cancel_order.confirm"), () -> {
+            if (actionTaken[0]) return;
+            actionTaken[0] = true;
+            if (holder[0] != null) holder[0].close();
+            MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.CancelOrderPacket(orderId));
+        }).danger());
+
+        VStack body = new VStack().gap(10);
+        body.addChild(Ui.heading(Component.translatable("ui.economy.cancel_order.title")));
+        body.addChild(Ui.text(Component.translatable(
+                "ui.economy.cancel_order.message", side, commodityName)).wrap().maxLines(2));
+        body.addChild(orderSummary);
+        body.addChild(Ui.text(Component.translatable(isSell
+                ? "ui.economy.cancel_order.restore_sell"
+                : "ui.economy.cancel_order.restore_buy")).style(TextStyle.CAPTION).wrap().maxLines(2));
+        body.addChild(actions);
+
+        Card card = new Card(body).elevated(true).outlined(true).padding(14);
+        card.width(230).minHeight(112);
+        holder[0] = Dialog.show(uiRuntime().overlays(), card, true, true, () -> actionTaken[0] = true);
     }
 
     private void openEditOrder(MarketNetwork.ActiveOrderEntry e) {

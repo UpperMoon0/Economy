@@ -106,6 +106,14 @@
   "ui.economy.confirm.total": "Total: %s",
   "ui.economy.confirm.total_label": "Total:",
 
+  "ui.economy.cancel_order.title": "CANCEL ORDER?",
+  "ui.economy.cancel_order.message": "Cancel your %s order for %s?",
+  "ui.economy.cancel_order.remaining": "Remaining: %s",
+  "ui.economy.cancel_order.restore_sell": "Reserved goods will be returned to your storage.",
+  "ui.economy.cancel_order.restore_buy": "Reserved coins will be returned to your balance.",
+  "ui.economy.cancel_order.keep": "Keep Order",
+  "ui.economy.cancel_order.confirm": "Cancel Order",
+
   "ui.economy.orders.active": "Active Orders",
   "ui.economy.orders.history": "Trade History",
   "ui.economy.history.search_placeholder": "Search item or player...",
