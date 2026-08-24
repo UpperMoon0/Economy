@@ -112,6 +112,9 @@
   "ui.economy.portfolio.net_worth": "NET WORTH",
   "ui.economy.portfolio.liquid_cash": "LIQUID CASH",
   "ui.economy.portfolio.vault_assets": "VAULT ASSETS",
+  "ui.economy.portfolio.tooltip.net_worth": "Your liquid cash plus the estimated market value of assets stored in connected Vaults and Tanks.",
+  "ui.economy.portfolio.tooltip.liquid_cash": "Coins currently available in your account for payments and market orders.",
+  "ui.economy.portfolio.tooltip.vault_assets": "The estimated market value of items and fluids stored in your connected Vaults and Tanks.",
 
   "ui.economy.containers.vaults": "VAULTS",
   "ui.economy.containers.tanks": "TANKS",

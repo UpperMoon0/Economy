@@ -1186,6 +1186,15 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                 drawStatBox(g, f, x, y, boxW, height, t("ui.economy.portfolio.net_worth"), formatCompact(nw), c.primary(), c);
                 drawStatBox(g, f, x + boxW + 4, y, boxW, height, t("ui.economy.portfolio.liquid_cash"), formatCompact(bal), c.success(), c);
                 drawStatBox(g, f, x + 2 * (boxW + 4), y, boxW, height, t("ui.economy.portfolio.vault_assets"), formatCompact(ass), c.primary(), c);
+                if (my >= y && my < y + height) {
+                    if (mx >= x && mx < x + boxW) {
+                        deferredTooltip = Component.translatable("ui.economy.portfolio.tooltip.net_worth");
+                    } else if (mx >= x + boxW + 4 && mx < x + 2 * boxW + 4) {
+                        deferredTooltip = Component.translatable("ui.economy.portfolio.tooltip.liquid_cash");
+                    } else if (mx >= x + 2 * (boxW + 4) && mx < x + 3 * boxW + 8) {
+                        deferredTooltip = Component.translatable("ui.economy.portfolio.tooltip.vault_assets");
+                    }
+                }
             }
         });
         v.addChild(new TrendChartComponent(portfolioChartSamples, portfolioChartOffset, true));
