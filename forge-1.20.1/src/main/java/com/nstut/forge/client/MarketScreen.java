@@ -648,14 +648,11 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                 int clr = e.isServerOrder ? c.primary() : (isAsks ? c.danger() : c.success());
                 String line = e.price + " x " + (e.isInfinite ? "∞" : (isFluidCommodity(MarketClientStore.detail.get() == null ? "" : MarketClientStore.detail.get().itemId)
                         ? formatFluidAmount(e.quantity) : formatItemAmount(e.quantity)));
-                line = fitText(f, line, Math.max(0, width - 6));
-                int lineX = x + width - f.width(line) - 3;
                 String sellerName = e.isServerOrder
                         ? t("ui.economy.orders.server_badge")
                         : e.sellerName;
-                int sellerWidth = Math.max(0, lineX - (x + 3) - 6);
-                drawSellerBadge(g, f, sellerName, x + 3, y + 3, sellerWidth, e.isServerOrder, c);
-                UiRender.text(g, f, line, lineX, y + 4, clr);
+                drawOrderRowMarquee(g, f, sellerName, line, x + 3, y + 3,
+                        Math.max(0, width - 6), e.isServerOrder, clr, c);
             }
             @Override public boolean mouseClicked(double mx, double my, int button) {
                 if (mx >= x && mx < x + width && my >= y && my < y + height) {
@@ -1236,6 +1233,24 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         int textColor = serverOrder ? colors.onPrimary() : colors.onSurface();
         UiRender.pill(g, bx, by, badgeWidth, EconomyUiComponents.BADGE_HEIGHT, background, border);
         drawMarqueeText(g, f, text, bx + 4, by + 2, Math.max(0, badgeWidth - 8), textColor, false);
+    }
+
+    /** Draws the seller badge and order values as one clipped, ping-ponging row. */
+    private static void drawOrderRowMarquee(GuiGraphics g, Font f, String seller, String orderText,
+                                            int tx, int ty, int maxWidth, boolean serverOrder,
+                                            int orderColor, ColorScheme colors) {
+        if (maxWidth <= 0 || seller == null || seller.isEmpty() || orderText == null || orderText.isEmpty()) return;
+        int badgeWidth = EconomyUiComponents.badgeWidth(f, seller);
+        int gap = 6;
+        int contentWidth = badgeWidth + gap + f.width(orderText);
+        int drawX = tx - UiAnimationUtil.pingPongOffset(contentWidth, maxWidth, Util.getMillis());
+        ClipStack.push(g, tx, ty - 1, maxWidth, Math.max(EconomyUiComponents.BADGE_HEIGHT + 2, f.lineHeight + 2));
+        try {
+            drawSellerBadge(g, f, seller, drawX, ty, badgeWidth, serverOrder, colors);
+            UiRender.text(g, f, orderText, drawX + badgeWidth + gap, ty + 1, orderColor);
+        } finally {
+            ClipStack.pop(g);
+        }
     }
 
     private UIComponent buildHoldingRow(MarketNetwork.AssetHoldingData h) {
