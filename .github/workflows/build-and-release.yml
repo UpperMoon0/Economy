@@ -150,7 +150,7 @@ jobs:
               relations: {
                 projects: [{
                   slug: "openui-mc",
-                  projectID: "1661978",
+                  projectID: 1661978,
                   type: "requiredDependency"
                 }]
               }
