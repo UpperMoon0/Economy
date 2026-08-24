@@ -502,15 +502,9 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                         ? EconomyFormatUtil.formatCount(card.offerCount, "order", "orders")
                         : t("ui.economy.card.no_orders");
                 if (card.globalPrice != null && !card.globalPrice.isEmpty() && !card.globalPrice.equals("--")) {
-                    EconomyUiComponents.drawCoin(g, textX, y + 16);
-                    int priceX = textX + 9;
                     String change = formatPriceChange(card.priceChangePercent);
-                    int changeWidth = Math.min(f.width(change), Math.max(0, textWidth / 2));
-                    change = fitText(f, change, changeWidth);
-                    String price = fitText(f, formatCompact(parsePrice(card.globalPrice)),
-                            Math.max(0, textX + textWidth - priceX - f.width(change) - 5));
-                    UiRender.text(g, f, price, priceX, y + 16, c.primary());
-                    UiRender.text(g, f, change, priceX + f.width(price) + 5, y + 16, changeColor(card.priceChangePercent));
+                    drawPriceChangeRowMarquee(g, f, formatCompact(parsePrice(card.globalPrice)), change,
+                            textX, y + 16, textWidth, c.primary(), changeColor(card.priceChangePercent));
                 } else {
                     UiRender.text(g, f, "--", textX, y + 16, c.onSurfaceMuted());
                 }
@@ -1354,6 +1348,26 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         ClipStack.push(g, tx, ty, maxWidth, f.lineHeight);
         try {
             UiRender.text(g, f, text, drawX, ty, color);
+        } finally {
+            ClipStack.pop(g);
+        }
+    }
+
+    /** Draws the coin, price, and complete change label as one clipped overflow row. */
+    private static void drawPriceChangeRowMarquee(GuiGraphics g, Font f, String price, String change,
+                                                   int tx, int ty, int maxWidth,
+                                                   int priceColor, int changeColor) {
+        if (maxWidth <= 0 || price == null || price.isEmpty() || change == null || change.isEmpty()) return;
+        int coinWidth = 9;
+        int gap = 5;
+        int contentWidth = coinWidth + f.width(price) + gap + f.width(change);
+        int drawX = tx - UiAnimationUtil.pingPongOffset(contentWidth, maxWidth, Util.getMillis());
+        ClipStack.push(g, tx, ty - 1, maxWidth, f.lineHeight + 2);
+        try {
+            EconomyUiComponents.drawCoin(g, drawX, ty);
+            int priceX = drawX + coinWidth;
+            UiRender.text(g, f, price, priceX, ty, priceColor);
+            UiRender.text(g, f, change, priceX + f.width(price) + gap, ty, changeColor);
         } finally {
             ClipStack.pop(g);
         }
