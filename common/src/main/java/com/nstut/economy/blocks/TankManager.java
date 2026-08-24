@@ -83,18 +83,31 @@ public class TankManager {
         if (records == null || records.isEmpty()) return Collections.emptyList();
         List<TankBlockEntity> result = new ArrayList<>();
         for (EconomyAccountData.VaultRecord record : records) {
-            Level targetLevel = level;
-            if (level.getServer() != null) {
-                ResourceLocation dimRl = new ResourceLocation(record.dimension);
-                ResourceKey<Level> key = ResourceKey.create(Registries.DIMENSION, dimRl);
-                ServerLevel serverLevel = level.getServer().getLevel(key);
-                if (serverLevel != null) targetLevel = serverLevel;
-            }
-            if (targetLevel.getBlockEntity(record.pos) instanceof TankBlockEntity tank) {
+            Level targetLevel = resolveRecordLevel(level, record.dimension);
+            if (targetLevel == null) continue;
+            if (!targetLevel.dimension().location().toString().equals(record.dimension)) continue;
+            if (targetLevel.getBlockEntity(record.pos) instanceof TankBlockEntity tank
+                    && tank.getOwner() != null && tank.getOwner().equals(owner)) {
                 result.add(tank);
             }
         }
         return result;
+    }
+
+    @Nullable
+    private static Level resolveRecordLevel(Level fallback, String dimension) {
+        if (fallback == null) return null;
+        if (fallback.getServer() != null) {
+            try {
+                ResourceLocation dimRl = new ResourceLocation(dimension);
+                ResourceKey<Level> key = ResourceKey.create(Registries.DIMENSION, dimRl);
+                return fallback.getServer().getLevel(key);
+            } catch (Exception e) {
+                com.nstut.Economy.LOGGER.warn("Ignoring storage record with unresolvable dimension {}", dimension);
+                return null;
+            }
+        }
+        return fallback;
     }
 
     public static int countFluidInTanks(Level level, UUID owner, Fluid fluid) {
@@ -110,14 +123,14 @@ public class TankManager {
     }
 
     public static int countAvailableFluidSpaceInTanks(Level level, UUID owner, Fluid fluid) {
+        FluidStack probe = new FluidStack(fluid, 1);
         int space = 0;
         for (TankBlockEntity t : getTanks(level, owner)) {
-            if (t.getMode().canReceiveMarket()) {
-                if (t.getFluid().isEmpty()) {
-                    space += t.getCapacity();
-                } else if (t.getFluid().getFluid() == fluid) {
-                    space += t.getCapacity() - t.getFluidAmount();
-                }
+            if (!t.getMode().canReceiveMarket()) continue;
+            if (t.getFluid().isEmpty()) {
+                space += t.getCapacity();
+            } else if (t.getFluid().isFluidEqual(probe)) {
+                space += t.getCapacity() - t.getFluidAmount();
             }
         }
         return space;
@@ -144,6 +157,24 @@ public class TankManager {
         return insertFluidToTanks(level, owner, stack, true);
     }
 
+    /**
+     * Simulates filling the receiving tanks without mutating them, using the
+     * same per-tank matching rules as the actual fill. Returns the amount that
+     * would fit.
+     */
+    public static int simulateInsertFluidToTanks(Level level, UUID owner, FluidStack stack) {
+        if (stack == null || stack.isEmpty()) return 0;
+        int remaining = stack.getAmount();
+        for (TankBlockEntity t : getTanks(level, owner)) {
+            if (remaining <= 0) break;
+            if (!t.getMode().canReceiveMarket()) continue;
+            FluidStack toInsert = stack.copy();
+            toInsert.setAmount(remaining);
+            remaining -= t.fill(toInsert, net.minecraftforge.fluids.capability.IFluidHandler.FluidAction.SIMULATE);
+        }
+        return stack.getAmount() - remaining;
+    }
+
     public static int restoreFluidToTanks(Level level, UUID owner, FluidStack stack) {
         return insertFluidToTanks(level, owner, stack, false);
     }
@@ -160,5 +191,23 @@ public class TankManager {
             remaining -= filled;
         }
         return stack.getAmount() - remaining;
+    }
+
+    /**
+     * Merges a list of stacks into a single representative stack whose amount
+     * is the sum of all parts. Used for space simulations of multi-part
+     * payloads that share one market commodity.
+     */
+    public static FluidStack mergeFluids(List<FluidStack> stacks) {
+        FluidStack merged = null;
+        for (FluidStack stack : stacks) {
+            if (stack == null || stack.isEmpty()) continue;
+            if (merged == null) {
+                merged = stack.copy();
+            } else {
+                merged.grow(stack.getAmount());
+            }
+        }
+        return merged != null ? merged : FluidStack.EMPTY;
     }
 }

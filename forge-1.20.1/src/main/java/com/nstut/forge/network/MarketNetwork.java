@@ -103,6 +103,20 @@ public class MarketNetwork {
         }
     }
 
+    // ── Server-side input validation ─────────────────────────────────────────
+
+    public static ResourceLocation parseCommodityId(String raw) {
+        return com.nstut.economy.util.OrderInputValidator.parseCommodityId(raw);
+    }
+
+    public static BigDecimal parsePrice(String raw) {
+        return com.nstut.economy.util.OrderInputValidator.parsePrice(raw);
+    }
+
+    public static boolean isValidQuantity(int quantity) {
+        return com.nstut.economy.util.OrderInputValidator.isValidQuantity(quantity);
+    }
+
     public static class OrderEntry {
         public final UUID orderId;
         public final UUID ownerId;
@@ -292,48 +306,76 @@ public class MarketNetwork {
             ctx.get().enqueueWork(() -> {
                 ServerPlayer player = ctx.get().getSender();
                 if (player == null) return;
-                ServerLevel level = player.serverLevel();
-                OrderManager orderManager = Economy.getOrderManager();
-                BigDecimal price = new BigDecimal(pkt.pricePerUnit);
+                try {
+                    if (!"ITEM".equals(pkt.commodityType) && !"FLUID".equals(pkt.commodityType)) {
+                        com.nstut.Economy.LOGGER.warn("Rejected order packet with unknown commodity type {} from {}", pkt.commodityType, player.getName().getString());
+                        return;
+                    }
+                    if (!isValidQuantity(pkt.quantity)) {
+                        com.nstut.Economy.LOGGER.warn("Rejected order packet with out-of-range quantity {} from {}", pkt.quantity, player.getName().getString());
+                        sendItemDetail(player, pkt.itemId);
+                        return;
+                    }
+                    BigDecimal price = parsePrice(pkt.pricePerUnit);
+                    if (price == null) {
+                        com.nstut.Economy.LOGGER.warn("Rejected order packet with invalid price from {}", player.getName().getString());
+                        sendItemDetail(player, pkt.itemId);
+                        return;
+                    }
+                    ResourceLocation commodityId = parseCommodityId(pkt.itemId);
+                    if (commodityId == null) {
+                        sendItemList(player);
+                        return;
+                    }
 
-                if ("FLUID".equals(pkt.commodityType)) {
-                    Fluid fluid = BuiltInRegistries.FLUID.get(new ResourceLocation(pkt.itemId));
-                    if (!CommodityUtil.isCanonicalFluid(fluid)) { sendItemList(player); return; }
-                    FluidCommodity commodity = new FluidCommodity(new ResourceLocation(pkt.itemId), fluid, BigDecimal.ZERO);
+                    ServerLevel level = player.serverLevel();
+                    OrderManager orderManager = Economy.getOrderManager();
 
-                    if (pkt.isSell) {
-                        if (TankManager.countFluidInTanks(level, player.getUUID(), fluid) < pkt.quantity) { sendItemDetail(player, pkt.itemId); return; }
-                        List<net.minecraftforge.fluids.FluidStack> reservedFluids = new ArrayList<>();
-                        int drained = TankManager.extractFluidFromTanks(level, player.getUUID(), fluid, pkt.quantity, reservedFluids);
-                        if (drained < pkt.quantity) {
-                            for (var reservedFluid : reservedFluids) {
-                                TankManager.restoreFluidToTanks(level, player.getUUID(), reservedFluid);
+                    if ("FLUID".equals(pkt.commodityType)) {
+                        Fluid fluid = BuiltInRegistries.FLUID.get(commodityId);
+                        if (!CommodityUtil.isCanonicalFluid(fluid)) { sendItemList(player); return; }
+                        FluidCommodity commodity = new FluidCommodity(commodityId, fluid, BigDecimal.ZERO);
+
+                        if (pkt.isSell) {
+                            if (TankManager.countFluidInTanks(level, player.getUUID(), fluid) < pkt.quantity) { sendItemDetail(player, pkt.itemId); return; }
+                            List<net.minecraftforge.fluids.FluidStack> reservedFluids = new ArrayList<>();
+                            int drained = TankManager.extractFluidFromTanks(level, player.getUUID(), fluid, pkt.quantity, reservedFluids);
+                            if (drained < pkt.quantity) {
+                                for (var reservedFluid : reservedFluids) {
+                                    TankManager.restoreFluidToTanks(level, player.getUUID(), reservedFluid);
+                                }
+                                sendItemDetail(player, pkt.itemId);
+                                return;
                             }
-                            sendItemDetail(player, pkt.itemId);
-                            return;
+                            orderManager.createSellOrder(player.getUUID(), commodity, pkt.quantity, price,
+                                    net.minecraft.core.NonNullList.create(), reservedFluids, level);
+                        } else {
+                            orderManager.createBuyOrder(player.getUUID(), commodity, pkt.quantity, price, pkt.isInfinite, level);
                         }
-                        orderManager.createSellOrder(player.getUUID(), commodity, pkt.quantity, price,
-                                net.minecraft.core.NonNullList.create(), reservedFluids, level);
                     } else {
-                        orderManager.createBuyOrder(player.getUUID(), commodity, pkt.quantity, price, pkt.isInfinite, level);
-                    }
-                } else {
-                    Item item = BuiltInRegistries.ITEM.get(new ResourceLocation(pkt.itemId));
-                    if (item == net.minecraft.world.item.Items.AIR) { sendItemList(player); return; }
-                    ItemCommodity commodity = new ItemCommodity(new ResourceLocation(pkt.itemId), item, BigDecimal.ZERO);
+                        Item item = BuiltInRegistries.ITEM.get(commodityId);
+                        if (item == net.minecraft.world.item.Items.AIR) { sendItemList(player); return; }
+                        ItemCommodity commodity = new ItemCommodity(commodityId, item, BigDecimal.ZERO);
 
-                    if (pkt.isSell) {
-                        if (VaultManager.countItemInVaults(level, player.getUUID(), item) < pkt.quantity) { sendItemDetail(player, pkt.itemId); return; }
-                        net.minecraft.core.NonNullList<net.minecraft.world.item.ItemStack> reserved = net.minecraft.core.NonNullList.create();
-                        if (!VaultManager.extractItemFromVaults(level, player.getUUID(), item, pkt.quantity, reserved)) { sendItemDetail(player, pkt.itemId); return; }
-                        orderManager.createSellOrder(player.getUUID(), commodity, pkt.quantity, price, reserved, level);
-                    } else {
-                        orderManager.createBuyOrder(player.getUUID(), commodity, pkt.quantity, price, pkt.isInfinite, level);
+                        if (pkt.isSell) {
+                            if (VaultManager.countItemInVaults(level, player.getUUID(), item) < pkt.quantity) { sendItemDetail(player, pkt.itemId); return; }
+                            net.minecraft.core.NonNullList<net.minecraft.world.item.ItemStack> reserved = net.minecraft.core.NonNullList.create();
+                            if (!VaultManager.extractItemFromVaults(level, player.getUUID(), item, pkt.quantity, reserved)) {
+                                VaultManager.insertItemStacksToVaults(level, player.getUUID(), reserved);
+                                sendItemDetail(player, pkt.itemId);
+                                return;
+                            }
+                            orderManager.createSellOrder(player.getUUID(), commodity, pkt.quantity, price, reserved, level);
+                        } else {
+                            orderManager.createBuyOrder(player.getUUID(), commodity, pkt.quantity, price, pkt.isInfinite, level);
+                        }
                     }
+                    orderManager.matchAllPendingOrders(level);
+                    sendItemDetail(player, pkt.itemId);
+                    sendItemList(player);
+                } catch (Exception e) {
+                    com.nstut.Economy.LOGGER.warn("Error handling order packet from {}", player.getName().getString(), e);
                 }
-                orderManager.matchAllPendingOrders(level);
-                sendItemDetail(player, pkt.itemId);
-                sendItemList(player);
             });
             ctx.get().setPacketHandled(true);
         }
@@ -381,29 +423,26 @@ public class MarketNetwork {
             ctx.get().enqueueWork(() -> {
                 ServerPlayer player = ctx.get().getSender();
                 if (player == null) return;
-                OrderManager orderManager = Economy.getOrderManager();
-                var opt = orderManager.getOrder(pkt.orderId);
-                if (opt.isPresent() && opt.get().getOwner().equals(player.getUUID())) {
-                    Order order = opt.get();
-                    if (order.getType() == IOrder.OrderType.SELL) {
-                        if (order.getCommodity() instanceof FluidCommodity fc && !order.getReservedFluids().isEmpty()) {
-                            for (var fs : order.getReservedFluids()) {
-                                TankManager.restoreFluidToTanks(player.serverLevel(), player.getUUID(), fs);
-                            }
-                        } else if (!order.getReservedItems().isEmpty()) {
-                            VaultManager.insertItemStacksToVaults(player.serverLevel(), player.getUUID(), order.getReservedItems());
+                try {
+                    OrderManager orderManager = Economy.getOrderManager();
+                    var opt = orderManager.getOrder(pkt.orderId);
+                    if (opt.isPresent() && opt.get().getOwner().equals(player.getUUID())) {
+                        boolean cancelled = orderManager.cancelOrder(pkt.orderId, player.getUUID(), player.serverLevel());
+                        if (!cancelled) {
+                            player.displayClientMessage(net.minecraft.network.chat.Component.literal(
+                                    "§c[Market] §fCannot cancel: your storage could not fit the reserved goods. Free up space and try again."), false);
                         }
                     }
-                    order.cancel();
-                    orderManager.cleanupOrders();
-                }
-                sendActiveOrders(player);
-                if (opt.isPresent() && opt.get().getCommodity() instanceof ItemCommodity ic) {
-                    sendItemDetail(player, ic.getId().toString());
-                } else if (opt.isPresent() && opt.get().getCommodity() instanceof FluidCommodity fc) {
-                    sendItemDetail(player, fc.getId().toString());
-                } else {
-                    sendItemList(player);
+                    sendActiveOrders(player);
+                    if (opt.isPresent() && opt.get().getCommodity() instanceof ItemCommodity ic) {
+                        sendItemDetail(player, ic.getId().toString());
+                    } else if (opt.isPresent() && opt.get().getCommodity() instanceof FluidCommodity fc) {
+                        sendItemDetail(player, fc.getId().toString());
+                    } else {
+                        sendItemList(player);
+                    }
+                } catch (Exception e) {
+                    com.nstut.Economy.LOGGER.warn("Error handling cancel packet from {}", player.getName().getString(), e);
                 }
             });
             ctx.get().setPacketHandled(true);
@@ -432,17 +471,31 @@ public class MarketNetwork {
             ctx.get().enqueueWork(() -> {
                 ServerPlayer player = ctx.get().getSender();
                 if (player == null) return;
-                ServerLevel level = player.serverLevel();
-                OrderManager orderManager = Economy.getOrderManager();
-                var opt = orderManager.getOrder(pkt.orderId);
-                BigDecimal price = new BigDecimal(pkt.pricePerUnit);
-                orderManager.editOrder(pkt.orderId, player.getUUID(), pkt.quantity, price, pkt.isInfinite, level);
-                sendActiveOrders(player);
-                sendItemList(player);
-                if (opt.isPresent() && opt.get().getCommodity() instanceof ItemCommodity ic) {
-                    sendItemDetail(player, ic.getId().toString());
-                } else if (opt.isPresent() && opt.get().getCommodity() instanceof FluidCommodity fc) {
-                    sendItemDetail(player, fc.getId().toString());
+                try {
+                    ServerLevel level = player.serverLevel();
+                    OrderManager orderManager = Economy.getOrderManager();
+                    var opt = orderManager.getOrder(pkt.orderId);
+                    BigDecimal price = parsePrice(pkt.pricePerUnit);
+                    // Quantity 0 is only meaningful for infinite buy orders
+                    // (price-only edits); everything else needs a real quantity.
+                    boolean isInfiniteBuyEdit = pkt.quantity == 0 && opt.isPresent()
+                            && opt.get().isInfinite()
+                            && opt.get().getType() == com.nstut.economy.api.IOrder.OrderType.BUY;
+                    boolean valid = price != null && (isValidQuantity(pkt.quantity) || isInfiniteBuyEdit);
+                    if (!valid) {
+                        com.nstut.Economy.LOGGER.warn("Rejected edit packet with invalid quantity/price from {}", player.getName().getString());
+                    } else {
+                        orderManager.editOrder(pkt.orderId, player.getUUID(), pkt.quantity, price, pkt.isInfinite, level);
+                    }
+                    sendActiveOrders(player);
+                    sendItemList(player);
+                    if (opt.isPresent() && opt.get().getCommodity() instanceof ItemCommodity ic) {
+                        sendItemDetail(player, ic.getId().toString());
+                    } else if (opt.isPresent() && opt.get().getCommodity() instanceof FluidCommodity fc) {
+                        sendItemDetail(player, fc.getId().toString());
+                    }
+                } catch (Exception e) {
+                    com.nstut.Economy.LOGGER.warn("Error handling edit packet from {}", player.getName().getString(), e);
                 }
             });
             ctx.get().setPacketHandled(true);

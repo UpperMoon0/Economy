@@ -1,19 +1,23 @@
 package com.nstut.economy.blocks;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.NonNullList;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.world.Container;
 import net.minecraft.world.ContainerHelper;
+import net.minecraft.world.WorldlyContainer;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
+import javax.annotation.ParametersAreNonnullByDefault;
 import java.util.UUID;
 
-public class VaultBlockEntity extends BlockEntity implements Container {
+@ParametersAreNonnullByDefault
+public class VaultBlockEntity extends BlockEntity implements WorldlyContainer {
 
     public enum VaultMode {
         BOTH(0, "Both (Input & Output)"),
@@ -144,16 +148,7 @@ public class VaultBlockEntity extends BlockEntity implements Container {
     }
 
     public int countAvailableSpace(ItemStack stack) {
-        int space = 0;
-        int maxStack = stack.getMaxStackSize();
-        for (ItemStack slot : items) {
-            if (slot.isEmpty()) {
-                space += maxStack;
-            } else if (ItemStack.isSameItemSameTags(slot, stack)) {
-                space += maxStack - slot.getCount();
-            }
-        }
-        return space;
+        return VaultInventoryOps.countAvailableSpace(items, stack);
     }
 
     public boolean extractItem(net.minecraft.world.item.Item item, int amount, NonNullList<ItemStack> destination) {
@@ -171,25 +166,34 @@ public class VaultBlockEntity extends BlockEntity implements Container {
         return true;
     }
 
-    public boolean insertItemStacks(NonNullList<ItemStack> stacks) {
-        for (ItemStack stack : stacks) {
-            ItemStack remainder = stack.copy();
-            for (int i = 0; i < items.size() && !remainder.isEmpty(); i++) {
-                ItemStack slot = items.get(i);
-                if (slot.isEmpty()) {
-                    items.set(i, remainder.copy());
-                    remainder.setCount(0);
-                } else if (ItemStack.isSameItemSameTags(slot, remainder)) {
-                    int space = slot.getMaxStackSize() - slot.getCount();
-                    int add = Math.min(space, remainder.getCount());
-                    slot.grow(add);
-                    remainder.shrink(add);
-                }
-            }
-            if (!remainder.isEmpty()) return false;
+    /**
+     * Inserts as much of the payload as fits and returns exactly what did not
+     * fit. An empty result means everything was stored. Callers that need
+     * all-or-nothing behavior must simulate first via
+     * {@link VaultManager#simulateInsertItemStacksToVaults}.
+     */
+    public NonNullList<ItemStack> insertItemStacks(NonNullList<ItemStack> stacks) {
+        int before = VaultInventoryOps.total(stacks);
+        NonNullList<ItemStack> leftovers = VaultInventoryOps.insert(items, stacks);
+        if (VaultInventoryOps.total(leftovers) != before) {
+            setChanged();
         }
-        setChanged();
-        return true;
+        return leftovers;
+    }
+
+    @Override
+    public int[] getSlotsForFace(Direction side) {
+        return new int[0];
+    }
+
+    @Override
+    public boolean canPlaceItemThroughFace(int index, ItemStack stack, @Nullable Direction direction) {
+        return false;
+    }
+
+    @Override
+    public boolean canTakeItemThroughFace(int index, ItemStack stack, @Nullable Direction direction) {
+        return false;
     }
 
     @Override

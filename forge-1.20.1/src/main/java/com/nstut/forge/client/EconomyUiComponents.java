@@ -63,6 +63,36 @@ public final class EconomyUiComponents {
         return x;
     }
 
+    public static int coinBadgeWidth(Font font, String text) {
+        return font.width(text) + 18;
+    }
+
+    /** Draws a semantic badge whose value is explicitly marked as Coin currency. */
+    public static int drawCoinBadge(GuiGraphics g, Font font, String text, int rightX, int y,
+                                    Badge.Variant variant, boolean hovered, ColorScheme colors) {
+        int background = switch (variant) {
+            case PRIMARY -> hovered ? colors.primaryHover() : colors.primaryDim();
+            case SUCCESS -> hovered ? colors.successHover() : colors.successDeep();
+            case WARNING -> hovered ? colors.warningHover() : colors.warning();
+            case DANGER -> hovered ? colors.dangerHover() : colors.dangerDeep();
+            case NEUTRAL -> hovered ? colors.surfaceRaised() : colors.surfaceVariant();
+        };
+        int border = switch (variant) {
+            case PRIMARY -> colors.primary();
+            case SUCCESS -> colors.success();
+            case WARNING -> colors.warningHover();
+            case DANGER -> colors.danger();
+            case NEUTRAL -> colors.border();
+        };
+        int width = coinBadgeWidth(font, text);
+        int x = rightX - width;
+        UiRender.pill(g, x, y, width, BADGE_HEIGHT, background, border);
+        drawCoin(g, x + 4, y + 2);
+        int textColor = variant == Badge.Variant.NEUTRAL ? colors.onSurface() : colors.onPrimary();
+        UiRender.text(g, font, text, x + 14, y + 2, textColor);
+        return x;
+    }
+
     /** Coin + compacted balance pill that fills the width of its parent. */
     public static UIComponent balancePill(ReadableSignal<String> balance) {
         return new UIComponent() {

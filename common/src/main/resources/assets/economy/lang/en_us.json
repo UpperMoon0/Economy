@@ -104,6 +104,15 @@
   "ui.economy.confirm.title": "CONFIRM TRANSACTION",
   "ui.economy.confirm.message": "%s %s of %s",
   "ui.economy.confirm.total": "Total: %s",
+  "ui.economy.confirm.total_label": "Total:",
+
+  "ui.economy.cancel_order.title": "CANCEL ORDER?",
+  "ui.economy.cancel_order.message": "Cancel your %s order for %s?",
+  "ui.economy.cancel_order.remaining": "Remaining: %s",
+  "ui.economy.cancel_order.restore_sell": "Reserved goods will be returned to your storage.",
+  "ui.economy.cancel_order.restore_buy": "Reserved coins will be returned to your balance.",
+  "ui.economy.cancel_order.keep": "Keep Order",
+  "ui.economy.cancel_order.confirm": "Cancel Order",
 
   "ui.economy.orders.active": "Active Orders",
   "ui.economy.orders.history": "Trade History",
@@ -112,6 +121,9 @@
   "ui.economy.portfolio.net_worth": "NET WORTH",
   "ui.economy.portfolio.liquid_cash": "LIQUID CASH",
   "ui.economy.portfolio.vault_assets": "VAULT ASSETS",
+  "ui.economy.portfolio.tooltip.net_worth": "Your liquid cash plus the estimated market value of assets stored in connected Vaults and Tanks.",
+  "ui.economy.portfolio.tooltip.liquid_cash": "Coins currently available in your account for payments and market orders.",
+  "ui.economy.portfolio.tooltip.vault_assets": "The estimated market value of items and fluids stored in your connected Vaults and Tanks.",
 
   "ui.economy.containers.vaults": "VAULTS",
   "ui.economy.containers.tanks": "TANKS",

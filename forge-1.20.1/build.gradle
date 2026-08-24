@@ -34,7 +34,7 @@ repositories {
 
 dependencies {
     minecraft "net.minecraftforge:forge:${project.minecraft_version}-${project.forge_version}"
-    implementation fg.deobf('com.nstut:openui-mc-forge-1.20.1:0.0.4')
+    implementation fg.deobf("com.nstut:openui-mc-forge-1.20.1:${project.openui_version}")
     testImplementation platform('org.junit:junit-bom:5.10.2')
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
@@ -51,6 +51,7 @@ tasks.named('processResources', ProcessResources).configure {
         minecraft_version_range: project.minecraft_version_range,
         forge_version_range    : project.forge_version_range,
         loader_version_range   : project.loader_version_range,
+        openui_version         : project.openui_version,
         version                : rootProject.mod_version
     ]
     inputs.properties replaceProperties

@@ -63,6 +63,7 @@ public class TankScreen extends EconomyUiContainerScreen<TankMenu> {
         if (modeBtn != null && mode != currentMode) {
             currentMode = mode;
             modeBtn.setLabel(modeLabel(mode));
+            modeBtn.tooltip(modeTooltip(mode));
         }
     }
 
@@ -102,6 +103,7 @@ public class TankScreen extends EconomyUiContainerScreen<TankMenu> {
         header.addChild(Ui.text(Component.translatable("ui.economy.tank.title")).style(TextStyle.TITLE));
         header.addChild(Ui.spacer().flex());
         modeBtn = Ui.button(modeLabel(currentMode), this::cycleMode).ghost().small();
+        modeBtn.tooltip(modeTooltip(currentMode));
         header.addChild(modeBtn);
         header.addChild(buildCompactThemeToggle());
 
@@ -157,6 +159,14 @@ public class TankScreen extends EconomyUiContainerScreen<TankMenu> {
         });
     }
 
+    private Component modeTooltip(TankBlockEntity.TankMode mode) {
+        return Component.translatable(switch (mode) {
+            case BOTH -> "ui.economy.container.tooltip.mode_both";
+            case INPUT -> "ui.economy.container.tooltip.mode_input";
+            case OUTPUT -> "ui.economy.container.tooltip.mode_output";
+        });
+    }
+
     private void cycleMode() {
         TankBlockEntity.TankMode next = TankBlockEntity.TankMode.byId((menu.getMode().id + 1) % 3);
         BlockPos targetPos = menu.getTankBlockEntity() != null ? menu.getTankBlockEntity().getBlockPos() : null;
@@ -164,7 +174,10 @@ public class TankScreen extends EconomyUiContainerScreen<TankMenu> {
         if (targetPos != null) {
             MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.ToggleTankModePacket(targetPos));
             currentMode = next;
-            if (modeBtn != null) modeBtn.setLabel(modeLabel(next));
+            if (modeBtn != null) {
+                modeBtn.setLabel(modeLabel(next));
+                modeBtn.tooltip(modeTooltip(next));
+            }
         }
     }
 }

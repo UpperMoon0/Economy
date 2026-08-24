@@ -2,7 +2,9 @@ package com.nstut.economy.trading;
 
 import com.nstut.economy.api.ICommodity;
 import com.nstut.economy.api.IOrder;
+import com.nstut.economy.blocks.VaultInventoryOps;
 import com.nstut.economy.data.EconomyOrderData;
+import com.nstut.Economy;
 import net.minecraft.core.NonNullList;
 import net.minecraft.world.item.ItemStack;
 
@@ -14,11 +16,13 @@ public class OrderManager {
 
     private final Map<UUID, Order> orders;
     private final Map<ICommodity, List<Order>> commodityIndex;
+    private final Map<UUID, EconomyOrderData.OrderSnapshot> quarantinedOrders;
     private EconomyOrderData backingData;
 
     public OrderManager() {
         this.orders = new ConcurrentHashMap<>();
         this.commodityIndex = new ConcurrentHashMap<>();
+        this.quarantinedOrders = new ConcurrentHashMap<>();
     }
 
     public void setOrderData(EconomyOrderData data) {
@@ -28,6 +32,7 @@ public class OrderManager {
     public void loadFrom(EconomyOrderData data) {
         orders.clear();
         commodityIndex.clear();
+        quarantinedOrders.clear();
         this.backingData = data;
         for (EconomyOrderData.OrderSnapshot snap : data.getOrders().values()) {
             try {
@@ -35,9 +40,35 @@ public class OrderManager {
                 if (order.isValid()) {
                     orders.put(order.getOrderId(), order);
                     commodityIndex.computeIfAbsent(order.getCommodity(), k -> new ArrayList<>()).add(order);
+                } else if (!snap.reservedItems.isEmpty() || !snap.reservedFluids.isEmpty()) {
+                    quarantineOrder(snap, "invalid persisted order (likely expired while offline)");
                 }
             } catch (Exception e) {
+                Economy.LOGGER.error("Failed to load persisted order {} for item {}; escrow snapshot preserved in world data",
+                        snap.orderId, snap.itemId, e);
+                quarantineOrder(snap, "order failed to deserialize");
             }
+        }
+    }
+
+    /**
+     * Preserves a snapshot of an order that can no longer be active but still
+     * holds escrowed goods. Quarantined snapshots are re-persisted on every
+     * save so escrowed items/fluids are never silently destroyed; an admin
+     * can resolve them manually from the saved data.
+     */
+    private void quarantineOrder(EconomyOrderData.OrderSnapshot snap, String reason) {
+        if (snap == null || (snap.reservedItems.isEmpty() && snap.reservedFluids.isEmpty())) {
+            return;
+        }
+        if (quarantinedOrders.put(snap.orderId, snap) == null) {
+            Economy.LOGGER.error(
+                    "Quarantined {} ({}): {}. Escrow preserved - {} item stack(s), {} mB",
+                    reason, snap.orderId, snap.itemId, snap.reservedItems.size(),
+                    snap.reservedFluids.stream().mapToInt(f -> f.getAmount()).sum());
+        }
+        if (backingData != null) {
+            backingData.putOrder(snap);
         }
     }
 
@@ -47,8 +78,22 @@ public class OrderManager {
         for (Order order : orders.values()) {
             if (order.isValid()) {
                 backingData.putOrder(order.toSnapshot());
+            } else {
+                quarantineOrder(order.toSnapshot(), "order no longer valid at save time");
             }
         }
+        for (EconomyOrderData.OrderSnapshot snap : quarantinedOrders.values()) {
+            backingData.putOrder(snap);
+        }
+    }
+
+    /**
+     * Domain-level validation applied on every order creation regardless of
+     * where the request came from. The network layer validates earlier, but a
+     * modified client must never be the only line of defense.
+     */
+    private static boolean isValidNewOrder(int quantity, java.math.BigDecimal pricePerUnit) {
+        return com.nstut.economy.util.OrderInputValidator.isValidNewOrder(quantity, pricePerUnit);
     }
 
     public Order createSellOrder(UUID owner, ICommodity commodity, int quantity,
@@ -71,6 +116,9 @@ public class OrderManager {
                                   java.math.BigDecimal pricePerUnit, NonNullList<ItemStack> reservedItems,
                                   List<net.minecraftforge.fluids.FluidStack> reservedFluids,
                                   net.minecraft.server.level.ServerLevel level) {
+        if (!isValidNewOrder(quantity, pricePerUnit)) {
+            return null;
+        }
         Order order = new Order(owner, commodity, quantity, quantity, pricePerUnit, IOrder.OrderType.SELL, null,
                 copyStacks(reservedItems), copyFluidStacks(reservedFluids), false);
 
@@ -127,6 +175,9 @@ public class OrderManager {
 
     public Order createBuyOrder(UUID owner, ICommodity commodity, int quantity,
                                  java.math.BigDecimal pricePerUnit, boolean isInfinite, net.minecraft.server.level.ServerLevel level) {
+        if (!isValidNewOrder(quantity, pricePerUnit)) {
+            return null;
+        }
         Order order = new Order(owner, commodity, quantity, quantity, pricePerUnit, IOrder.OrderType.BUY, null, NonNullList.create(), isInfinite);
 
         List<Order> matchingSellOrders = getSellOrders(commodity).stream()
@@ -164,6 +215,21 @@ public class OrderManager {
         if (order == null || !order.getOwner().equals(requester) || !order.isValid()) {
             return false;
         }
+        if (newPrice == null || newPrice.signum() <= 0) {
+            return false;
+        }
+        if (newPrice.scale() > com.nstut.economy.config.EconomyConfig.getInstance().getMaxPriceScale()
+                || newPrice.compareTo(com.nstut.economy.config.EconomyConfig.getInstance().getMaxPrice()) > 0
+                || newPrice.compareTo(com.nstut.economy.config.EconomyConfig.getInstance().getMinPrice()) < 0) {
+            return false;
+        }
+        if (!order.isInfinite() || order.getType() == IOrder.OrderType.SELL) {
+            if (newQuantity <= 0 || newQuantity > com.nstut.economy.config.EconomyConfig.getInstance().getMaxOrderQuantity()) {
+                return false;
+            }
+        } else if (newQuantity < 0 || newQuantity > com.nstut.economy.config.EconomyConfig.getInstance().getMaxOrderQuantity()) {
+            return false;
+        }
 
         if (order.getType() == IOrder.OrderType.SELL) {
             if (order.getCommodity() instanceof ItemCommodity ic && level != null) {
@@ -171,27 +237,28 @@ public class OrderManager {
                 int currentQty = order.getQuantity();
                 if (newQuantity > currentQty) {
                     int needed = newQuantity - currentQty;
+                    if (needed > com.nstut.economy.config.EconomyConfig.getInstance().getMaxOrderQuantity()) {
+                        return false;
+                    }
                     int available = com.nstut.economy.blocks.VaultManager.countItemInVaults(level, requester, item);
                     if (available < needed) {
                         return false;
                     }
-                    com.nstut.economy.blocks.VaultManager.extractItemFromVaults(level, requester, item, needed, order.getReservedItems());
+                    NonNullList<ItemStack> extracted = NonNullList.create();
+                    if (!com.nstut.economy.blocks.VaultManager.extractItemFromVaults(level, requester, item, needed, extracted)) {
+                        if (!extracted.isEmpty()) {
+                            com.nstut.economy.blocks.VaultManager.insertItemStacksToVaults(level, requester, extracted);
+                        }
+                        return false;
+                    }
+                    order.getReservedItems().addAll(extracted);
                 } else if (newQuantity < currentQty) {
                     int excess = currentQty - newQuantity;
-                    NonNullList<ItemStack> returnItems = NonNullList.create();
-                    int countToReturn = excess;
-                    var it = order.getReservedItems().iterator();
-                    while (it.hasNext() && countToReturn > 0) {
-                        ItemStack stack = it.next();
-                        if (stack.isEmpty()) continue;
-                        int take = Math.min(countToReturn, stack.getCount());
-                        ItemStack split = stack.split(take);
-                        returnItems.add(split);
-                        countToReturn -= take;
-                        if (stack.isEmpty()) it.remove();
+                    if (order.getEscrowedItemCount() < excess) {
+                        return false;
                     }
-                    if (!returnItems.isEmpty()) {
-                        com.nstut.economy.blocks.VaultManager.insertItemStacksToVaults(level, requester, returnItems);
+                    if (!returnItemsToVaults(level, requester, order, excess)) {
+                        return false;
                     }
                 }
             } else if (order.getCommodity() instanceof FluidCommodity fc && level != null) {
@@ -199,6 +266,9 @@ public class OrderManager {
                 int currentQty = order.getQuantity();
                 if (newQuantity > currentQty) {
                     int needed = newQuantity - currentQty;
+                    if (needed > com.nstut.economy.config.EconomyConfig.getInstance().getMaxOrderQuantity()) {
+                        return false;
+                    }
                     int available = com.nstut.economy.blocks.TankManager.countFluidInTanks(level, requester, fluid);
                     if (available < needed) {
                         return false;
@@ -214,16 +284,8 @@ public class OrderManager {
                     order.getReservedFluids().addAll(drained);
                 } else if (newQuantity < currentQty) {
                     int excess = currentQty - newQuantity;
-                    var it = order.getReservedFluids().iterator();
-                    while (it.hasNext() && excess > 0) {
-                        net.minecraftforge.fluids.FluidStack fs = it.next();
-                        int take = Math.min(excess, fs.getAmount());
-                        net.minecraftforge.fluids.FluidStack toReturn = fs.copy();
-                        toReturn.setAmount(take);
-                        com.nstut.economy.blocks.TankManager.restoreFluidToTanks(level, requester, toReturn);
-                        fs.shrink(take);
-                        excess -= take;
-                        if (fs.isEmpty()) it.remove();
+                    if (!returnFluidToTanks(level, requester, order, excess)) {
+                        return false;
                     }
                 }
             }
@@ -247,6 +309,75 @@ public class OrderManager {
 
         matchAllPendingOrders(level);
         return true;
+    }
+
+    /**
+     * Returns {@code qty} units of escrowed items to the player's vaults
+     * transactionally: copies are simulated and committed first, and escrow is
+     * only shrunk once the full amount is verifiably back in storage.
+     */
+    private static boolean returnItemsToVaults(net.minecraft.server.level.ServerLevel level, UUID requester,
+                                               Order order, int qty) {
+        NonNullList<ItemStack> returnItems = NonNullList.create();
+        int countToReturn = qty;
+        for (ItemStack stack : order.getReservedItems()) {
+            if (countToReturn <= 0) break;
+            if (stack == null || stack.isEmpty()) continue;
+            int take = Math.min(countToReturn, stack.getCount());
+            ItemStack part = stack.copy();
+            part.setCount(take);
+            returnItems.add(part);
+            countToReturn -= take;
+        }
+        if (countToReturn > 0 || returnItems.isEmpty()) {
+            return false;
+        }
+        NonNullList<ItemStack> leftover = com.nstut.economy.blocks.VaultManager.simulateInsertItemStacksToVaults(level, requester, returnItems);
+        if (!leftover.isEmpty()) {
+            return false;
+        }
+        leftover = com.nstut.economy.blocks.VaultManager.insertItemStacksToVaults(level, requester, returnItems);
+        if (!leftover.isEmpty()) {
+            Economy.LOGGER.error("Vault insertion diverged from simulation while editing order {}; escrow left untouched", orderIdSafe(order));
+            return false;
+        }
+        order.consumeEscrow(qty);
+        return true;
+    }
+
+    private static boolean returnFluidToTanks(net.minecraft.server.level.ServerLevel level, UUID requester,
+                                              Order order, int qty) {
+        java.util.List<net.minecraftforge.fluids.FluidStack> parts = new java.util.ArrayList<>();
+        int toTake = qty;
+        for (net.minecraftforge.fluids.FluidStack fs : order.getReservedFluids()) {
+            if (toTake <= 0) break;
+            if (fs == null || fs.isEmpty()) continue;
+            net.minecraftforge.fluids.FluidStack part = fs.copy();
+            part.setAmount(Math.min(toTake, fs.getAmount()));
+            parts.add(part);
+            toTake -= part.getAmount();
+        }
+        if (toTake > 0 || parts.isEmpty()) {
+            return false;
+        }
+        net.minecraftforge.fluids.FluidStack merged = com.nstut.economy.blocks.TankManager.mergeFluids(parts);
+        if (com.nstut.economy.blocks.TankManager.simulateInsertFluidToTanks(level, requester, merged) < qty) {
+            return false;
+        }
+        int restored = 0;
+        for (net.minecraftforge.fluids.FluidStack part : parts) {
+            restored += com.nstut.economy.blocks.TankManager.restoreFluidToTanks(level, requester, part);
+        }
+        if (restored < qty) {
+            Economy.LOGGER.error("Tank restoration diverged from simulation while editing order {}; escrow left untouched", orderIdSafe(order));
+            return false;
+        }
+        order.consumeEscrow(qty);
+        return true;
+    }
+
+    private static UUID orderIdSafe(Order order) {
+        return order.getOrderId();
     }
 
     private static NonNullList<ItemStack> copyStacks(NonNullList<ItemStack> original) {
@@ -290,6 +421,17 @@ public class OrderManager {
     }
 
     public boolean cancelOrder(UUID orderId, UUID requester) {
+        return cancelOrder(orderId, requester, null);
+    }
+
+    /**
+     * Cancels an order after transactionally returning any escrowed goods.
+     * Restoration is attempted with copies first; the order (and its escrow)
+     * is only discarded once every unit is verifiably back in the player's
+     * storage. Without a level, orders holding escrow are refused rather than
+     * destroyed.
+     */
+    public boolean cancelOrder(UUID orderId, UUID requester, net.minecraft.server.level.ServerLevel level) {
         Order order = orders.get(orderId);
         if (order == null) {
             return false;
@@ -297,10 +439,58 @@ public class OrderManager {
         if (!order.getOwner().equals(requester)) {
             return false;
         }
+        // Verify the order is actually cancellable before touching escrow;
+        // restoring goods for a failed cancel would duplicate them.
+        if (!order.canCancel()) {
+            return false;
+        }
+
+        if (order.getType() == IOrder.OrderType.SELL && !order.isServerOrder()
+                && (!order.getReservedItems().isEmpty() || !order.getReservedFluids().isEmpty())) {
+            if (level == null) {
+                Economy.LOGGER.warn("Refusing to cancel order {} without a world to restore escrow into", orderId);
+                return false;
+            }
+            if (!order.getReservedItems().isEmpty()) {
+                NonNullList<ItemStack> copies = NonNullList.create();
+                for (ItemStack stack : order.getReservedItems()) {
+                    if (stack != null && !stack.isEmpty()) copies.add(stack.copy());
+                }
+                NonNullList<ItemStack> leftover = com.nstut.economy.blocks.VaultManager.simulateInsertItemStacksToVaults(level, requester, copies);
+                if (!leftover.isEmpty()) {
+                    return false;
+                }
+                leftover = com.nstut.economy.blocks.VaultManager.insertItemStacksToVaults(level, requester, copies);
+                if (!leftover.isEmpty()) {
+                    Economy.LOGGER.error("Vault restoration diverged from simulation while cancelling order {}; order kept intact", orderId);
+                    return false;
+                }
+            }
+            if (!order.getReservedFluids().isEmpty()) {
+                int escrowed = 0;
+                for (net.minecraftforge.fluids.FluidStack fs : order.getReservedFluids()) {
+                    escrowed += fs.getAmount();
+                }
+                net.minecraftforge.fluids.FluidStack merged = com.nstut.economy.blocks.TankManager.mergeFluids(order.getReservedFluids());
+                if (com.nstut.economy.blocks.TankManager.simulateInsertFluidToTanks(level, requester, merged) < escrowed) {
+                    return false;
+                }
+                int restored = 0;
+                for (net.minecraftforge.fluids.FluidStack fs : new ArrayList<>(order.getReservedFluids())) {
+                    restored += com.nstut.economy.blocks.TankManager.restoreFluidToTanks(level, requester, fs);
+                }
+                if (restored < escrowed) {
+                    Economy.LOGGER.error("Tank restoration diverged from simulation while cancelling order {}; order kept intact", orderId);
+                    return false;
+                }
+            }
+        }
+
         if (order.cancel()) {
             removeOrder(order);
             return true;
         }
+        Economy.LOGGER.error("Order {} passed cancellability check but cancel() failed; keeping order intact", orderId);
         return false;
     }
 
@@ -378,7 +568,11 @@ public class OrderManager {
             .filter(order -> !order.isValid())
             .collect(Collectors.toList());
         for (Order order : toRemove) {
+            boolean holdsEscrow = !order.getReservedItems().isEmpty() || !order.getReservedFluids().isEmpty();
             removeOrder(order);
+            if (holdsEscrow) {
+                quarantineOrder(order.toSnapshot(), "invalid order still held escrow");
+            }
         }
     }
 

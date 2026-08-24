@@ -48,6 +48,7 @@ public class VaultScreen extends EconomyUiContainerScreen<VaultMenu> {
         if (modeBtn != null && mode != currentMode) {
             currentMode = mode;
             modeBtn.setLabel(modeLabel(mode));
+            modeBtn.tooltip(modeTooltip(mode));
         }
     }
 
@@ -74,6 +75,7 @@ public class VaultScreen extends EconomyUiContainerScreen<VaultMenu> {
         header.addChild(Ui.text(Component.translatable("ui.economy.vault.title")).style(TextStyle.TITLE));
         header.addChild(Ui.spacer().flex());
         modeBtn = Ui.button(modeLabel(currentMode), this::cycleMode).ghost().small();
+        modeBtn.tooltip(modeTooltip(currentMode));
         header.addChild(modeBtn);
         header.addChild(buildCompactThemeToggle());
 
@@ -91,6 +93,14 @@ public class VaultScreen extends EconomyUiContainerScreen<VaultMenu> {
         });
     }
 
+    private Component modeTooltip(VaultBlockEntity.VaultMode mode) {
+        return Component.translatable(switch (mode) {
+            case BOTH -> "ui.economy.container.tooltip.mode_both";
+            case INPUT -> "ui.economy.container.tooltip.mode_input";
+            case OUTPUT -> "ui.economy.container.tooltip.mode_output";
+        });
+    }
+
     private void cycleMode() {
         VaultBlockEntity.VaultMode next = VaultBlockEntity.VaultMode.byId((menu.getMode().id + 1) % 3);
         BlockPos targetPos = menu.getVaultBlockEntity() != null ? menu.getVaultBlockEntity().getBlockPos() : null;
@@ -98,7 +108,10 @@ public class VaultScreen extends EconomyUiContainerScreen<VaultMenu> {
         if (targetPos != null) {
             MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.ToggleVaultModePacket(targetPos));
             currentMode = next;
-            if (modeBtn != null) modeBtn.setLabel(modeLabel(next));
+            if (modeBtn != null) {
+                modeBtn.setLabel(modeLabel(next));
+                modeBtn.tooltip(modeTooltip(next));
+            }
         }
     }
 }
