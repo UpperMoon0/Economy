@@ -14,6 +14,7 @@ import com.nstut.openui.api.UiAnimationUtil;
 import com.nstut.openui.api.VStack;
 import com.nstut.openui.api.UiRender;
 import com.nstut.openui.controls.Badge;
+import com.nstut.openui.controls.Card;
 import com.nstut.openui.controls.Dialog;
 import com.nstut.openui.controls.Popover;
 import com.nstut.openui.controls.Select;
@@ -904,20 +905,57 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         String qtyStr = p.isInfinite ? "∞" : EconomyFormatUtil.formatCommodityQuantity(p.quantity, fluid);
         String msg = Component.translatable("ui.economy.confirm.message", p.action, qtyStr, getItemDisplayName(p.itemId, p.itemName)).getString();
         OverlayHandle[] holder = new OverlayHandle[1];
-        holder[0] = Dialog.confirm(uiRuntime().overlays(),
-                Component.translatable("ui.economy.confirm.title"),
-                Component.literal(msg + "\n" + Component.translatable("ui.economy.confirm.total", p.totalPrice).getString()),
-                () -> {
-                    MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.CreateOrderPacket(
-                            p.itemId, p.quantity, p.priceStr, p.isSell, p.isInfinite, p.commodityType));
-                    String id = p.itemId;
-                    pendingConfirmation.set(null);
-                    selectedItemId.set(id);
-                    MarketClientStore.detail.set(null);
-                    switchView(MarketView.DETAIL);
-                    MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestItemDetailPacket(id));
-                },
-                () -> pendingConfirmation.set(null));
+        boolean[] actionTaken = new boolean[1];
+
+        UIComponent totalRow = new UIComponent() {
+            @Override public int preferredWidth(Font f) { return 0; }
+            @Override public int preferredHeight(Font f) { return 12; }
+            @Override public void render(GuiGraphics g, Font f, int mx, int my, float pt) {
+                ColorScheme colors = theme().colors();
+                String label = t("ui.economy.confirm.total_label");
+                UiRender.text(g, f, label, x, y + 2, colors.onSurface());
+                int coinX = x + f.width(label) + 4;
+                EconomyUiComponents.drawCoin(g, coinX, y + 1);
+                UiRender.text(g, f, p.totalPrice, coinX + 10, y + 2, colors.primary());
+            }
+        };
+        totalRow.fillWidth();
+
+        HStack actions = new HStack().gap(6).justify(com.nstut.openui.layout.Justification.END);
+        actions.addChild(Ui.button(Component.translatable("gui.cancel"), () -> {
+            if (actionTaken[0]) return;
+            actionTaken[0] = true;
+            pendingConfirmation.set(null);
+            if (holder[0] != null) holder[0].close();
+        }).danger());
+        actions.addChild(Ui.button(Component.translatable("gui.ok"), () -> {
+            if (actionTaken[0]) return;
+            actionTaken[0] = true;
+            if (holder[0] != null) holder[0].close();
+            MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.CreateOrderPacket(
+                    p.itemId, p.quantity, p.priceStr, p.isSell, p.isInfinite, p.commodityType));
+            String id = p.itemId;
+            pendingConfirmation.set(null);
+            selectedItemId.set(id);
+            MarketClientStore.detail.set(null);
+            switchView(MarketView.DETAIL);
+            MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestItemDetailPacket(id));
+        }).primary());
+
+        VStack body = new VStack().gap(10);
+        body.addChild(Ui.heading(Component.translatable("ui.economy.confirm.title")));
+        body.addChild(Ui.text(Component.literal(msg)));
+        body.addChild(totalRow);
+        body.addChild(actions);
+
+        Card card = new Card(body).elevated(true).outlined(true).padding(14);
+        card.width(220).minHeight(88);
+        holder[0] = Dialog.show(uiRuntime().overlays(), card, true, true, () -> {
+            if (!actionTaken[0]) {
+                actionTaken[0] = true;
+                pendingConfirmation.set(null);
+            }
+        });
     }
 
     // ── ORDERS ─────────────────────────────────────────────────────────────

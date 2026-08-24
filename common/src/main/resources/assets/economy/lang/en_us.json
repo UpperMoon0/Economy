@@ -104,6 +104,7 @@
   "ui.economy.confirm.title": "CONFIRM TRANSACTION",
   "ui.economy.confirm.message": "%s %s of %s",
   "ui.economy.confirm.total": "Total: %s",
+  "ui.economy.confirm.total_label": "Total:",
 
   "ui.economy.orders.active": "Active Orders",
   "ui.economy.orders.history": "Trade History",
