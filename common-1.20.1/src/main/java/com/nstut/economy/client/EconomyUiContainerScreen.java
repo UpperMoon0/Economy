@@ -18,6 +18,7 @@ import java.util.function.Supplier;
 /** Shared OpenUI base for Economy container screens. Container geometry is never resized here. */
 public abstract class EconomyUiContainerScreen<M extends AbstractContainerMenu> extends UiContainerScreen<M> {
     protected final Signal<EconomyUiThemeMode> themeMode = Signals.of(MarketClientPreferences.getThemeMode());
+    private final RenderReentryGuard shellRenderGuard = new RenderReentryGuard();
     private ButtonWidget themeToggle;
 
     protected EconomyUiContainerScreen(M menu, Inventory inventory, Component title) {
@@ -38,11 +39,16 @@ public abstract class EconomyUiContainerScreen<M extends AbstractContainerMenu> 
     public Theme.Radii radii() { return currentUiTheme().radii(); }
 
     protected void renderBaseShell(GuiGraphics g) {
-        renderBackground(g);
-        ColorScheme c = colors();
-        int radius = currentUiTheme().cardTheme().radius();
-        UiRender.surface(g, leftPos, topPos, imageWidth, imageHeight,
-                radius, c.surface(), c.borderSubtle(), true, c);
+        if (!shellRenderGuard.enter()) return;
+        try {
+            renderBackground(g);
+            ColorScheme c = colors();
+            int radius = currentUiTheme().cardTheme().radius();
+            UiRender.surface(g, leftPos, topPos, imageWidth, imageHeight,
+                    radius, c.surface(), c.borderSubtle(), true, c);
+        } finally {
+            shellRenderGuard.exit();
+        }
     }
 
     @Override

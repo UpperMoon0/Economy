@@ -3,20 +3,13 @@ package com.nstut.neoforge;
 import com.nstut.Economy;
 import com.nstut.economy.blocks.BlockRegistries;
 import com.nstut.economy.blocks.TankBlockEntity;
-import com.nstut.economy.blocks.TankManager;
 import com.nstut.economy.blocks.VaultBlockEntity;
-import com.nstut.economy.blocks.VaultManager;
 import com.nstut.economy.command.EconomyCommands;
-import com.nstut.economy.data.EconomyAccountData;
-import com.nstut.economy.data.EconomyOrderData;
-import com.nstut.economy.data.EconomyTradeData;
-import com.nstut.economy.data.TradeLedger;
 import com.nstut.economy.items.ItemRegistries;
 import com.nstut.economy.network.MarketNetwork;
+import com.nstut.economy.server.EconomyServerLifecycle;
 import com.nstut.economy.sound.SoundRegistries;
-import com.nstut.economy.trading.OrderManager;
 import net.minecraft.network.chat.Component;
-import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Player;
@@ -27,7 +20,7 @@ import net.neoforged.fml.common.Mod;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
 import net.neoforged.neoforge.event.level.BlockEvent;
-import net.neoforged.neoforge.event.server.ServerAboutToStartEvent;
+import net.neoforged.neoforge.event.level.LevelEvent;
 import net.neoforged.neoforge.event.server.ServerStoppingEvent;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
 
@@ -79,38 +72,20 @@ public final class EconomyNeoForge {
     }
 
     @SubscribeEvent
-    public static void onServerAboutToStart(ServerAboutToStartEvent event) {
-        MinecraftServer server = event.getServer();
-        ServerLevel overworld = server.overworld();
-
-        EconomyAccountData accountData = EconomyAccountData.get(overworld);
-        EconomyOrderData orderData = EconomyOrderData.get(overworld);
-        EconomyTradeData tradeData = EconomyTradeData.get(overworld);
-
-        Economy.getAccountManager().loadFrom(accountData);
-
-        OrderManager orderManager = Economy.getOrderManager();
-        orderManager.setOrderData(orderData);
-        orderManager.loadFrom(orderData);
-
-        TradeLedger.setTradeData(tradeData);
-        VaultManager.setAccountData(accountData);
-        TankManager.setAccountData(accountData);
-
-        Economy.LOGGER.info("Economy data loaded");
+    public static void onLevelLoad(LevelEvent.Load event) {
+        if (!(event.getLevel() instanceof ServerLevel level)) return;
+        if (!Level.OVERWORLD.equals(level.dimension())) return;
+        EconomyServerLifecycle.load(level);
     }
 
     @SubscribeEvent
     public static void onServerStopping(ServerStoppingEvent event) {
-        Economy.getAccountManager().saveAll();
-        Economy.getOrderManager().saveAll();
+        EconomyServerLifecycle.save();
         Economy.LOGGER.info("Economy data saved");
     }
 
     @SubscribeEvent
     public static void onServerTick(ServerTickEvent.Post event) {
-        if (event.getServer().getTickCount() % 20 == 0) {
-            Economy.getOrderManager().matchAllPendingOrders(event.getServer().overworld());
-        }
+        EconomyServerLifecycle.tick(event.getServer());
     }
 }

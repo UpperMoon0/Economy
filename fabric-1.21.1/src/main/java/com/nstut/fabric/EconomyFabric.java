@@ -2,20 +2,16 @@ package com.nstut.fabric;
 
 import com.nstut.Economy;
 import com.nstut.economy.blocks.BlockRegistries;
-import com.nstut.economy.blocks.TankManager;
 import com.nstut.economy.command.EconomyCommands;
-import com.nstut.economy.data.EconomyAccountData;
-import com.nstut.economy.data.EconomyOrderData;
-import com.nstut.economy.data.EconomyTradeData;
-import com.nstut.economy.data.TradeLedger;
 import com.nstut.economy.items.ItemRegistries;
 import com.nstut.economy.network.MarketNetwork;
+import com.nstut.economy.server.EconomyServerLifecycle;
 import com.nstut.economy.sound.SoundRegistries;
-import com.nstut.economy.trading.OrderManager;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerWorldEvents;
 import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
@@ -43,7 +39,7 @@ public class EconomyFabric implements ModInitializer {
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) ->
                 EconomyCommands.register(dispatcher));
 
-        ServerLifecycleEvents.SERVER_STARTING.register(this::onServerStarting);
+        ServerWorldEvents.LOAD.register(this::onWorldLoad);
         ServerLifecycleEvents.SERVER_STOPPING.register(this::onServerStopping);
         ServerTickEvents.END_SERVER_TICK.register(this::onEndServerTick);
     }
@@ -66,35 +62,17 @@ public class EconomyFabric implements ModInitializer {
         return false;
     }
 
-    private void onServerStarting(MinecraftServer server) {
-        ServerLevel overworld = server.overworld();
-
-        EconomyAccountData accountData = EconomyAccountData.get(overworld);
-        EconomyOrderData orderData = EconomyOrderData.get(overworld);
-        EconomyTradeData tradeData = EconomyTradeData.get(overworld);
-
-        Economy.getAccountManager().loadFrom(accountData);
-
-        OrderManager orderManager = Economy.getOrderManager();
-        orderManager.setOrderData(orderData);
-        orderManager.loadFrom(orderData);
-
-        TradeLedger.setTradeData(tradeData);
-        com.nstut.economy.blocks.VaultManager.setAccountData(accountData);
-        TankManager.setAccountData(accountData);
-
-        Economy.LOGGER.info("Economy data loaded");
+    private void onWorldLoad(MinecraftServer server, ServerLevel world) {
+        if (!Level.OVERWORLD.equals(world.dimension())) return;
+        EconomyServerLifecycle.load(world);
     }
 
     private void onServerStopping(MinecraftServer server) {
-        Economy.getAccountManager().saveAll();
-        Economy.getOrderManager().saveAll();
+        EconomyServerLifecycle.save();
         Economy.LOGGER.info("Economy data saved");
     }
 
     private void onEndServerTick(MinecraftServer server) {
-        if (server.getTickCount() % 20 == 0) {
-            Economy.getOrderManager().matchAllPendingOrders(server.overworld());
-        }
+        EconomyServerLifecycle.tick(server);
     }
 }

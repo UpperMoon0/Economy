@@ -6,13 +6,15 @@ import com.nstut.economy.command.EconomyCommands;
 import com.nstut.economy.items.ItemRegistries;
 import com.nstut.economy.network.MarketNetwork;
 import com.nstut.economy.sound.SoundRegistries;
-import net.minecraftforge.event.RegisterCommandsEvent;
-import net.minecraftforge.eventbus.api.SubscribeEvent;
+import dev.architectury.platform.forge.EventBuses;
 import net.minecraftforge.fml.common.Mod;
+import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 
 @Mod(Economy.MOD_ID)
+@Mod.EventBusSubscriber(modid = Economy.MOD_ID)
 public final class EconomyForge {
     public EconomyForge() {
+        EventBuses.registerModEventBus(Economy.MOD_ID, FMLJavaModLoadingContext.get().getModEventBus());
         BlockRegistries.init();
         ItemRegistries.init();
         SoundRegistries.init();
@@ -20,8 +22,8 @@ public final class EconomyForge {
         Economy.init();
     }
 
-    @SubscribeEvent
-    public static void onRegisterCommands(RegisterCommandsEvent event) {
+    @net.minecraftforge.eventbus.api.SubscribeEvent
+    public static void onRegisterCommands(net.minecraftforge.event.RegisterCommandsEvent event) {
         EconomyCommands.register(event.getDispatcher());
     }
 }

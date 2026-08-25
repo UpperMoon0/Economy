@@ -73,8 +73,50 @@ jobs:
           name: economy-mod-jars
           path: forge-1.20.1/build/libs/*.jar
 
+  cross-version-verification:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+
+      - name: Checkout OpenUI-MC
+        uses: actions/checkout@v4
+        with:
+          repository: UpperMoon0/OpenUI-MC
+          ref: 2034fa9767645c186f32b236e790796c7769a865
+          path: OpenUI-MC
+
+      - name: Set up supported JDKs
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: |
+            17
+            21
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v5
+
+      - name: Grant Gradle wrapper permissions
+        run: |
+          chmod +x gradlew
+          chmod +x OpenUI-MC/gradlew
+
+      - name: Publish every OpenUI-MC target to Maven Local
+        working-directory: OpenUI-MC
+        run: >-
+          ./gradlew
+          :fabric-1.20.1:publishToMavenLocal
+          :forge-1.20.1:publishToMavenLocal
+          :fabric-1.21.1:publishToMavenLocal
+          :neoforge-1.21.1:publishToMavenLocal
+          --no-daemon
+
+      - name: Test and build every Economy target
+        run: ./gradlew testAllVersions buildAll --no-daemon
+
   release:
-    needs: build
+    needs: [build, cross-version-verification]
     if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:

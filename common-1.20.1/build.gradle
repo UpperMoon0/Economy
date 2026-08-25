@@ -3,6 +3,7 @@ architectury {
 }
 
 sourceSets.main.java.srcDir('../shared/minecraft-1.20plus/src/main/java')
+sourceSets.test.java.srcDir('../shared/minecraft-1.20plus/src/test/java')
 
 configurations {
     shadowBundle
