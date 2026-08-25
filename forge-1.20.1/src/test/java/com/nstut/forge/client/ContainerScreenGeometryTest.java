@@ -1,4 +1,4 @@
-package com.nstut.forge.client;
+package com.nstut.economy.client;
 
 import com.nstut.economy.blocks.TankMenu;
 import com.nstut.economy.blocks.VaultMenu;

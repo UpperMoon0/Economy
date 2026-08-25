@@ -1,11 +1,40 @@
 pluginManagement {
     repositories {
+        maven { url "https://maven.fabricmc.net/" }
+        maven { url "https://maven.architectury.dev/" }
+        maven { url "https://files.minecraftforge.net/maven/" }
         gradlePluginPortal()
-        maven { url = 'https://maven.minecraftforge.net/' }
     }
+}
+
+plugins {
+    id 'org.gradle.toolchains.foojay-resolver-convention' version '0.9.0'
 }
 
 rootProject.name = 'economy'
 
-include 'common'
-include 'forge-1.20.1'
+// A targeted neoforge-26.1.2 invocation must not configure the legacy Loom
+// projects. Besides being faster, this keeps IDE-held mapping locks from
+// blocking the standalone ModDevGradle client/server runs.
+def requestedTasks = gradle.startParameter.taskNames
+def onlyNeoForge2612 = !requestedTasks.isEmpty() && requestedTasks.every {
+    it == 'neoforge-26.1.2' || it.startsWith(':neoforge-26.1.2:')
+}
+
+if (!onlyNeoForge2612) {
+    // Version-neutral shared code (pure Java)
+    include 'common'
+
+    // Minecraft 1.20.1 family
+    include 'common-1.20.1'
+    include 'fabric-1.20.1'
+    include 'forge-1.20.1'
+
+    // Minecraft 1.21.1 family
+    include 'common-1.21.1'
+    include 'fabric-1.21.1'
+    include 'neoforge-1.21.1'
+}
+
+// Minecraft 26.1.2 module (standalone ModDevGradle project)
+include 'neoforge-26.1.2'

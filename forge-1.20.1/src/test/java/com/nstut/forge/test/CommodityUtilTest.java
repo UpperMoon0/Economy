@@ -1,4 +1,4 @@
-package com.nstut.forge.test;
+package com.nstut.economy.test;
 
 import com.nstut.economy.util.CommodityUtil;
 import net.minecraft.world.level.material.Fluids;

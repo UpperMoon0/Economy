@@ -1,7 +1,7 @@
 package com.nstut.economy.trading;
 
 import com.nstut.economy.api.IOrder;
-import com.nstut.forge.test.MinecraftTestBase;
+import com.nstut.economy.test.MinecraftTestBase;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Items;
 import org.junit.jupiter.api.DisplayName;

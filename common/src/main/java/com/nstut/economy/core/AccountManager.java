@@ -3,7 +3,7 @@ package com.nstut.economy.core;
 import com.nstut.economy.api.IAccountManager;
 import com.nstut.economy.api.IBankAccount;
 import com.nstut.economy.config.EconomyConfig;
-import com.nstut.economy.data.EconomyAccountData;
+import com.nstut.economy.core.BalanceStore;
 
 import java.math.BigDecimal;
 import java.util.HashMap;
@@ -16,7 +16,7 @@ public class AccountManager implements IAccountManager {
     private final Map<UUID, BankAccount> accounts;
     private final BankAccount serverAccount;
     private final BankAccount taxAccount;
-    private EconomyAccountData backingData;
+    private BalanceStore backingData;
 
     public AccountManager() {
         this.accounts = new HashMap<>();
@@ -29,11 +29,11 @@ public class AccountManager implements IAccountManager {
         AccountManagerHolder.setInstance(this);
     }
 
-    public void setAccountData(EconomyAccountData data) {
+    public void setAccountData(BalanceStore data) {
         this.backingData = data;
     }
 
-    public void loadFrom(EconomyAccountData data) {
+    public void loadFrom(BalanceStore data) {
         this.backingData = data;
         accounts.clear();
         for (Map.Entry<UUID, BigDecimal> entry : data.getBalances().entrySet()) {

@@ -1,0 +1,23 @@
+﻿{
+    "key":  {
+                "D":  {
+                          "item":  "minecraft:diamond"
+                      },
+                "I":  {
+                          "item":  "minecraft:iron_ingot"
+                      },
+                "C":  {
+                          "item":  "minecraft:chest"
+                      }
+            },
+    "pattern":  [
+                    "DID",
+                    "ICI",
+                    "DID"
+                ],
+    "result":  {
+                   "id":  "economy:vault",
+                   "count":  1
+               },
+    "type":  "minecraft:crafting_shaped"
+}

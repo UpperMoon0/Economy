@@ -1,6 +1,6 @@
-package com.nstut.forge.test;
+package com.nstut.economy.test;
 
-import com.nstut.forge.network.MarketNetwork;
+import com.nstut.economy.network.MarketNetwork;
 import io.netty.buffer.Unpooled;
 import net.minecraft.network.FriendlyByteBuf;
 import org.junit.jupiter.api.DisplayName;

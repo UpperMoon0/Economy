@@ -1,13 +1,12 @@
 package com.nstut.economy.blocks;
 
-import com.nstut.forge.test.MinecraftTestBase;
+import com.nstut.economy.test.MinecraftTestBase;
+import com.nstut.economy.trading.EconomyFluidStack;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.level.material.Fluids;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntityType;
-import net.minecraftforge.fluids.capability.IFluidHandler;
-import net.minecraftforge.fluids.FluidStack;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -22,39 +21,36 @@ class TankFluidTransferTest extends MinecraftTestBase {
     }
 
     @Test
-    @DisplayName("Fluid capability simulation reports transfer without mutating the tank")
-    void capabilitySimulationDoesNotMutate() {
+    @DisplayName("Simulated fill reports transfer without mutating the tank")
+    void simulateFillDoesNotMutate() {
         TankBlockEntity tank = tankEntity();
-        IFluidHandler handler = tank.fluidHandlerForTesting();
 
-        assertEquals(1000, handler.fill(new FluidStack(Fluids.WATER, 1000), IFluidHandler.FluidAction.SIMULATE));
+        assertEquals(1000, tank.simulateFill(new EconomyFluidStack(Fluids.WATER, 1000)));
         assertTrue(tank.getFluid().isEmpty());
 
-        assertEquals(1000, handler.fill(new FluidStack(Fluids.WATER, 1000), IFluidHandler.FluidAction.EXECUTE));
-        FluidStack simulatedDrain = handler.drain(500, IFluidHandler.FluidAction.SIMULATE);
-        assertEquals(500, simulatedDrain.getAmount());
+        assertEquals(1000, tank.fill(new EconomyFluidStack(Fluids.WATER, 1000)));
+        assertEquals(0, tank.simulateFill(new EconomyFluidStack(Fluids.LAVA, 500)));
         assertEquals(1000, tank.getFluidAmount());
     }
 
     @Test
-    @DisplayName("Fluid capability rejects a different fluid in a non-empty tank")
-    void capabilityRejectsMixedFluids() {
+    @DisplayName("A non-empty tank rejects a different fluid")
+    void tankRejectsMixedFluids() {
         TankBlockEntity tank = tankEntity();
-        IFluidHandler handler = tank.fluidHandlerForTesting();
-        handler.fill(new FluidStack(Fluids.WATER, 1000), IFluidHandler.FluidAction.EXECUTE);
+        tank.fill(new EconomyFluidStack(Fluids.WATER, 1000));
 
-        assertEquals(0, handler.fill(new FluidStack(Fluids.LAVA, 1000), IFluidHandler.FluidAction.SIMULATE));
+        assertEquals(0, tank.simulateFill(new EconomyFluidStack(Fluids.LAVA, 1000)));
+        assertEquals(0, tank.fill(new EconomyFluidStack(Fluids.LAVA, 1000)));
         assertSame(Fluids.WATER, tank.getFluid().getFluid());
     }
 
     @Test
-    @DisplayName("Draining the final 1,000 mB leaves a truly empty fluid handler")
+    @DisplayName("Draining the final 1,000 mB leaves a truly empty tank")
     void drainsFinalBucketAmountCompletely() {
         TankBlockEntity tank = tankEntity();
-        IFluidHandler handler = tank.fluidHandlerForTesting();
-        handler.fill(new FluidStack(Fluids.LAVA, 1000), IFluidHandler.FluidAction.EXECUTE);
+        tank.fill(new EconomyFluidStack(Fluids.LAVA, 1000));
 
-        FluidStack drained = handler.drain(1000, IFluidHandler.FluidAction.EXECUTE);
+        EconomyFluidStack drained = tank.drain(1000);
 
         assertSame(Fluids.LAVA, drained.getFluid());
         assertEquals(1000, drained.getAmount());
@@ -66,10 +62,8 @@ class TankFluidTransferTest extends MinecraftTestBase {
     @DisplayName("Filling a tank deposits exactly 1,000 mB")
     void fillsTankWithBucketAmount() {
         TankBlockEntity tank = tankEntity();
-        IFluidHandler handler = tank.fluidHandlerForTesting();
 
-        int filled = handler.fill(new FluidStack(Fluids.WATER, 1000),
-                IFluidHandler.FluidAction.EXECUTE);
+        int filled = tank.fill(new EconomyFluidStack(Fluids.WATER, 1000));
 
         assertEquals(1000, filled);
         assertSame(Fluids.WATER, tank.getFluid().getFluid());
@@ -87,10 +81,10 @@ class TankFluidTransferTest extends MinecraftTestBase {
     void fluidTagRoundTrips() {
         CompoundTag root = new CompoundTag();
         CompoundTag fluidTag = new CompoundTag();
-        new FluidStack(Fluids.LAVA, 37_500).writeToNBT(fluidTag);
+        new EconomyFluidStack(Fluids.LAVA, 37_500).writeTo(fluidTag);
         root.put("Fluid", fluidTag);
 
-        FluidStack loaded = TankBlockEntity.loadFluidFromTag(root);
+        EconomyFluidStack loaded = TankBlockEntity.loadFluidFromTag(root);
         assertSame(Fluids.LAVA, loaded.getFluid());
         assertEquals(37_500, loaded.getAmount());
     }

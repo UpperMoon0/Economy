@@ -1,0 +1,2 @@
+[25Aug2026 17:39:41.265] [Test worker/WARN] [economy/]: Rejected malformed commodity id from client: ??not-a-location
+[25Aug2026 17:39:41.267] [Test worker/WARN] [economy/]: Rejected malformed commodity id from client: minecraft::diamond
