@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
 
       - name: Checkout OpenUI-MC
         uses: actions/checkout@v4
@@ -40,7 +40,7 @@ jobs:
             exit 1
           fi
 
-      - name: Set up JDK 21 for OpenUI
+      - name: Set up JDK 21 for OpenUI and Economy
         uses: actions/setup-java@v5
         with:
           distribution: 'temurin'
@@ -58,12 +58,6 @@ jobs:
         working-directory: OpenUI-MC
         run: ./gradlew :forge-1.20.1:publishToMavenLocal --no-daemon
 
-      - name: Set up JDK 17 for Economy
-        uses: actions/setup-java@v5
-        with:
-          distribution: 'temurin'
-          java-version: '17'
-
       - name: Build with Gradle
         run: ./gradlew :forge-1.20.1:build --no-daemon
 
@@ -71,7 +65,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
 
       - name: Checkout OpenUI-MC
         uses: actions/checkout@v4
@@ -86,8 +80,8 @@ jobs:
           distribution: 'temurin'
           java-version: |
             17
-            21
             25
+            21
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v5
@@ -99,20 +93,17 @@ jobs:
 
       - name: Publish every OpenUI-MC target to Maven Local
         working-directory: OpenUI-MC
-        run: >-
-          ./gradlew
-          :fabric-1.20.1:publishToMavenLocal
-          :forge-1.20.1:publishToMavenLocal
-          :fabric-1.21.1:publishToMavenLocal
-          :neoforge-1.21.1:publishToMavenLocal
-          :neoforge-26.1.2:publishToMavenLocal
-          --no-daemon
+        shell: bash
+        run: |
+          for target in :fabric-1.20.1 :forge-1.20.1 :fabric-1.21.1 :neoforge-1.21.1 :neoforge-26.1.2; do
+            ./gradlew "$target:publishToMavenLocal" --no-daemon
+          done
 
       - name: Test and build every Economy target
         run: ./gradlew testAllVersions buildAll --no-daemon
 
       - name: Upload release artifacts for every target
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: economy-mod-jars
           path: |
@@ -132,9 +123,9 @@ jobs:
       contents: write
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
       - name: Download Build Artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v4
         with:
           name: economy-mod-jars
           path: build/release-libs
