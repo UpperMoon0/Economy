@@ -18,7 +18,6 @@ import com.nstut.economy.config.EconomyConfig;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import org.jetbrains.annotations.NotNull;
 import java.util.UUID;
 
 
@@ -61,10 +60,10 @@ public class TankBlockEntity extends BlockEntity implements WorldlyContainer {
     private NonNullList<ItemStack> items;
 
     public TankBlockEntity(BlockPos pos, BlockState state) {
-        this(BlockRegistries.TANK_BE.get(), pos, state);
+        this(BlockRegistries.TANK_BE != null ? BlockRegistries.TANK_BE.get() : null, pos, state);
     }
 
-    TankBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
+    public TankBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
         super(type, pos, state);
         this.items = NonNullList.withSize(CONTAINER_SIZE, ItemStack.EMPTY);
     }
@@ -160,6 +159,7 @@ public class TankBlockEntity extends BlockEntity implements WorldlyContainer {
             }
         }
     }
+
     private void commitContainerTransfer(ItemStack resultContainer, EconomyFluidStack resultingFluid) {
         fluid = resultingFluid.copy();
         items.set(0, resultContainer.copy());
@@ -344,7 +344,3 @@ public class TankBlockEntity extends BlockEntity implements WorldlyContainer {
         return EconomyFluidStack.EMPTY;
     }
 }
-
-
-
-

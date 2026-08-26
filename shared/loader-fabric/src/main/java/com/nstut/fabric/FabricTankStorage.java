@@ -13,12 +13,18 @@ import net.fabricmc.fabric.api.transfer.v1.transaction.base.SnapshotParticipant;
  * Converts between Fabric Transfer API droplets (81,000 / bucket) and Economy mB (1,000 / bucket).
  * Defers client sync and BE modification until transaction final commit to avoid packet churn
  * and rendering flicker during simulated transfers.
+ *
+ * <p>Snapshot encoding: {@code createSnapshot()} always returns a non-null {@link FabricTankSnapshot},
+ * as required by {@code SnapshotParticipant}. The staged value itself may be {@code null}
+ * (no staged transactional fluid), so it is wrapped: {@code readSnapshot(snapshot)} restores
+ * both "no staged state" and a previously staged fluid — correctly handling nested transactions.</p>
  */
-public class FabricTankStorage extends SnapshotParticipant<EconomyFluidStack> implements SingleSlotStorage<FluidVariant> {
+public class FabricTankStorage extends SnapshotParticipant<FabricTankSnapshot> implements SingleSlotStorage<FluidVariant> {
 
     public static final long DROPLETS_PER_MB = FluidConstants.BUCKET / 1000; // 81 droplets = 1 mB
 
     private final TankBlockEntity tank;
+    /** Non-null only while a transaction has staged a change; null means the BE is authoritative. */
     private EconomyFluidStack txnFluid = null;
 
     public FabricTankStorage(TankBlockEntity tank) {
@@ -90,14 +96,32 @@ public class FabricTankStorage extends SnapshotParticipant<EconomyFluidStack> im
         return (long) toExtract * DROPLETS_PER_MB;
     }
 
+    /**
+     * Returns a non-null snapshot wrapping the current staged state (which may be {@code null}
+     * when no staged change exists). {@code SnapshotParticipant} requires snapshots to never
+     * be null, so the nullable staged value is wrapped in a holder record. Capturing the
+     * {@code txnFluid} reference is safe because staged stacks are immutable in practice:
+     * every write replaces the reference instead of mutating it.
+     */
     @Override
-    protected EconomyFluidStack createSnapshot() {
-        return getCurrentFluid().copy();
+    protected FabricTankSnapshot createSnapshot() {
+        return new FabricTankSnapshot(txnFluid);
     }
 
+    /**
+     * Restores staged state from snapshot.
+     *
+     * <ul>
+     *   <li>{@code snapshot.staged() == null} → no staged state existed; clear {@code txnFluid} so the BE is authoritative.</li>
+     *   <li>non-null → a staged fluid existed; restore it as the staged value.</li>
+     * </ul>
+     *
+     * This correctly handles outer-abort (restores to none) and nested-inner-abort
+     * (restores to the outer's staged fluid).
+     */
     @Override
-    protected void readSnapshot(EconomyFluidStack snapshot) {
-        txnFluid = snapshot;
+    protected void readSnapshot(FabricTankSnapshot snapshot) {
+        this.txnFluid = snapshot.staged();
     }
 
     @Override
