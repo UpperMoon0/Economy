@@ -1,10 +1,10 @@
 # NsTut Economy
 
-![Minecraft Version](https://img.shields.io/badge/Minecraft-1.20.1-brightgreen)
-![Forge Version](https://img.shields.io/badge/Forge-47.4.21-orange)
+![Minecraft](https://img.shields.io/badge/Minecraft-multi--version-brightgreen)
+![Loaders](https://img.shields.io/badge/loaders-Fabric%20%7C%20Forge%20%7C%20NeoForge-orange)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
-A modern order-book economy for Minecraft 1.20.1 (Forge), with physical item and fluid storage, automated order matching, portfolio tracking, and a full in-game market terminal.
+A modern multi-loader order-book economy for Minecraft, with physical item and fluid storage, automated order matching, portfolio tracking, and a full in-game market terminal.
 
 ## Dependency
 
@@ -50,8 +50,8 @@ The client UI requires [OpenUI MC](https://github.com/UpperMoon0/OpenUI-MC), whi
 #### Fluid Tank
 
 - Stores up to `128,000 mB` of one compatible fluid.
-- Accepts Forge fluid containers such as buckets and cells through its processing slot.
-- Exposes the standard Forge fluid capability for compatible pipes and automation.
+- Accepts loader-compatible fluid containers such as buckets and cells through its processing slot.
+- Exposes the loader's standard fluid API for compatible pipes and automation.
 - Uses a centered custom screen with a tiled/cropped fluid texture and a single `current / maximum` amount display.
 - Renders its fluid on the Tank's front face using the fluid's true texture proportions.
 - Supports the same `BOTH`, `INPUT ONLY`, and `OUTPUT ONLY` market behavior as Vaults.
@@ -97,14 +97,14 @@ This creates an infinite server sell order for `16k mB` of water at 2 coins per 
 ## Building and Testing
 
 ```bash
-# Run the automated test suite
-./gradlew :forge-1.20.1:test
+# Run every shared and version-specific test suite
+./gradlew testAllVersions
 
-# Build the production JAR
-./gradlew :forge-1.20.1:build
+# Build every supported loader target
+./gradlew buildAll
 ```
 
-The compiled JAR is written to `forge-1.20.1/build/libs/`.
+Each loader module writes its compiled JAR to its own `build/libs/` directory.
 
 ---
 

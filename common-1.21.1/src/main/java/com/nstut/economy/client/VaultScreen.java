@@ -102,16 +102,10 @@ public class VaultScreen extends EconomyUiContainerScreen<VaultMenu> {
     }
 
     private void cycleMode() {
-        VaultBlockEntity.VaultMode next = VaultBlockEntity.VaultMode.byId((menu.getMode().id + 1) % 3);
         BlockPos targetPos = menu.getVaultBlockEntity() != null ? menu.getVaultBlockEntity().getBlockPos() : null;
         if (targetPos == null && minecraft != null && minecraft.hitResult instanceof BlockHitResult hit) targetPos = hit.getBlockPos();
         if (targetPos != null) {
             MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.ToggleVaultModePacket(targetPos));
-            currentMode = next;
-            if (modeBtn != null) {
-                modeBtn.setLabel(modeLabel(next));
-                modeBtn.tooltip(modeTooltip(next));
-            }
         }
     }
 }

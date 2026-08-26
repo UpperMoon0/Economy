@@ -85,7 +85,8 @@ tasks.register('buildAll') {
     group = 'build'
     description = 'Builds every loader target across all supported Minecraft versions.'
     dependsOn ':forge-1.20.1:build', ':fabric-1.20.1:build',
-            ':neoforge-1.21.1:build', ':fabric-1.21.1:build'
+            ':neoforge-1.21.1:build', ':fabric-1.21.1:build',
+            ':neoforge-26.1.2:build'
 }
 
 tasks.register('testAllVersions') {
@@ -93,5 +94,6 @@ tasks.register('testAllVersions') {
     description = 'Runs shared and version-specific tests for every supported Minecraft version.'
     dependsOn ':common:test', ':common-1.20.1:test', ':common-1.21.1:test',
             ':forge-1.20.1:test', ':fabric-1.20.1:test',
-            ':fabric-1.21.1:test', ':neoforge-1.21.1:test'
+            ':fabric-1.21.1:test', ':neoforge-1.21.1:test',
+            ':neoforge-26.1.2:test'
 }

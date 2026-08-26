@@ -26,7 +26,7 @@ jobs:
           repository: UpperMoon0/OpenUI-MC
           # OpenUI MC 0.0.6 release candidate (UpperMoon0/OpenUI-MC#4).
           # Keep this immutable until the v0.0.6 release tag is available.
-          ref: 2034fa9767645c186f32b236e790796c7769a865
+          ref: e83be38acc7d6e86d879ac53bc22ad8d9b108273
           path: OpenUI-MC
 
       - name: Verify OpenUI-MC version alignment
@@ -67,12 +67,6 @@ jobs:
       - name: Build with Gradle
         run: ./gradlew :forge-1.20.1:build --no-daemon
 
-      - name: Upload Build Artifacts
-        uses: actions/upload-artifact@v7
-        with:
-          name: economy-mod-jars
-          path: forge-1.20.1/build/libs/*.jar
-
   cross-version-verification:
     runs-on: ubuntu-latest
     steps:
@@ -83,7 +77,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: UpperMoon0/OpenUI-MC
-          ref: 2034fa9767645c186f32b236e790796c7769a865
+          ref: e83be38acc7d6e86d879ac53bc22ad8d9b108273
           path: OpenUI-MC
 
       - name: Set up supported JDKs
@@ -93,6 +87,7 @@ jobs:
           java-version: |
             17
             21
+            25
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v5
@@ -110,10 +105,24 @@ jobs:
           :forge-1.20.1:publishToMavenLocal
           :fabric-1.21.1:publishToMavenLocal
           :neoforge-1.21.1:publishToMavenLocal
+          :neoforge-26.1.2:publishToMavenLocal
           --no-daemon
 
       - name: Test and build every Economy target
         run: ./gradlew testAllVersions buildAll --no-daemon
+
+      - name: Upload release artifacts for every target
+        uses: actions/upload-artifact@v7
+        with:
+          name: economy-mod-jars
+          path: |
+            fabric-1.20.1/build/libs/economy-fabric-1.20.1-*.jar
+            forge-1.20.1/build/libs/economy-forge-1.20.1-*.jar
+            fabric-1.21.1/build/libs/economy-fabric-1.21.1-*.jar
+            neoforge-1.21.1/build/libs/economy-neoforge-1.21.1-*.jar
+            neoforge-26.1.2/build/libs/economy-neoforge-26.1.2-*.jar
+            !**/*-sources.jar
+            !**/*-dev-shadow.jar
 
   release:
     needs: [build, cross-version-verification]

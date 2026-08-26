@@ -168,16 +168,10 @@ public class TankScreen extends EconomyUiContainerScreen<TankMenu> {
     }
 
     private void cycleMode() {
-        TankBlockEntity.TankMode next = TankBlockEntity.TankMode.byId((menu.getMode().id + 1) % 3);
         BlockPos targetPos = menu.getTankBlockEntity() != null ? menu.getTankBlockEntity().getBlockPos() : null;
         if (targetPos == null && minecraft != null && minecraft.hitResult instanceof BlockHitResult hit) targetPos = hit.getBlockPos();
         if (targetPos != null) {
             MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.ToggleTankModePacket(targetPos));
-            currentMode = next;
-            if (modeBtn != null) {
-                modeBtn.setLabel(modeLabel(next));
-                modeBtn.tooltip(modeTooltip(next));
-            }
         }
     }
 }

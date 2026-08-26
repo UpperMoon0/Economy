@@ -15,7 +15,7 @@ A player-driven item and fluid economy with an OpenUI-powered Market Terminal, m
 [[dependencies.economy]]
 modId = "openui_mc"
 mandatory = true
-versionRange = "[${openui_version},1)"
+versionRange = "[${openui_version},)"
 ordering = "AFTER"
 side = "CLIENT"
 

@@ -497,7 +497,8 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                 CommodityIconComponent.drawIcon(g, card.itemId, x + 6, y + 12, 16, 16);
                 int textX = x + 28;
                 int textWidth = Math.max(1, width - 34);
-                UiRender.text(g, f, fitText(f, getItemDisplayName(card.itemId, card.displayName), textWidth), textX, y + 4, c.onSurface());
+                drawMarqueeText(g, f, getItemDisplayName(card.itemId, card.displayName),
+                        textX, y + 4, textWidth, c.onSurface(), false);
                 String countText = card.offerCount > 0
                         ? EconomyFormatUtil.formatCount(card.offerCount, "order", "orders")
                         : t("ui.economy.card.no_orders");
@@ -955,7 +956,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
             MarketClientStore.detail.set(null);
             switchView(MarketView.DETAIL);
             MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestItemDetailPacket(id));
-        }).ghost());
+        }).primary());
 
         VStack body = new VStack().gap(10);
         body.addChild(Ui.heading(Component.translatable("ui.economy.confirm.title")));
@@ -1049,18 +1050,14 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                 String name = fitText(f, getItemDisplayName(e.itemId, e.displayName),
                         Math.max(0, x + width - nameX - 4));
                 UiRender.text(g, f, name, nameX, y + 4, c.onSurface());
-                EconomyUiComponents.drawCoin(g, x + 24, y + 18);
                 String qty = e.isInfinite
                         ? t("ui.economy.orders.quantity_infinite")
                         : Component.translatable("ui.economy.orders.quantity_progress",
                                 isFluidCommodity(e.itemId) ? formatFluidAmount(e.quantity) : formatItemAmount(e.quantity),
                                 isFluidCommodity(e.itemId) ? formatFluidAmount(e.initialQuantity) : formatItemAmount(e.initialQuantity)).getString();
-                int metadataX = x + 35;
-                int metadataWidth = Math.max(0, x + width - metadataX - 4);
-                String price = fitText(f, e.price, metadataWidth);
-                UiRender.text(g, f, price, metadataX, y + 17, c.primary());
-                String quantity = fitText(f, " • " + qty, Math.max(0, metadataWidth - f.width(price)));
-                UiRender.text(g, f, quantity, metadataX + f.width(price), y + 17, c.onSurfaceMuted());
+                drawPriceChangeRowMarquee(g, f, e.price, " • " + qty,
+                        x + 24, y + 17, Math.max(0, width - 28),
+                        c.primary(), c.onSurfaceMuted());
             }
         };
         info.flex();
