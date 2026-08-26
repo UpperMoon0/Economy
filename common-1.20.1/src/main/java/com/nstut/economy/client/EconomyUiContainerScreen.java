@@ -9,6 +9,7 @@ import com.nstut.openui.state.Signals;
 import com.nstut.openui.theme.ColorScheme;
 import com.nstut.openui.theme.Theme;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.screens.inventory.MenuAccess;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.AbstractContainerMenu;
@@ -16,7 +17,7 @@ import net.minecraft.world.inventory.AbstractContainerMenu;
 import java.util.function.Supplier;
 
 /** Shared OpenUI base for Economy container screens. Container geometry is never resized here. */
-public abstract class EconomyUiContainerScreen<M extends AbstractContainerMenu> extends UiContainerScreen<M> {
+public abstract class EconomyUiContainerScreen<M extends AbstractContainerMenu> extends UiContainerScreen<M> implements MenuAccess<M> {
     protected final Signal<EconomyUiThemeMode> themeMode = Signals.of(MarketClientPreferences.getThemeMode());
     private final RenderReentryGuard shellRenderGuard = new RenderReentryGuard();
     private ButtonWidget themeToggle;
@@ -97,4 +98,3 @@ public abstract class EconomyUiContainerScreen<M extends AbstractContainerMenu> 
 
     public EconomyUiThemeMode currentThemeMode() { return themeMode.get(); }
 }
-

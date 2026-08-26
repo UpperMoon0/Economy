@@ -24,9 +24,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: UpperMoon0/OpenUI-MC
-          # OpenUI MC 0.0.6 release candidate (UpperMoon0/OpenUI-MC#4).
-          # Keep this immutable until the v0.0.6 release tag is available.
-          ref: e83be38acc7d6e86d879ac53bc22ad8d9b108273
+          ref: 7f9d853b0df39a3ea3e4fcfcfa0e18df042f4c9c
           path: OpenUI-MC
 
       - name: Verify OpenUI-MC version alignment
@@ -75,7 +73,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: UpperMoon0/OpenUI-MC
-          ref: e83be38acc7d6e86d879ac53bc22ad8d9b108273
+          ref: 7f9d853b0df39a3ea3e4fcfcfa0e18df042f4c9c
           path: OpenUI-MC
 
       - name: Set up supported JDKs
@@ -218,7 +216,7 @@ jobs:
                 relations: {
                   projects: [{
                     slug: "openui-mc",
-                    projectID: "1661978",
+                    projectID: 1661978,
                     type: "requiredDependency"
                   }]
                 }
