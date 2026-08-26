@@ -34,7 +34,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: UpperMoon0/OpenUI-MC
-          ref: 7f9d853b0df39a3ea3e4fcfcfa0e18df042f4c9c
+          ref: d5f665d42a186ab6454882a50268e41b5df6c049
           path: .openui-mc
       - name: Set up supported JDKs
         uses: actions/setup-java@v5
