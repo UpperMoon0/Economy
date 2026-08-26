@@ -35,8 +35,12 @@ jobs:
           set -euo pipefail
           expected="$(sed -n 's/^openui_version[[:space:]]*=[[:space:]]*//p' gradle.properties | head -n1 | tr -d '\r' | xargs)"
           actual="$(sed -n 's/^mod_version[[:space:]]*=[[:space:]]*//p' OpenUI-MC/gradle.properties | head -n1 | tr -d '\r' | xargs)"
-          if [[ -z "$expected" || -z "$actual" || "$actual" != "$expected" ]]; then
-            echo "OpenUI version mismatch: Economy requires '$expected' but the checked-out source publishes '$actual'." >&2
+          if [[ -z "$expected" || -z "$actual" ]]; then
+            echo "Failed to parse OpenUI versions." >&2
+            exit 1
+          fi
+          if [[ "$(printf '%s\n%s' "$expected" "$actual" | sort -V | head -n1)" != "$expected" ]]; then
+            echo "OpenUI version mismatch: Economy requires >= '$expected' but OpenUI-MC publishes '$actual'." >&2
             exit 1
           fi
 
@@ -102,7 +106,7 @@ jobs:
       - name: Test and build every Economy target
         run: ./gradlew testAllVersions buildAll --no-daemon
 
-      - name: Upload release artifacts for every target
+      - name: Upload release artifacts for every production target
         uses: actions/upload-artifact@v4
         with:
           name: economy-mod-jars
@@ -111,7 +115,6 @@ jobs:
             forge-1.20.1/build/libs/economy-forge-1.20.1-*.jar
             fabric-1.21.1/build/libs/economy-fabric-1.21.1-*.jar
             neoforge-1.21.1/build/libs/economy-neoforge-1.21.1-*.jar
-            neoforge-26.1.2/build/libs/economy-neoforge-26.1.2-*.jar
             !**/*-sources.jar
             !**/*-dev-shadow.jar
 
@@ -129,6 +132,15 @@ jobs:
         with:
           name: economy-mod-jars
           path: build/release-libs
+      - name: Flatten downloaded jars
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/release-libs-flat
+          find build/release-libs -type f -name '*.jar' -exec cp {} build/release-libs-flat/ \;
+          rm -rf build/release-libs
+          mv build/release-libs-flat build/release-libs
+          ls -la build/release-libs
       - name: Determine Release Tag
         id: tag
         run: |
@@ -178,12 +190,11 @@ jobs:
             "forge-1.20.1:Forge:1.20.1:Java 17"
             "fabric-1.21.1:Fabric:1.21.1:Java 21"
             "neoforge-1.21.1:NeoForge:1.21.1:Java 21"
-            "neoforge-26.1.2:NeoForge:26.1.2:Java 25"
           )
 
           for entry in "${targets[@]}"; do
             IFS=':' read -r target_key loader mc_ver java_ver <<< "$entry"
-            jar_file=$(find build/release-libs -maxdepth 1 -type f -name "economy-${target_key}-*.jar" ! -name '*-sources.jar' ! -name '*-dev*.jar' | head -n1)
+            jar_file=$(find build/release-libs -type f -name "economy-${target_key}-*.jar" ! -name '*-sources.jar' ! -name '*-dev*.jar' | head -n1)
             if [[ -z "$jar_file" || ! -f "$jar_file" ]]; then
               echo "Missing required release jar for target ${target_key} in build/release-libs" >&2
               exit 1
