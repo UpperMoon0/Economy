@@ -29,14 +29,83 @@ import java.util.UUID;
 @Mod(Economy.MOD_ID)
 public final class EconomyNeoForge {
 
-    public EconomyNeoForge() {
+    public EconomyNeoForge(net.neoforged.bus.api.IEventBus modBus) {
         BlockRegistries.init();
         ItemRegistries.init();
         SoundRegistries.init();
         MarketNetwork.init();
         Economy.init();
 
+        modBus.addListener(this::registerCapabilities);
         NeoForge.EVENT_BUS.register(this);
+    }
+
+    private void registerCapabilities(net.neoforged.neoforge.capabilities.RegisterCapabilitiesEvent event) {
+        event.registerBlockEntity(
+                net.neoforged.neoforge.capabilities.Capabilities.FluidHandler.BLOCK,
+                BlockRegistries.TANK_BE.get(),
+                (tank, side) -> {
+                    if (!com.nstut.economy.config.EconomyConfig.getInstance().isExternalAutomationAllowed()) {
+                        return null;
+                    }
+                    return new net.neoforged.neoforge.fluids.capability.IFluidHandler() {
+                        @Override
+                        public int getTanks() {
+                            return 1;
+                        }
+
+                        @Override
+                        public net.neoforged.neoforge.fluids.FluidStack getFluidInTank(int tankIndex) {
+                            if (tankIndex != 0 || tank.getFluid().isEmpty()) {
+                                return net.neoforged.neoforge.fluids.FluidStack.EMPTY;
+                            }
+                            return new net.neoforged.neoforge.fluids.FluidStack(tank.getFluid().getFluid(), tank.getFluidAmount());
+                        }
+
+                        @Override
+                        public int getTankCapacity(int tankIndex) {
+                            return tankIndex == 0 ? tank.getCapacity() : 0;
+                        }
+
+                        @Override
+                        public boolean isFluidValid(int tankIndex, net.neoforged.neoforge.fluids.FluidStack stack) {
+                            return tankIndex == 0 && !stack.isEmpty()
+                                    && (tank.getFluid().isEmpty() || tank.getFluid().getFluid() == stack.getFluid());
+                        }
+
+                        @Override
+                        public int fill(net.neoforged.neoforge.fluids.FluidStack resource, FluidAction action) {
+                            if (resource.isEmpty()) return 0;
+                            com.nstut.economy.trading.EconomyFluidStack probe = new com.nstut.economy.trading.EconomyFluidStack(resource.getFluid(), resource.getAmount());
+                            return action.simulate() ? tank.simulateFill(probe) : tank.fill(probe);
+                        }
+
+                        @Override
+                        public net.neoforged.neoforge.fluids.FluidStack drain(net.neoforged.neoforge.fluids.FluidStack resource, FluidAction action) {
+                            if (action.simulate()) {
+                                com.nstut.economy.trading.EconomyFluidStack have = tank.getFluid();
+                                if (have.isEmpty() || have.getFluid() != resource.getFluid()) {
+                                    return net.neoforged.neoforge.fluids.FluidStack.EMPTY;
+                                }
+                                int take = Math.min(have.getAmount(), resource.getAmount());
+                                return take <= 0 ? net.neoforged.neoforge.fluids.FluidStack.EMPTY
+                                        : new net.neoforged.neoforge.fluids.FluidStack(have.getFluid(), take);
+                            }
+                            com.nstut.economy.trading.EconomyFluidStack drained = tank.drain(new com.nstut.economy.trading.EconomyFluidStack(resource.getFluid(), resource.getAmount()));
+                            if (drained.isEmpty()) return net.neoforged.neoforge.fluids.FluidStack.EMPTY;
+                            return new net.neoforged.neoforge.fluids.FluidStack(drained.getFluid(), drained.getAmount());
+                        }
+
+                        @Override
+                        public net.neoforged.neoforge.fluids.FluidStack drain(int maxDrain, FluidAction action) {
+                            com.nstut.economy.trading.EconomyFluidStack have = tank.getFluid();
+                            if (have.isEmpty()) return net.neoforged.neoforge.fluids.FluidStack.EMPTY;
+                            return drain(new net.neoforged.neoforge.fluids.FluidStack(have.getFluid(),
+                                    Math.min(maxDrain, have.getAmount())), action);
+                        }
+                    };
+                }
+        );
     }
 
     /**

@@ -165,14 +165,6 @@ jobs:
             exit 1
           fi
 
-          mapfile -t jars < <(find build/release-libs -maxdepth 1 -type f -name '*.jar' \
-            ! -name '*-sources.jar' ! -name '*-dev.jar' | sort)
-          if [[ ${#jars[@]} -ne 1 ]]; then
-            echo "Expected exactly one runnable Economy jar, found ${#jars[@]}" >&2
-            printf '  %s\n' "${jars[@]}" >&2
-            exit 1
-          fi
-
           mod_version="$(sed -n 's/^mod_version[[:space:]]*=[[:space:]]*//p' gradle.properties | head -n1 | tr -d '\r' | xargs)"
           changelog_path="changelogs/v${mod_version}.md"
           if [[ ! -f "$changelog_path" ]]; then
@@ -180,41 +172,66 @@ jobs:
             exit 1
           fi
           changelog="$(<"$changelog_path")"
-          metadata="$(jq -cn \
-            --arg changelog "$changelog" \
-            --arg displayName "NsTut Economy ${mod_version} - Forge 1.20.1" \
-            '{
-              changelog: $changelog,
-              changelogType: "markdown",
-              displayName: $displayName,
-              gameVersionNames: ["1.20.1", "Forge", "Java 17", "Client", "Server"],
-              releaseType: "release",
-              relations: {
-                projects: [{
-                  slug: "openui-mc",
-                  projectID: "1661978",
-                  type: "requiredDependency"
-                }]
-              }
-            }')"
 
-          response_file="$(mktemp)"
-          trap 'rm -f "$response_file"' EXIT
-          http_status="$(curl --silent --show-error \
-            --output "$response_file" \
-            --write-out '%{http_code}' \
-            --request POST \
-            --header "X-Api-Token: ${CURSEFORGE_API_TOKEN}" \
-            --form-string "metadata=${metadata}" \
-            --form "file=@${jars[0]}" \
-            "https://minecraft.curseforge.com/api/projects/${CURSEFORGE_PROJECT_ID}/upload-file")"
-          response="$(<"$response_file")"
-          if [[ "$http_status" =~ ^2 ]]; then
-            file_id="$(jq -er '.id' <<< "$response")"
-            echo "Published Economy to CurseForge as file ID ${file_id}."
-          elif grep -Eqi 'already|duplicate' <<< "$response"; then
-            echo "CurseForge already has this Economy artifact; treating retry as successful."
-          else
-            echo "CurseForge upload failed with HTTP ${http_status}: ${response}" >&2
-            exit 1
-          fi
+          targets=(
+            "fabric-1.20.1:Fabric:1.20.1:Java 17"
+            "forge-1.20.1:Forge:1.20.1:Java 17"
+            "fabric-1.21.1:Fabric:1.21.1:Java 21"
+            "neoforge-1.21.1:NeoForge:1.21.1:Java 21"
+            "neoforge-26.1.2:NeoForge:26.1.2:Java 25"
+          )
+
+          for entry in "${targets[@]}"; do
+            IFS=':' read -r target_key loader mc_ver java_ver <<< "$entry"
+            jar_file=$(find build/release-libs -maxdepth 1 -type f -name "economy-${target_key}-*.jar" ! -name '*-sources.jar' ! -name '*-dev*.jar' | head -n1)
+            if [[ -z "$jar_file" || ! -f "$jar_file" ]]; then
+              echo "Missing required release jar for target ${target_key} in build/release-libs" >&2
+              exit 1
+            fi
+
+            display_name="NsTut Economy ${mod_version} - ${loader} ${mc_ver}"
+            echo "Publishing ${display_name} (${jar_file})..."
+
+            metadata="$(jq -cn \
+              --arg changelog "$changelog" \
+              --arg displayName "$display_name" \
+              --arg mcVer "$mc_ver" \
+              --arg loader "$loader" \
+              --arg javaVer "$java_ver" \
+              '{
+                changelog: $changelog,
+                changelogType: "markdown",
+                displayName: $displayName,
+                gameVersionNames: [$mcVer, $loader, $javaVer, "Client", "Server"],
+                releaseType: "release",
+                relations: {
+                  projects: [{
+                    slug: "openui-mc",
+                    projectID: "1661978",
+                    type: "requiredDependency"
+                  }]
+                }
+              }')"
+
+            response_file="$(mktemp)"
+            http_status="$(curl --silent --show-error \
+              --output "$response_file" \
+              --write-out '%{http_code}' \
+              --request POST \
+              --header "X-Api-Token: ${CURSEFORGE_API_TOKEN}" \
+              --form-string "metadata=${metadata}" \
+              --form "file=@${jar_file}" \
+              "https://minecraft.curseforge.com/api/projects/${CURSEFORGE_PROJECT_ID}/upload-file")"
+            response="$(<"$response_file")"
+            rm -f "$response_file"
+
+            if [[ "$http_status" =~ ^2 ]]; then
+              file_id="$(jq -er '.id' <<< "$response")"
+              echo "Published ${display_name} to CurseForge as file ID ${file_id}."
+            elif grep -Eqi 'already|duplicate' <<< "$response"; then
+              echo "CurseForge already has ${display_name}; treating retry as successful."
+            else
+              echo "CurseForge upload failed for ${display_name} with HTTP ${http_status}: ${response}" >&2
+              exit 1
+            fi
+          done

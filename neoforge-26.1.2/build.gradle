@@ -52,9 +52,11 @@ sourceSets.main.resources {
 // menu and persistence APIs. Keep its adapter sources local while preserving
 // the same package-level architecture and behavior as the shared targets.
 sourceSets.test.java.srcDir('../common/src/test/java')
-sourceSets.test.java.srcDir('../shared/minecraft-1.20plus/src/test/java')
 sourceSets.main.java.srcDir('../shared/minecraft-all/src/main/java')
 sourceSets.test.java.srcDir('../shared/minecraft-all/src/test/java')
+
+sourceSets.test.compileClasspath += sourceSets.main.compileClasspath
+sourceSets.test.runtimeClasspath += sourceSets.main.runtimeClasspath
 
 repositories {
     maven { url = 'https://maven.architectury.dev/' }

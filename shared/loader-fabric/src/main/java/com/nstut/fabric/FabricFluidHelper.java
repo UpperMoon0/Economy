@@ -12,6 +12,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.BucketItem;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
@@ -62,18 +63,17 @@ public class FabricFluidHelper implements IFluidHelper {
 
     @Override
     public Optional<BucketTransfer> tryEmptyContainerIntoTank(ItemStack container, int capacity, EconomyFluidStack current) {
-        if (!(container.getItem() instanceof BucketItem bucket)) return Optional.empty();
+        if (!(container.getItem() instanceof BucketItem)) return Optional.empty();
         Fluid content = contentOf(container);
         if (content == Fluids.EMPTY || content.defaultFluidState().isEmpty()) return Optional.empty();
         if (!current.isEmpty() && current.getFluid() != content) return Optional.empty();
 
         int room = capacity - current.getAmount();
-        if (room <= 0) return Optional.empty();
-        int take = Math.min(BUCKET_VOLUME, room);
+        if (room < BUCKET_VOLUME) return Optional.empty();
 
         EconomyFluidStack newCurrent = current.isEmpty()
-                ? new EconomyFluidStack(content, take)
-                : new EconomyFluidStack(current.getFluid(), current.getAmount() + take);
+                ? new EconomyFluidStack(content, BUCKET_VOLUME)
+                : new EconomyFluidStack(current.getFluid(), current.getAmount() + BUCKET_VOLUME);
         return Optional.of(new BucketTransfer(new ItemStack(Items.BUCKET), newCurrent));
     }
 
@@ -82,11 +82,10 @@ public class FabricFluidHelper implements IFluidHelper {
         if (current.isEmpty() || current.getAmount() < BUCKET_VOLUME) return Optional.empty();
         if (!container.is(Items.BUCKET)) return Optional.empty();
 
-        ItemStack filled;
         Fluid fluid = current.getFluid();
-        if (fluid == Fluids.WATER) filled = new ItemStack(Items.WATER_BUCKET);
-        else if (fluid == Fluids.LAVA) filled = new ItemStack(Items.LAVA_BUCKET);
-        else return Optional.empty();
+        Item bucketItem = fluid.getBucket();
+        if (bucketItem == null || bucketItem == Items.AIR) return Optional.empty();
+        ItemStack filled = new ItemStack(bucketItem);
 
         int remaining = current.getAmount() - BUCKET_VOLUME;
         EconomyFluidStack newCurrent = remaining > 0
@@ -98,6 +97,13 @@ public class FabricFluidHelper implements IFluidHelper {
     private static Fluid contentOf(ItemStack stack) {
         if (stack.is(Items.WATER_BUCKET)) return Fluids.WATER;
         if (stack.is(Items.LAVA_BUCKET)) return Fluids.LAVA;
+        if (stack.getItem() instanceof BucketItem) {
+            for (Fluid fluid : net.minecraft.core.registries.BuiltInRegistries.FLUID) {
+                if (fluid != Fluids.EMPTY && fluid.isSource(fluid.defaultFluidState()) && fluid.getBucket() == stack.getItem()) {
+                    return fluid;
+                }
+            }
+        }
         return Fluids.EMPTY;
     }
 

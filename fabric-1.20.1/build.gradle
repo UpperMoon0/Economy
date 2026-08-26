@@ -31,6 +31,8 @@ loom {
 
 sourceSets.main.java.srcDir('../shared/loader-fabric/src/main/java')
 sourceSets.main.resources.srcDir('../shared/loader-fabric/src/main/resources')
+sourceSets.test.java.srcDir('../shared/minecraft-1.20plus/src/test/java')
+sourceSets.test.java.srcDir('../shared/minecraft-all/src/test/java')
 
 configurations {
     common {
@@ -60,6 +62,30 @@ dependencies {
 
     common(project(path: ':common-1.20.1', configuration: 'namedElements')) { transitive false }
     shadowBundle project(path: ':common-1.20.1', configuration: 'transformProductionFabric')
+
+    testImplementation project(':common')
+    testImplementation project(path: ':common-1.20.1', configuration: 'namedElements')
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher:1.10.2'
+}
+
+test {
+    useJUnitPlatform()
+}
+
+configurations.all {
+    resolutionStrategy {
+        force(
+                "org.lwjgl:lwjgl:3.3.1",
+                "org.lwjgl:lwjgl-jemalloc:3.3.1",
+                "org.lwjgl:lwjgl-openal:3.3.1",
+                "org.lwjgl:lwjgl-opengl:3.3.1",
+                "org.lwjgl:lwjgl-glfw:3.3.1",
+                "org.lwjgl:lwjgl-stb:3.3.1",
+                "org.lwjgl:lwjgl-tinyfd:3.3.1",
+                "org.lwjgl:lwjgl-natives:3.3.1"
+        )
+    }
 }
 
 processResources {

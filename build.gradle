@@ -9,7 +9,7 @@ rootProject.ext.minecraft_version = '1.20.1'
 rootProject.ext.architectury_api_version = '9.2.14'
 rootProject.ext.fabric_loader_version = '0.16.14'
 rootProject.ext.fabric_api_version = '0.92.5+1.20.1'
-rootProject.ext.forge_version = '1.20.1-47.4.21'
+rootProject.ext.forge_version = '1.20.1-47.4.0'
 
 architectury {
     minecraft = rootProject.ext.minecraft_version

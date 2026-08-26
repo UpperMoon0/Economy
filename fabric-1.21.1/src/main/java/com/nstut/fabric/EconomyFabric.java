@@ -42,6 +42,13 @@ public class EconomyFabric implements ModInitializer {
         ServerWorldEvents.LOAD.register(this::onWorldLoad);
         ServerLifecycleEvents.SERVER_STOPPING.register(this::onServerStopping);
         ServerTickEvents.END_SERVER_TICK.register(this::onEndServerTick);
+
+        net.fabricmc.fabric.api.transfer.v1.fluid.FluidStorage.SIDED.registerForBlockEntity((tank, direction) -> {
+            if (!com.nstut.economy.config.EconomyConfig.getInstance().isExternalAutomationAllowed()) {
+                return null;
+            }
+            return new com.nstut.fabric.FabricTankStorage((com.nstut.economy.blocks.TankBlockEntity) tank);
+        }, BlockRegistries.TANK_BE.get());
     }
 
     private boolean canBreak(Level world, Player player, net.minecraft.core.BlockPos pos) {
