@@ -5,6 +5,7 @@ import com.nstut.economy.client.MarketScreen;
 import com.nstut.economy.client.TankRenderer;
 import com.nstut.economy.client.TankScreen;
 import com.nstut.economy.client.VaultScreen;
+import com.nstut.economy.testing.LiveJoinClientProbe;
 import net.minecraft.client.renderer.blockentity.BlockEntityRenderers;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.fml.common.EventBusSubscriber;
@@ -30,5 +31,6 @@ public final class EconomyNeoForgeClient {
     @SubscribeEvent
     static void onClientSetup(net.neoforged.fml.event.lifecycle.FMLClientSetupEvent event) {
         com.nstut.economy.network.NetworkChannel.registerClientReceivers();
+        LiveJoinClientProbe.register();
     }
 }

@@ -246,6 +246,9 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         this.panelWidth = Math.max(1, Math.min(SCREEN_W, this.width - 16));
         this.panelHeight = Math.max(1, Math.min(SCREEN_H, this.height - 16));
         super.init();
+        com.nstut.Economy.LOGGER.info(
+                "[market-geom] screen={}x{} panel={}x{} left={} top={} image={}x{}",
+                this.width, this.height, panelWidth, panelHeight, leftPos, topPos, getImageWidth(), getImageHeight());
         if (!initialDataRequested) {
             initialDataRequested = true;
             MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestRefreshPacket());

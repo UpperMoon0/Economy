@@ -13,7 +13,7 @@ import com.nstut.openui.layout.Alignment;
 import com.nstut.openui.layout.Insets;
 import com.nstut.openui.theme.ColorScheme;
 import com.nstut.openui.theme.TextStyle;
-import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.player.Inventory;
@@ -33,7 +33,9 @@ public class VaultScreen extends EconomyUiContainerScreen<VaultMenu> {
     private VaultBlockEntity.VaultMode currentMode;
 
     public VaultScreen(VaultMenu menu, Inventory playerInventory, Component title) {
-        super(menu, playerInventory, title, VaultMenu.IMAGE_WIDTH, VaultMenu.IMAGE_HEIGHT);
+        super(menu, playerInventory, title);
+        imageWidth = VaultMenu.IMAGE_WIDTH;
+        imageHeight = VaultMenu.IMAGE_HEIGHT;
         inventoryLabelY = INVENTORY_LABEL_Y;
         titleLabelY = 6;
         currentMode = menu.getMode();
@@ -44,7 +46,6 @@ public class VaultScreen extends EconomyUiContainerScreen<VaultMenu> {
         super.containerTick();
         VaultBlockEntity.VaultMode mode = menu.getMode();
         if (modeBtn != null && mode != currentMode) {
-            com.nstut.Economy.LOGGER.info("[vault-mode] client label {} -> {}", currentMode, mode);
             currentMode = mode;
             modeBtn.setLabel(modeLabel(mode));
             modeBtn.tooltip(modeTooltip(mode));
@@ -52,7 +53,7 @@ public class VaultScreen extends EconomyUiContainerScreen<VaultMenu> {
     }
 
     @Override
-    protected void renderBackgroundLayer(GuiGraphicsExtractor g, float partialTick, int mouseX, int mouseY) {
+    protected void renderBackgroundLayer(GuiGraphics g, float partialTick, int mouseX, int mouseY) {
         renderBaseShell(g);
         ColorScheme c = colors();
         int x = leftPos, y = topPos;
@@ -108,4 +109,5 @@ public class VaultScreen extends EconomyUiContainerScreen<VaultMenu> {
         }
     }
 }
+
 

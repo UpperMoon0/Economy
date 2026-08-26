@@ -10,6 +10,19 @@ ext.forge_version = commonProject.forge_version
 loom {
     forge {
     }
+    runs {
+        liveJoinTestClient {
+            client()
+            runDir("run/live-join/client")
+            property "economy.liveJoinTest", "true"
+            programArgs "--quickPlayMultiplayer", "127.0.0.1:25575"
+        }
+        liveJoinTestServer {
+            server()
+            runDir("run/live-join/server")
+            programArg "nogui"
+        }
+    }
 }
 
 architectury {

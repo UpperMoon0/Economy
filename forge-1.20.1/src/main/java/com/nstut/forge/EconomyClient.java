@@ -4,6 +4,7 @@ import com.nstut.Economy;
 import com.nstut.economy.blocks.BlockRegistries;
 import com.nstut.economy.client.MarketScreen;
 import com.nstut.economy.client.TankRenderer;
+import com.nstut.economy.testing.LiveJoinClientProbe;
 import net.minecraft.client.gui.screens.MenuScreens;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.client.event.EntityRenderersEvent;
@@ -20,6 +21,7 @@ public class EconomyClient {
             MenuScreens.register(BlockRegistries.MARKET_MENU.get(), MarketScreen::new);
             MenuScreens.register(BlockRegistries.VAULT_MENU.get(), com.nstut.economy.client.VaultScreen::new);
             MenuScreens.register(BlockRegistries.TANK_MENU.get(), com.nstut.economy.client.TankScreen::new);
+            LiveJoinClientProbe.register();
         });
     }
 

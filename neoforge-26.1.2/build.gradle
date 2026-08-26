@@ -53,6 +53,8 @@ sourceSets.main.resources {
 // the same package-level architecture and behavior as the shared targets.
 sourceSets.test.java.srcDir('../common/src/test/java')
 sourceSets.test.java.srcDir('../shared/minecraft-1.20plus/src/test/java')
+sourceSets.main.java.srcDir('../shared/minecraft-all/src/main/java')
+sourceSets.test.java.srcDir('../shared/minecraft-all/src/test/java')
 
 repositories {
     maven { url = 'https://maven.architectury.dev/' }
@@ -74,10 +76,23 @@ neoForge {
             systemProperty 'economy.enabledGameTestNamespaces', project.mod_id
         }
 
+        liveJoinTestClient {
+            client()
+            gameDirectory = project.file("run/live-join/client")
+            systemProperty 'economy.liveJoinTest', 'true'
+            programArguments.addAll '--quickPlayMultiplayer', '127.0.0.1:25575'
+        }
+
         server {
             server()
             programArgument '--nogui'
             systemProperty 'economy.enabledGameTestNamespaces', project.mod_id
+        }
+
+        liveJoinTestServer {
+            server()
+            gameDirectory = project.file("run/live-join/server")
+            programArgument '--nogui'
         }
 
         data {

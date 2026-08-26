@@ -1,5 +1,5 @@
 modLoader = "javafml"
-loaderVersion = "${neoforge_version_range}"
+loaderVersion = "${loader_version_range}"
 license = "All Rights Reserved"
 
 [[mods]]

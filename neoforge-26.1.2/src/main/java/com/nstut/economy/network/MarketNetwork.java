@@ -1031,6 +1031,7 @@ public class MarketNetwork {
         public static void handle(ToggleVaultModePacket pkt, Supplier<NetworkManager.PacketContext> ctx) {
             ctx.get().queue(() -> {
                 ServerPlayer player = ctx.get().getPlayer() instanceof ServerPlayer sp ? sp : null;
+                com.nstut.Economy.LOGGER.info("[vault-toggle] packet received for {} by {}", pkt.pos, player != null ? player.getName().getString() : "null");
                 if (player != null && player.level().getBlockEntity(pkt.pos) instanceof com.nstut.economy.blocks.VaultBlockEntity vault) {
                     if (vault.getOwner() != null && vault.getOwner().equals(player.getUUID())) {
                         vault.cycleMode();
@@ -1054,6 +1055,7 @@ public class MarketNetwork {
         public static void handle(ToggleTankModePacket pkt, Supplier<NetworkManager.PacketContext> ctx) {
             ctx.get().queue(() -> {
                 ServerPlayer player = ctx.get().getPlayer() instanceof ServerPlayer sp ? sp : null;
+                com.nstut.Economy.LOGGER.info("[tank-toggle] packet received for {}", pkt.pos);
                 if (player != null && player.level().getBlockEntity(pkt.pos) instanceof TankBlockEntity tank) {
                     if (tank.getOwner() != null && tank.getOwner().equals(player.getUUID())) {
                         tank.cycleMode();

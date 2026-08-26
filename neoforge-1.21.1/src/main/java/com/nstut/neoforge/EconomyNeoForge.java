@@ -44,7 +44,7 @@ public final class EconomyNeoForge {
      * another player walk away with its contents.
      */
     @SubscribeEvent
-    public static void onBlockBreak(BlockEvent.BreakEvent event) {
+    public void onBlockBreak(BlockEvent.BreakEvent event) {
         if (!(event.getLevel() instanceof ServerLevel level)) return;
         Player player = event.getPlayer();
         if (player == null) return;
@@ -72,20 +72,20 @@ public final class EconomyNeoForge {
     }
 
     @SubscribeEvent
-    public static void onLevelLoad(LevelEvent.Load event) {
+    public void onLevelLoad(LevelEvent.Load event) {
         if (!(event.getLevel() instanceof ServerLevel level)) return;
         if (!Level.OVERWORLD.equals(level.dimension())) return;
         EconomyServerLifecycle.load(level);
     }
 
     @SubscribeEvent
-    public static void onServerStopping(ServerStoppingEvent event) {
+    public void onServerStopping(ServerStoppingEvent event) {
         EconomyServerLifecycle.save();
         Economy.LOGGER.info("Economy data saved");
     }
 
     @SubscribeEvent
-    public static void onServerTick(ServerTickEvent.Post event) {
+    public void onServerTick(ServerTickEvent.Post event) {
         EconomyServerLifecycle.tick(event.getServer());
     }
 }

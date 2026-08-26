@@ -1,14 +1,8 @@
 ﻿{
     "key":  {
-                "G":  {
-                          "item":  "minecraft:glass"
-                      },
-                "I":  {
-                          "item":  "minecraft:iron_ingot"
-                      },
-                "B":  {
-                          "item":  "minecraft:bucket"
-                      }
+                "G":  "minecraft:glass",
+                "I":  "minecraft:iron_ingot",
+                "B":  "minecraft:bucket"
             },
     "pattern":  [
                     "GIG",
