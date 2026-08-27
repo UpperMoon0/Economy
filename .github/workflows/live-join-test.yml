@@ -52,14 +52,7 @@ jobs:
       - name: Install matching OpenUI MC artifact
         shell: bash
         run: |
-          case "${{ matrix.target }}" in
-            fabric-1.20.1) targets=(:common-1.20.1 :fabric-1.20.1) ;;
-            forge-1.20.1) targets=(:common-1.20.1 :forge-1.20.1) ;;
-            fabric-1.21.1) targets=(:common-1.21.1 :fabric-1.21.1) ;;
-            neoforge-1.21.1) targets=(:common-1.21.1 :neoforge-1.21.1) ;;
-            neoforge-26.1.2) targets=(:neoforge-26.1.2) ;;
-          esac
-          for target in "${targets[@]}"; do
+          for target in :common-1.20.1 :fabric-1.20.1 :forge-1.20.1 :common-1.21.1 :fabric-1.21.1 :neoforge-1.21.1 :neoforge-26.1.2; do
             ./.openui-mc/gradlew -p .openui-mc "$target:publishToMavenLocal" --no-daemon
           done
       - name: Run automatic real-client join test
