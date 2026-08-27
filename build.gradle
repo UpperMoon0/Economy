@@ -85,7 +85,8 @@ tasks.register('buildAll') {
     group = 'build'
     description = 'Builds every production loader target across supported Minecraft versions.'
     dependsOn ':forge-1.20.1:build', ':fabric-1.20.1:build',
-            ':neoforge-1.21.1:build', ':fabric-1.21.1:build'
+            ':neoforge-1.21.1:build', ':fabric-1.21.1:build',
+            ':neoforge-26.1.2:build'
 }
 
 tasks.register('testAllVersions') {
