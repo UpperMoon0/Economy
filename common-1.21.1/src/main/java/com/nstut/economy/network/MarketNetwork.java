@@ -40,31 +40,37 @@ import java.util.function.Supplier;
 
 public class MarketNetwork {
     public static final NetworkChannel CHANNEL = NetworkChannel.create(
-            ResourceLocation.fromNamespaceAndPath(Economy.MOD_ID, "market"));
+            ResourceLocation.fromNamespaceAndPath(Economy.MOD_ID, "market_c2s"));
+    public static final NetworkChannel S2C_CHANNEL = NetworkChannel.create(
+            ResourceLocation.fromNamespaceAndPath(Economy.MOD_ID, "market_s2c"));
 
     private static boolean initialized = false;
 
     public static synchronized void init() {
         if (initialized) return;
         initialized = true;
-        CHANNEL.register(SyncItemListPacket.class, SyncItemListPacket::encode, SyncItemListPacket::decode, SyncItemListPacket::handle);
+
+        // Client-to-Server packets
         CHANNEL.register(RequestItemDetailPacket.class, RequestItemDetailPacket::encode, RequestItemDetailPacket::decode, RequestItemDetailPacket::handle);
-        CHANNEL.register(SyncItemDetailPacket.class, SyncItemDetailPacket::encode, SyncItemDetailPacket::decode, SyncItemDetailPacket::handle);
         CHANNEL.register(CreateOrderPacket.class, CreateOrderPacket::encode, CreateOrderPacket::decode, CreateOrderPacket::handle);
         CHANNEL.register(AcceptOrderPacket.class, AcceptOrderPacket::encode, AcceptOrderPacket::decode, AcceptOrderPacket::handle);
         CHANNEL.register(CancelOrderPacket.class, CancelOrderPacket::encode, CancelOrderPacket::decode, CancelOrderPacket::handle);
         CHANNEL.register(RequestRefreshPacket.class, RequestRefreshPacket::encode, RequestRefreshPacket::decode, RequestRefreshPacket::handle);
         CHANNEL.register(RequestOrderHistoryPacket.class, RequestOrderHistoryPacket::encode, RequestOrderHistoryPacket::decode, RequestOrderHistoryPacket::handle);
-        CHANNEL.register(SyncOrderHistoryPacket.class, SyncOrderHistoryPacket::encode, SyncOrderHistoryPacket::decode, SyncOrderHistoryPacket::handle);
         CHANNEL.register(RequestVaultInfoPacket.class, RequestVaultInfoPacket::encode, RequestVaultInfoPacket::decode, RequestVaultInfoPacket::handle);
-        CHANNEL.register(SyncVaultInfoPacket.class, SyncVaultInfoPacket::encode, SyncVaultInfoPacket::decode, SyncVaultInfoPacket::handle);
         CHANNEL.register(ToggleVaultModePacket.class, ToggleVaultModePacket::encode, ToggleVaultModePacket::decode, ToggleVaultModePacket::handle);
         CHANNEL.register(ToggleTankModePacket.class, ToggleTankModePacket::encode, ToggleTankModePacket::decode, ToggleTankModePacket::handle);
         CHANNEL.register(RequestPortfolioPacket.class, RequestPortfolioPacket::encode, RequestPortfolioPacket::decode, RequestPortfolioPacket::handle);
-        CHANNEL.register(SyncPortfolioPacket.class, SyncPortfolioPacket::encode, SyncPortfolioPacket::decode, SyncPortfolioPacket::handle);
         CHANNEL.register(EditOrderPacket.class, EditOrderPacket::encode, EditOrderPacket::decode, EditOrderPacket::handle);
         CHANNEL.register(RequestActiveOrdersPacket.class, RequestActiveOrdersPacket::encode, RequestActiveOrdersPacket::decode, RequestActiveOrdersPacket::handle);
-        CHANNEL.register(SyncActiveOrdersPacket.class, SyncActiveOrdersPacket::encode, SyncActiveOrdersPacket::decode, SyncActiveOrdersPacket::handle);
+
+        // Server-to-Client packets
+        S2C_CHANNEL.register(SyncItemListPacket.class, SyncItemListPacket::encode, SyncItemListPacket::decode, SyncItemListPacket::handle);
+        S2C_CHANNEL.register(SyncItemDetailPacket.class, SyncItemDetailPacket::encode, SyncItemDetailPacket::decode, SyncItemDetailPacket::handle);
+        S2C_CHANNEL.register(SyncOrderHistoryPacket.class, SyncOrderHistoryPacket::encode, SyncOrderHistoryPacket::decode, SyncOrderHistoryPacket::handle);
+        S2C_CHANNEL.register(SyncVaultInfoPacket.class, SyncVaultInfoPacket::encode, SyncVaultInfoPacket::decode, SyncVaultInfoPacket::handle);
+        S2C_CHANNEL.register(SyncPortfolioPacket.class, SyncPortfolioPacket::encode, SyncPortfolioPacket::decode, SyncPortfolioPacket::handle);
+        S2C_CHANNEL.register(SyncActiveOrdersPacket.class, SyncActiveOrdersPacket::encode, SyncActiveOrdersPacket::decode, SyncActiveOrdersPacket::handle);
     }
 
     public static class ItemCardData {
@@ -586,7 +592,7 @@ public class MarketNetwork {
             ));
         }
 
-        CHANNEL.sendToPlayer(player, new SyncActiveOrdersPacket(entries));
+        S2C_CHANNEL.sendToPlayer(player, new SyncActiveOrdersPacket(entries));
     }
 
     public static class RequestRefreshPacket {
@@ -726,7 +732,7 @@ public class MarketNetwork {
             cards.add(new ItemCardData(commodityId, displayName, priceStr, counts.getOrDefault(commodityId, 0), priceChange, typeStr));
         }
 
-        CHANNEL.sendToPlayer(player, new SyncItemListPacket(balance, vaultCount, cards));
+        S2C_CHANNEL.sendToPlayer(player, new SyncItemListPacket(balance, vaultCount, cards));
     }
 
     private static void sendItemDetail(ServerPlayer player, String itemId) {
@@ -807,7 +813,7 @@ public class MarketNetwork {
             chart.add(new ChartPoint(globalPrice.intValue(), 1, System.currentTimeMillis()));
         }
 
-        CHANNEL.sendToPlayer(player, new SyncItemDetailPacket(itemId, displayName, vaultCount, asks, bids, chart));
+        S2C_CHANNEL.sendToPlayer(player, new SyncItemDetailPacket(itemId, displayName, vaultCount, asks, bids, chart));
     }
 
     // ── Order History ────────────────────────────────────────────────────────
@@ -890,7 +896,7 @@ public class MarketNetwork {
                     t.quantity, isSeller, t.timestamp, counterName));
         }
 
-        CHANNEL.sendToPlayer(player, new SyncOrderHistoryPacket(entries));
+        S2C_CHANNEL.sendToPlayer(player, new SyncOrderHistoryPacket(entries));
     }
 
     // ── Vault Details ──────────────────────────────────────────────────────────
@@ -1013,7 +1019,7 @@ public class MarketNetwork {
             entries.add(new VaultDetailEntry(r.pos.getX(), r.pos.getY(), r.pos.getZ(),
                     r.dimension, amount, capacity, amount, mode, true, contentId));
         }
-        CHANNEL.sendToPlayer(player, new SyncVaultInfoPacket(entries));
+        S2C_CHANNEL.sendToPlayer(player, new SyncVaultInfoPacket(entries));
     }
 
     private static ServerLevel resolveRecordLevel(ServerPlayer player, String dimension) {
@@ -1221,7 +1227,7 @@ public class MarketNetwork {
         }
 
         holdings.sort((a, b) -> new BigDecimal(b.totalValue).compareTo(new BigDecimal(a.totalValue)));
-        CHANNEL.sendToPlayer(player, new SyncPortfolioPacket(points, holdings));
+        S2C_CHANNEL.sendToPlayer(player, new SyncPortfolioPacket(points, holdings));
     }
 }
 
