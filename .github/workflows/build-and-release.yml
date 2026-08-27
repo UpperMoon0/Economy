@@ -130,8 +130,9 @@ jobs:
           - target: neoforge-1.21.1
             java: 21
             build: true
+          # Gradle runs on Java 21; ModDevGradle provisions the Java 25 toolchain.
           - target: neoforge-26.1.2
-            java: 25
+            java: 21
             build: true
     steps:
       - name: Checkout Repository

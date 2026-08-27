@@ -80,8 +80,9 @@ jobs:
             java: 21
           - target: neoforge-1.21.1
             java: 21
+          # Gradle runs on Java 21; ModDevGradle provisions the Java 25 toolchain.
           - target: neoforge-26.1.2
-            java: 25
+            java: 21
     steps:
       - uses: actions/checkout@v4
       - name: Restore OpenUI Maven Local Cache
