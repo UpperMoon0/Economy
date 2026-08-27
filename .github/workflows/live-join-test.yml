@@ -46,7 +46,7 @@ jobs:
             21
           cache: gradle
       - name: Install virtual display
-        run: sudo apt-get update && sudo apt-get install -y xvfb
+        run: sudo apt-get update -o Acquire::Retries=3 || true; sudo apt-get install -y --no-install-recommends xvfb || true
       - name: Make Gradle executable
         run: chmod +x gradlew .openui-mc/gradlew
       - name: Install matching OpenUI MC artifact
