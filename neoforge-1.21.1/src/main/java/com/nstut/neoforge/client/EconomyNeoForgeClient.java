@@ -28,4 +28,9 @@ public final class EconomyNeoForgeClient {
     static void registerRenderers(EntityRenderersEvent.RegisterRenderers event) {
         event.registerBlockEntityRenderer(BlockRegistries.TANK_BE.get(), TankRenderer::new);
     }
+
+    @SubscribeEvent
+    static void onClientSetup(net.neoforged.fml.event.lifecycle.FMLClientSetupEvent event) {
+        com.nstut.economy.network.NetworkChannel.registerClientReceivers();
+    }
 }

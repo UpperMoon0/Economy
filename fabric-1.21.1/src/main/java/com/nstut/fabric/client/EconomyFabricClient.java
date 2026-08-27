@@ -18,6 +18,7 @@ public class EconomyFabricClient implements ClientModInitializer {
         MenuScreens.register(BlockRegistries.VAULT_MENU.get(), VaultScreen::new);
         MenuScreens.register(BlockRegistries.TANK_MENU.get(), TankScreen::new);
         BlockEntityRenderers.register(BlockRegistries.TANK_BE.get(), TankRenderer::new);
+        com.nstut.economy.network.NetworkChannel.registerClientReceivers();
         LiveJoinClientProbe.register();
     }
 }

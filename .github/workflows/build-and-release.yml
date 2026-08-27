@@ -106,7 +106,7 @@ jobs:
           done
 
       - name: Test and build every Economy target
-        run: ./gradlew testAllVersions buildAll --no-daemon
+        run: ./gradlew testAllVersions buildAll --no-daemon --no-parallel
 
       - name: Upload release artifacts for every production target
         uses: actions/upload-artifact@v4
