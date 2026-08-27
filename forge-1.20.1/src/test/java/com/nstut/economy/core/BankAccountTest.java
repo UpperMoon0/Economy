@@ -44,4 +44,54 @@ class BankAccountTest {
         assertFalse(alice.transferTo(null, BigDecimal.ONE,
                 TransactionContext.transfer("invalid", alice.getOwner())));
     }
+
+    @Test
+    @DisplayName("AccountManager writes through to BalanceStore on mutations and account creation")
+    void accountManagerWritesThroughToBalanceStore() {
+        java.util.Map<UUID, BigDecimal> storeBalances = new java.util.HashMap<>();
+        BalanceStore fakeStore = new BalanceStore() {
+            @Override
+            public java.util.Map<UUID, BigDecimal> getBalances() {
+                return storeBalances;
+            }
+
+            @Override
+            public void setBalance(UUID player, BigDecimal balance) {
+                storeBalances.put(player, balance);
+            }
+
+            @Override
+            public void removeBalance(UUID player) {
+                storeBalances.remove(player);
+            }
+        };
+
+        AccountManager manager = new AccountManager();
+        manager.setAccountData(fakeStore);
+
+        UUID user1 = UUID.randomUUID();
+        var acct1 = manager.getOrCreatePlayerAccount(user1);
+        // BalanceStore must contain the new account immediately
+        assertTrue(storeBalances.containsKey(user1));
+        assertEquals(BigDecimal.ZERO, storeBalances.get(user1));
+
+        // Credit writes through immediately
+        acct1.credit(new BigDecimal("100.00"), TransactionContext.adminGive("test"));
+        assertEquals(new BigDecimal("100.00"), storeBalances.get(user1));
+
+        // Debit writes through immediately
+        acct1.debit(new BigDecimal("30.00"), TransactionContext.adminTake("test"));
+        assertEquals(new BigDecimal("70.00"), storeBalances.get(user1));
+
+        // Transfer writes through for both accounts immediately
+        UUID user2 = UUID.randomUUID();
+        var acct2 = manager.getOrCreatePlayerAccount(user2);
+        acct1.transferTo(acct2, new BigDecimal("20.00"), TransactionContext.transfer("test", user1));
+        assertEquals(new BigDecimal("50.00"), storeBalances.get(user1));
+        assertEquals(new BigDecimal("20.00"), storeBalances.get(user2));
+
+        // Delete account removes from BalanceStore
+        manager.deleteAccount(user1);
+        assertFalse(storeBalances.containsKey(user1));
+    }
 }

@@ -33,7 +33,14 @@ bin/
 ### Minecraft Modding ###
 run/
 logs/
+**/logs/
+.architectury-transformer/
+**/.architectury-transformer/
 !**/src/**/run/
 **/src/generated/**/.cache/
 repo/
 !**/src/**/repo/
+
+### Python ###
+__pycache__/
+*.py[cod]

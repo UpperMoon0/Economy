@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "key": {
+    "G": "minecraft:gold_ingot",
+    "E": "minecraft:emerald",
+    "B": "minecraft:book",
+    "S": "minecraft:smooth_stone"
+  },
+  "pattern": [
+    "GGG",
+    "EBE",
+    "SSS"
+  ],
+  "result": {
+    "id": "economy:market",
+    "count": 1
+  }
+}

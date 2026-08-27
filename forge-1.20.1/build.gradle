@@ -1,40 +1,70 @@
 plugins {
-    id 'java-library'
-    id 'net.minecraftforge.gradle' version '[6.0,6.2)'
-    id 'idea'
+    id 'com.gradleup.shadow'
 }
 
-sourceSets.main.java.srcDir rootProject.file('common/src/main/java')
-sourceSets.main.resources.srcDir rootProject.file('common/src/main/resources')
+def commonProject = project(':common-1.20.1')
+ext.minecraft_version = commonProject.minecraft_version
+ext.architectury_api_version = commonProject.architectury_api_version
+ext.forge_version = commonProject.forge_version
 
-java.toolchain.languageVersion = JavaLanguageVersion.of(17)
-
-minecraft {
-    mappings channel: 'official', version: project.minecraft_version
+loom {
+    forge {
+    }
     runs {
-        client {
-            workingDirectory project.file('run')
-            property 'forge.logging.markers', 'REGISTRIES'
-            property 'forge.logging.console.level', 'debug'
-            mods { "${rootProject.archives_name}" { source sourceSets.main } }
+        liveJoinTestClient {
+            client()
+            runDir("run/live-join/client")
+            property "economy.liveJoinTest", "true"
+            programArgs "--quickPlayMultiplayer", "127.0.0.1:25575"
         }
-        server {
-            workingDirectory project.file('run')
-            property 'forge.logging.markers', 'REGISTRIES'
-            property 'forge.logging.console.level', 'debug'
-            mods { "${rootProject.archives_name}" { source sourceSets.main } }
+        liveJoinTestServer {
+            server()
+            runDir("run/live-join/server")
+            programArg "nogui"
         }
     }
 }
 
-repositories {
-    mavenLocal()
-    mavenCentral()
+architectury {
+    platformSetupLoomIde()
+    forge()
+}
+
+configurations {
+    common {
+        canBeResolved = true
+        canBeConsumed = false
+    }
+    compileClasspath.extendsFrom common
+    runtimeClasspath.extendsFrom common
+    developmentForge.extendsFrom common
+    testCompileClasspath.extendsFrom common
+    testRuntimeClasspath.extendsFrom common
+
+    shadowBundle {
+        canBeResolved = true
+        canBeConsumed = false
+    }
 }
 
 dependencies {
-    minecraft "net.minecraftforge:forge:${project.minecraft_version}-${project.forge_version}"
-    implementation fg.deobf("com.nstut:openui-mc-forge-1.20.1:${project.openui_version}")
+    forge "net.minecraftforge:forge:$project.forge_version"
+
+    modImplementation "dev.architectury:architectury-forge:$project.architectury_api_version"
+
+    // OpenUI's production Forge jar is SRG-named. Loom 1.11 incorrectly remaps
+    // it as an intermediary jar on the development classpath, corrupting every
+    // Minecraft type descriptor. Use the published named development artifact
+    // for compilation/runs; Economy still declares the normal OpenUI mod as an
+    // external runtime dependency in mods.toml and never bundles this jar.
+    compileOnly "com.nstut:openui-mc-forge-1.20.1:${rootProject.openui_version}:dev-shadow"
+    runtimeOnly "com.nstut:openui-mc-forge-1.20.1:${rootProject.openui_version}:dev-shadow"
+
+    implementation project(':common')
+
+    common(project(path: ':common-1.20.1', configuration: 'namedElements')) { transitive false }
+    shadowBundle project(path: ':common-1.20.1', configuration: 'transformProductionForge')
+
     testImplementation platform('org.junit:junit-bom:5.10.2')
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
@@ -45,29 +75,41 @@ tasks.named('test', Test).configure {
     systemProperty 'economy.repoRoot', rootProject.projectDir.absolutePath
 }
 
-def resourceTargets = ['META-INF/mods.toml']
-tasks.named('processResources', ProcessResources).configure {
-    def replaceProperties = [
-        minecraft_version_range: project.minecraft_version_range,
-        forge_version_range    : project.forge_version_range,
-        loader_version_range   : project.loader_version_range,
-        openui_version         : project.openui_version,
-        version                : rootProject.mod_version
-    ]
-    inputs.properties replaceProperties
-    filesMatching(resourceTargets) { expand replaceProperties }
+processResources {
+    inputs.property 'version', project.version
+    inputs.property 'archives_name', rootProject.archives_name
+    inputs.property 'mod_name', rootProject.mod_name
+    inputs.property 'mod_description', rootProject.mod_description
+    inputs.property 'mod_authors', rootProject.mod_authors
+    inputs.property 'minecraft_version', project.minecraft_version
+    inputs.property 'forge_version_range', project.findProperty('forge_version_range') ?: '[47,48)'
+    inputs.property 'loader_version_range', project.findProperty('loader_version_range') ?: '[47,48)'
+    inputs.property 'minecraft_version_range', project.findProperty('minecraft_version_range') ?: '[1.20.1,1.21)'
+    inputs.property 'openui_version', rootProject.openui_version
+
+    filesMatching('META-INF/mods.toml') {
+        expand version: project.version,
+                archives_name: rootProject.archives_name,
+                mod_name: rootProject.mod_name,
+                mod_description: rootProject.mod_description,
+                mod_authors: rootProject.mod_authors,
+                minecraft_version: project.minecraft_version,
+                forge_version_range: project.findProperty('forge_version_range') ?: '[47,48)',
+                loader_version_range: project.findProperty('loader_version_range') ?: '[47,48)',
+                minecraft_version_range: project.findProperty('minecraft_version_range') ?: '[1.20.1,1.21)',
+                openui_version: rootProject.openui_version
+    }
 }
 
-tasks.named('jar', Jar).configure {
-    manifest {
-        attributes([
-            'Specification-Title'     : rootProject.archives_name,
-            'Specification-Vendor'    : rootProject.maven_group,
-            'Specification-Version'   : '1',
-            'Implementation-Title'    : project.name,
-            'Implementation-Version'  : project.jar.archiveVersion,
-            'Implementation-Vendor'   : rootProject.maven_group
-        ])
-    }
-    archiveBaseName = rootProject.archives_name
+shadowJar {
+    configurations = [project.configurations.shadowBundle]
+    archiveClassifier = 'dev-shadow'
+}
+
+remapJar {
+    inputFile.set shadowJar.archiveFile
+}
+
+test {
+    useJUnitPlatform()
 }

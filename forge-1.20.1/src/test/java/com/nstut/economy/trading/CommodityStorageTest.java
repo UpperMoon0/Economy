@@ -1,6 +1,6 @@
 package com.nstut.economy.trading;
 
-import com.nstut.forge.test.MinecraftTestBase;
+import com.nstut.economy.test.MinecraftTestBase;
 import net.minecraft.core.NonNullList;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.SimpleContainer;

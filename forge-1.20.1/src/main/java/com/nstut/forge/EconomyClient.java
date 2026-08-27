@@ -2,8 +2,11 @@ package com.nstut.forge;
 
 import com.nstut.Economy;
 import com.nstut.economy.blocks.BlockRegistries;
-import com.nstut.forge.client.MarketScreen;
-import com.nstut.forge.client.TankRenderer;
+import com.nstut.economy.client.MarketScreen;
+import com.nstut.economy.client.TankRenderer;
+import com.nstut.economy.client.TankScreen;
+import com.nstut.economy.client.VaultScreen;
+import com.nstut.economy.testing.LiveJoinClientProbe;
 import net.minecraft.client.gui.screens.MenuScreens;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.client.event.EntityRenderersEvent;
@@ -18,8 +21,11 @@ public class EconomyClient {
     public static void onClientSetup(FMLClientSetupEvent event) {
         event.enqueueWork(() -> {
             MenuScreens.register(BlockRegistries.MARKET_MENU.get(), MarketScreen::new);
-            MenuScreens.register(BlockRegistries.VAULT_MENU.get(), com.nstut.forge.client.VaultScreen::new);
-            MenuScreens.register(BlockRegistries.TANK_MENU.get(), com.nstut.forge.client.TankScreen::new);
+            MenuScreens.register(BlockRegistries.VAULT_MENU.get(), VaultScreen::new);
+            MenuScreens.register(BlockRegistries.TANK_MENU.get(), TankScreen::new);
+            Economy.LOGGER.info("Registered Forge menu screens: market, vault, tank (missing screens: {})",
+                    MenuScreens.selfTest());
+            LiveJoinClientProbe.register();
         });
     }
 

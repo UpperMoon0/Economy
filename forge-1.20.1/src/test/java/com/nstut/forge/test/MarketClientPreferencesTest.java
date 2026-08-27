@@ -1,7 +1,7 @@
-package com.nstut.forge.test;
+package com.nstut.economy.test;
 
-import com.nstut.forge.client.EconomyUiThemeMode;
-import com.nstut.forge.client.MarketClientPreferences;
+import com.nstut.economy.client.EconomyUiThemeMode;
+import com.nstut.economy.client.MarketClientPreferences;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 

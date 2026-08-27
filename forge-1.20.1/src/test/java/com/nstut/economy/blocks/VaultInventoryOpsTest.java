@@ -1,6 +1,6 @@
 package com.nstut.economy.blocks;
 
-import com.nstut.forge.test.MinecraftTestBase;
+import com.nstut.economy.test.MinecraftTestBase;
 import net.minecraft.core.NonNullList;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.item.ItemStack;

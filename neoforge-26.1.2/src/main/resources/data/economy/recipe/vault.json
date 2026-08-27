@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "key": {
+    "D": "minecraft:diamond",
+    "I": "minecraft:iron_ingot",
+    "C": "minecraft:chest"
+  },
+  "pattern": [
+    "DID",
+    "ICI",
+    "DID"
+  ],
+  "result": {
+    "id": "economy:vault",
+    "count": 1
+  }
+}

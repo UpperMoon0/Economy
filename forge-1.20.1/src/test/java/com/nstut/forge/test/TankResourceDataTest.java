@@ -1,4 +1,4 @@
-package com.nstut.forge.test;
+package com.nstut.economy.test;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;

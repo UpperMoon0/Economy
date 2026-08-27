@@ -1,0 +1,43 @@
+architectury {
+    common rootProject.findProperty('enabled_platforms_1211').split(',')
+}
+
+sourceSets.main.java.srcDir('../shared/minecraft-1.20plus/src/main/java')
+sourceSets.main.java.srcDir('../shared/minecraft-1.21plus/src/main/java')
+sourceSets.main.java.srcDir('../shared/minecraft-all/src/main/java')
+sourceSets.test.java.srcDir('../shared/minecraft-1.20plus/src/test/java')
+sourceSets.test.java.srcDir('../shared/minecraft-all/src/test/java')
+
+configurations {
+    shadowBundle
+}
+
+dependencies {
+    // Shared pure-Java module
+    implementation project(':common')
+
+    modImplementation "net.fabricmc:fabric-loader:$project.fabric_loader_version"
+    modImplementation "dev.architectury:architectury:$project.architectury_api_version"
+
+    // OpenUI MC - compile against the matching 1.21.1 common API; loaders provide the runtime mod.
+    modCompileOnly "com.nstut:openui-mc-common-1.21.1:${rootProject.openui_version}"
+
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher:1.10.2'
+}
+
+processResources {
+    from(project(':common').sourceSets.main.resources)
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
+jar {
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    from {
+        project(':common').sourceSets.main.output
+    }
+}
+
+test {
+    useJUnitPlatform()
+}

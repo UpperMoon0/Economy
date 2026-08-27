@@ -6,7 +6,7 @@ import com.nstut.economy.api.IOrder;
 import com.nstut.economy.api.ITransactionContext;
 import com.nstut.economy.api.ITransactionRecord;
 import com.nstut.economy.core.AccountManagerHolder;
-import com.nstut.forge.test.MinecraftTestBase;
+import com.nstut.economy.test.MinecraftTestBase;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Items;
 import net.minecraft.core.NonNullList;

@@ -1,6 +1,36 @@
-// Shared sources are compiled by the loader-specific module, which provides
-// Minecraft and Forge on the classpath. Keeping this as a resource/source
-// container avoids compiling the same sources without those dependencies.
+// Pure Java library - no Minecraft dependencies
+// Contains code shared across all Minecraft versions (1.20.1, 1.21.1, 26.1.2)
+
 plugins {
-    id 'base'
+    id 'java-library'
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+    withSourcesJar()
+}
+
+group = rootProject.maven_group
+version = rootProject.mod_version
+
+base {
+    archivesName = "$rootProject.archives_name-$project.name"
+}
+
+dependencies {
+    // SLF4J API for logging (implementation provided by Minecraft)
+    compileOnly "org.slf4j:slf4j-api:2.0.9"
+
+    testImplementation platform("org.junit:junit-bom:5.11.4")
+    testImplementation "org.junit.jupiter:junit-jupiter"
+    testRuntimeOnly "org.junit.platform:junit-platform-launcher"
+}
+
+test {
+    useJUnitPlatform()
+}
+
+tasks.withType(JavaCompile).configureEach {
+    it.options.release = 17
 }

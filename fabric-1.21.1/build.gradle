@@ -1,0 +1,94 @@
+plugins {
+    id 'com.gradleup.shadow'
+}
+
+def commonProject = project(':common-1.21.1')
+ext.minecraft_version = commonProject.minecraft_version
+ext.architectury_api_version = commonProject.architectury_api_version
+ext.fabric_loader_version = commonProject.fabric_loader_version
+ext.fabric_api_version = commonProject.fabric_api_version
+
+architectury {
+    platformSetupLoomIde()
+    fabric()
+}
+
+loom {
+    runs {
+        liveJoinTestClient {
+            client()
+            runDir("run/live-join/client")
+            property "economy.liveJoinTest", "true"
+            programArgs "--quickPlayMultiplayer", "127.0.0.1:25575"
+        }
+        liveJoinTestServer {
+            server()
+            runDir("run/live-join/server")
+            programArg "nogui"
+        }
+    }
+}
+
+sourceSets.main.java.srcDir('../shared/loader-fabric/src/main/java')
+sourceSets.main.resources.srcDir('../shared/loader-fabric/src/main/resources')
+
+configurations {
+    common {
+        canBeResolved = true
+        canBeConsumed = false
+    }
+    compileClasspath.extendsFrom common
+    runtimeClasspath.extendsFrom common
+    developmentFabric.extendsFrom common
+
+    shadowBundle {
+        canBeResolved = true
+        canBeConsumed = false
+    }
+}
+
+dependencies {
+    modImplementation "net.fabricmc:fabric-loader:$project.fabric_loader_version"
+    modImplementation "net.fabricmc.fabric-api:fabric-api:$project.fabric_api_version"
+    modImplementation "dev.architectury:architectury-fabric:$project.architectury_api_version"
+
+    // OpenUI MC - required client-side UI framework
+    modImplementation "com.nstut:openui-mc-fabric-1.21.1:${rootProject.openui_version}"
+
+    // Shared pure-Java module (compiled in via common-1.20.1's jar)
+    implementation project(':common')
+
+    common(project(path: ':common-1.21.1', configuration: 'namedElements')) { transitive false }
+    shadowBundle project(path: ':common-1.21.1', configuration: 'transformProductionFabric')
+}
+
+processResources {
+    inputs.property 'version', project.version
+    inputs.property 'mod_name', project.rootProject.mod_name
+    inputs.property 'mod_description', project.rootProject.mod_description
+    inputs.property 'mod_authors', project.rootProject.mod_authors
+    inputs.property 'fabric_loader_version', project.fabric_loader_version
+    inputs.property 'archives_name', project.rootProject.archives_name
+    inputs.property 'minecraft_version', project.minecraft_version
+    inputs.property 'openui_version', rootProject.openui_version
+    inputs.property 'architectury_api_version', project.architectury_api_version
+    inputs.property 'mod_id', rootProject.mod_id
+
+    filesMatching('fabric.mod.json') {
+        expand version: project.version, mod_name: project.rootProject.mod_name,
+                mod_description: project.rootProject.mod_description, mod_authors: project.rootProject.mod_authors,
+                fabric_loader_version: project.fabric_loader_version, archives_name: project.rootProject.archives_name,
+                minecraft_version: project.minecraft_version, openui_version: rootProject.openui_version,
+                architectury_api_version: project.architectury_api_version, mod_id: rootProject.mod_id
+    }
+}
+
+shadowJar {
+    configurations = [project.configurations.shadowBundle]
+    archiveClassifier = 'dev-shadow'
+}
+
+remapJar {
+    inputFile.set shadowJar.archiveFile
+}
+

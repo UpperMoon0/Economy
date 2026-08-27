@@ -1,4 +1,4 @@
-package com.nstut.forge.test;
+package com.nstut.economy.test;
 
 import net.minecraft.SharedConstants;
 import net.minecraft.server.Bootstrap;
