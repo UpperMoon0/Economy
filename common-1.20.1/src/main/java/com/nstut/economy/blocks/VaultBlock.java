@@ -94,4 +94,3 @@ public class VaultBlock extends DirectionalBlock implements EntityBlock {
         return new VaultBlockEntity(pos, state);
     }
 }
-

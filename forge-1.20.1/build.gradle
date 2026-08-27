@@ -52,7 +52,13 @@ dependencies {
 
     modImplementation "dev.architectury:architectury-forge:$project.architectury_api_version"
 
-    modImplementation "com.nstut:openui-mc-forge-1.20.1:${rootProject.openui_version}"
+    // OpenUI's production Forge jar is SRG-named. Loom 1.11 incorrectly remaps
+    // it as an intermediary jar on the development classpath, corrupting every
+    // Minecraft type descriptor. Use the published named development artifact
+    // for compilation/runs; Economy still declares the normal OpenUI mod as an
+    // external runtime dependency in mods.toml and never bundles this jar.
+    compileOnly "com.nstut:openui-mc-forge-1.20.1:${rootProject.openui_version}:dev-shadow"
+    runtimeOnly "com.nstut:openui-mc-forge-1.20.1:${rootProject.openui_version}:dev-shadow"
 
     implementation project(':common')
 
