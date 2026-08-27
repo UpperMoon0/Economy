@@ -12,6 +12,7 @@ import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.UUID;
+import java.util.function.Consumer;
 
 /**
  * Implementation of IBankAccount.
@@ -22,12 +23,18 @@ public class BankAccount implements IBankAccount {
     private BigDecimal balance;
     private final List<ITransactionRecord> transactionHistory;
     private final int maxHistory;
+    private final Consumer<BigDecimal> onBalanceChanged;
     
     public BankAccount(UUID owner, BigDecimal initialBalance) {
+        this(owner, initialBalance, null);
+    }
+
+    public BankAccount(UUID owner, BigDecimal initialBalance, Consumer<BigDecimal> onBalanceChanged) {
         this.owner = owner;
         this.balance = initialBalance;
         this.maxHistory = EconomyConfig.getInstance().getMaxTransactionHistory();
         this.transactionHistory = new LinkedList<>();
+        this.onBalanceChanged = onBalanceChanged;
     }
     
     @Override
@@ -48,6 +55,7 @@ public class BankAccount implements IBankAccount {
         
         balance = balance.add(amount);
         recordTransaction(ctx, amount, null);
+        notifyBalanceChanged();
         return true;
     }
     
@@ -63,6 +71,7 @@ public class BankAccount implements IBankAccount {
         
         balance = balance.subtract(amount);
         recordTransaction(ctx, amount.negate(), null);
+        notifyBalanceChanged();
         return true;
     }
     
@@ -79,6 +88,7 @@ public class BankAccount implements IBankAccount {
         // Debit from this account
         balance = balance.subtract(amount);
         recordTransaction(ctx, amount.negate(), target.getOwner());
+        notifyBalanceChanged();
         
         // Credit to target account
         ITransactionContext targetCtx = new TransactionContext(
@@ -126,5 +136,12 @@ public class BankAccount implements IBankAccount {
      */
     public synchronized void setBalance(BigDecimal newBalance) {
         this.balance = newBalance;
+        notifyBalanceChanged();
+    }
+
+    private void notifyBalanceChanged() {
+        if (onBalanceChanged != null) {
+            onBalanceChanged.accept(balance);
+        }
     }
 }

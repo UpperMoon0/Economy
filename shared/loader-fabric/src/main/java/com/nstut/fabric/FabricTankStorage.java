@@ -31,6 +31,16 @@ public class FabricTankStorage extends SnapshotParticipant<FabricTankSnapshot> i
         this.tank = tank;
     }
 
+    public static FabricTankStorage get(TankBlockEntity tank) {
+        if (tank == null) return null;
+        if (tank.getPlatformFluidStorage() instanceof FabricTankStorage storage) {
+            return storage;
+        }
+        FabricTankStorage storage = new FabricTankStorage(tank);
+        tank.setPlatformFluidStorage(storage);
+        return storage;
+    }
+
     private EconomyFluidStack getCurrentFluid() {
         return txnFluid != null ? txnFluid : tank.getFluid();
     }

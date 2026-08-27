@@ -152,4 +152,26 @@ class FabricTankTransactionSemanticsTest extends MinecraftTestBase {
 
         assertEquals(500, p.committed.get().getAmount());
     }
+
+    @Test
+    @DisplayName("Multiple sequential operations in a single outer transaction accumulate correctly")
+    void sequentialOperationsInSingleTransactionAccumulate() {
+        TestParticipant p = new TestParticipant(1000);
+
+        try (Transaction tx = Transaction.openOuter()) {
+            // First operation: insert +500 -> 1500
+            p.stageAmount(p.getCurrent().getAmount() + 500, tx);
+            assertEquals(1500, p.getCurrent().getAmount());
+
+            // Second operation on same participant: extract -200 -> 1300
+            p.stageAmount(p.getCurrent().getAmount() - 200, tx);
+            assertEquals(1300, p.getCurrent().getAmount());
+
+            tx.commit();
+        }
+
+        assertEquals(1300, p.committed.get().getAmount());
+        assertEquals(1300, p.getCurrent().getAmount());
+        assertNull(p.staged);
+    }
 }

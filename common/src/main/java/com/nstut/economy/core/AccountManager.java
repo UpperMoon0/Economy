@@ -29,15 +29,28 @@ public class AccountManager implements IAccountManager {
         AccountManagerHolder.setInstance(this);
     }
 
+    private BankAccount createAccount(UUID owner, BigDecimal initialBalance) {
+        return new BankAccount(owner, initialBalance, bal -> {
+            if (backingData != null) {
+                backingData.setBalance(owner, bal);
+            }
+        });
+    }
+
     public void setAccountData(BalanceStore data) {
         this.backingData = data;
+        if (data != null) {
+            for (Map.Entry<UUID, BankAccount> entry : accounts.entrySet()) {
+                data.setBalance(entry.getKey(), entry.getValue().getBalance());
+            }
+        }
     }
 
     public void loadFrom(BalanceStore data) {
         this.backingData = data;
         accounts.clear();
         for (Map.Entry<UUID, BigDecimal> entry : data.getBalances().entrySet()) {
-            BankAccount account = new BankAccount(entry.getKey(), entry.getValue());
+            BankAccount account = createAccount(entry.getKey(), entry.getValue());
             accounts.put(entry.getKey(), account);
         }
     }
@@ -46,15 +59,6 @@ public class AccountManager implements IAccountManager {
         if (backingData == null) return;
         for (Map.Entry<UUID, BankAccount> entry : accounts.entrySet()) {
             backingData.setBalance(entry.getKey(), entry.getValue().getBalance());
-        }
-    }
-
-    private void markDirty(UUID player) {
-        if (backingData != null) {
-            IBankAccount account = accounts.get(player);
-            if (account != null) {
-                backingData.setBalance(player, account.getBalance());
-            }
         }
     }
 
@@ -68,11 +72,12 @@ public class AccountManager implements IAccountManager {
         return accounts.computeIfAbsent(player, uuid -> {
             EconomyConfig config = EconomyConfig.getInstance();
             BigDecimal startingBalance = config.getStartingBalance();
-            BankAccount account = new BankAccount(uuid, BigDecimal.ZERO);
+            BankAccount account = createAccount(uuid, BigDecimal.ZERO);
             if (startingBalance.compareTo(BigDecimal.ZERO) > 0) {
                 account.credit(startingBalance, TransactionContext.startingBalance());
+            } else if (backingData != null) {
+                backingData.setBalance(uuid, BigDecimal.ZERO);
             }
-            markDirty(uuid);
             return account;
         });
     }
@@ -94,7 +99,11 @@ public class AccountManager implements IAccountManager {
 
     @Override
     public boolean deleteAccount(UUID player) {
-        return accounts.remove(player) != null;
+        boolean removed = accounts.remove(player) != null;
+        if (removed && backingData != null) {
+            backingData.removeBalance(player);
+        }
+        return removed;
     }
 
     public Map<UUID, BankAccount> getAllAccounts() {
@@ -104,7 +113,7 @@ public class AccountManager implements IAccountManager {
     public void loadAccounts(Map<UUID, BigDecimal> savedBalances) {
         accounts.clear();
         for (Map.Entry<UUID, BigDecimal> entry : savedBalances.entrySet()) {
-            BankAccount account = new BankAccount(entry.getKey(), entry.getValue());
+            BankAccount account = createAccount(entry.getKey(), entry.getValue());
             accounts.put(entry.getKey(), account);
         }
     }

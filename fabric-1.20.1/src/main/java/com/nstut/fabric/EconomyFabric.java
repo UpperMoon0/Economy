@@ -47,7 +47,7 @@ public class EconomyFabric implements ModInitializer {
             if (!com.nstut.economy.config.EconomyConfig.getInstance().isExternalAutomationAllowed()) {
                 return null;
             }
-            return new com.nstut.fabric.FabricTankStorage((com.nstut.economy.blocks.TankBlockEntity) tank);
+            return com.nstut.fabric.FabricTankStorage.get((com.nstut.economy.blocks.TankBlockEntity) tank);
         }, BlockRegistries.TANK_BE.get());
     }
 

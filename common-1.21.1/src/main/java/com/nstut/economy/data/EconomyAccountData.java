@@ -73,6 +73,8 @@ public class EconomyAccountData extends SavedData implements com.nstut.economy.c
 
     public Map<UUID, BigDecimal> getBalances() { return balances; }
     public void setBalance(UUID player, BigDecimal balance) { balances.put(player, balance); setDirty(); }
+    @Override
+    public void removeBalance(UUID player) { if (balances.remove(player) != null) setDirty(); }
     public BigDecimal getBalance(UUID player) { return balances.getOrDefault(player, BigDecimal.ZERO); }
 
     public Map<UUID, List<VaultRecord>> getVaults() { return vaults; }

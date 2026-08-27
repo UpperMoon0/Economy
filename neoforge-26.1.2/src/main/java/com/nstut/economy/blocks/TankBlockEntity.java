@@ -65,6 +65,15 @@ public class TankBlockEntity extends BlockEntity implements WorldlyContainer {
     private UUID owner;
     private TankMode mode = TankMode.BOTH;
     private NonNullList<ItemStack> items;
+    private Object platformFluidStorage;
+
+    public Object getPlatformFluidStorage() {
+        return platformFluidStorage;
+    }
+
+    public void setPlatformFluidStorage(Object platformFluidStorage) {
+        this.platformFluidStorage = platformFluidStorage;
+    }
 
     public TankBlockEntity(BlockPos pos, BlockState state) {
         this(BlockRegistries.TANK_BE.get(), pos, state);

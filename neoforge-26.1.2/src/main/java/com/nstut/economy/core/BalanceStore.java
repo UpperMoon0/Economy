@@ -14,4 +14,6 @@ public interface BalanceStore {
     Map<UUID, BigDecimal> getBalances();
 
     void setBalance(UUID player, BigDecimal balance);
+
+    default void removeBalance(UUID player) {}
 }
