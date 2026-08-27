@@ -58,7 +58,11 @@ jobs:
 
       - name: Publish OpenUI-MC to Maven Local
         working-directory: OpenUI-MC
-        run: ./gradlew publishToMavenLocal --no-daemon
+        shell: bash
+        run: |
+          for target in :common-1.20.1 :forge-1.20.1; do
+            ./gradlew "$target:publishToMavenLocal" --no-daemon
+          done
 
       - name: Build with Gradle
         run: ./gradlew :forge-1.20.1:build --no-daemon
@@ -95,7 +99,11 @@ jobs:
 
       - name: Publish every OpenUI-MC target to Maven Local
         working-directory: OpenUI-MC
-        run: ./gradlew publishToMavenLocal --no-daemon
+        shell: bash
+        run: |
+          for target in :common-1.20.1 :fabric-1.20.1 :forge-1.20.1 :common-1.21.1 :fabric-1.21.1 :neoforge-1.21.1 :neoforge-26.1.2; do
+            ./gradlew "$target:publishToMavenLocal" --no-daemon
+          done
 
       - name: Test and build every Economy target
         run: ./gradlew testAllVersions buildAll --no-daemon
