@@ -14,13 +14,21 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  prepare-openui:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      - name: Cache OpenUI Maven Local
+        id: cache-openui
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository/com/nstut/openui-mc
+          key: openui-maven-82a5dd2f0e6c6027f20ca2acf049858f7f96f597
+
       - name: Checkout OpenUI-MC
+        if: steps.cache-openui.outputs.cache-hit != 'true'
         uses: actions/checkout@v4
         with:
           repository: UpperMoon0/OpenUI-MC
@@ -28,6 +36,7 @@ jobs:
           path: OpenUI-MC
 
       - name: Verify OpenUI-MC version alignment
+        if: steps.cache-openui.outputs.cache-hit != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -42,86 +51,124 @@ jobs:
             exit 1
           fi
 
-      - name: Set up JDK 21 for OpenUI and Economy
-        uses: actions/setup-java@v5
+      - name: Set up JDK 21 for OpenUI
+        if: steps.cache-openui.outputs.cache-hit != 'true'
+        uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '21'
+          cache: 'gradle'
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v5
-
-      - name: Grant Gradle wrapper permissions
-        run: |
-          chmod +x gradlew
-          chmod +x OpenUI-MC/gradlew
+      - name: Make OpenUI gradlew executable
+        if: steps.cache-openui.outputs.cache-hit != 'true'
+        run: chmod +x OpenUI-MC/gradlew
 
       - name: Publish OpenUI-MC to Maven Local
+        if: steps.cache-openui.outputs.cache-hit != 'true'
         working-directory: OpenUI-MC
         shell: bash
         run: |
-          for target in :common-1.20.1 :fabric-1.20.1 :forge-1.20.1 :common-1.21.1 :fabric-1.21.1 :neoforge-1.21.1 :neoforge-26.1.2; do
-            ./gradlew "$target:publishToMavenLocal" --no-daemon
-          done
+          ./gradlew \
+            :common-1.20.1:publishToMavenLocal \
+            :fabric-1.20.1:publishToMavenLocal \
+            :forge-1.20.1:publishToMavenLocal \
+            :common-1.21.1:publishToMavenLocal \
+            :fabric-1.21.1:publishToMavenLocal \
+            :neoforge-1.21.1:publishToMavenLocal \
+            :neoforge-26.1.2:publishToMavenLocal \
+            --parallel --no-daemon
 
-      - name: Build with Gradle
-        run: ./gradlew :forge-1.20.1:build --no-daemon
+      - name: Upload OpenUI Maven Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: openui-m2
+          path: ~/.m2/repository/com/nstut/openui-mc
+          if-no-files-found: error
 
-  cross-version-verification:
+  test-shared:
+    needs: prepare-openui
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+          cache: 'gradle'
+      - run: chmod +x gradlew
+      - name: Run shared unit tests
+        run: ./gradlew :common:test :common-1.20.1:test :common-1.21.1:test
+
+  verify-and-build:
+    needs: prepare-openui
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: fabric-1.20.1
+            java: 17
+            build: true
+          - target: forge-1.20.1
+            java: 17
+            build: true
+          - target: fabric-1.21.1
+            java: 21
+            build: true
+          - target: neoforge-1.21.1
+            java: 21
+            build: true
+          - target: neoforge-26.1.2
+            java: 25
+            build: false
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Checkout OpenUI-MC
-        uses: actions/checkout@v4
+      - name: Restore OpenUI Maven Local Cache
+        id: cache-openui
+        uses: actions/cache@v4
         with:
-          repository: UpperMoon0/OpenUI-MC
-          ref: 82a5dd2f0e6c6027f20ca2acf049858f7f96f597
-          path: OpenUI-MC
+          path: ~/.m2/repository/com/nstut/openui-mc
+          key: openui-maven-82a5dd2f0e6c6027f20ca2acf049858f7f96f597
 
-      - name: Set up supported JDKs
-        uses: actions/setup-java@v5
+      - name: Download OpenUI Maven Artifacts Fallback
+        if: steps.cache-openui.outputs.cache-hit != 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: openui-m2
+          path: ~/.m2/repository/com/nstut/openui-mc
+
+      - name: Set up target JDK
+        uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: |
-            17
-            25
-            21
+          java-version: ${{ matrix.java }}
+          cache: 'gradle'
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v5
+      - name: Make gradlew executable
+        run: chmod +x gradlew
 
-      - name: Grant Gradle wrapper permissions
-        run: |
-          chmod +x gradlew
-          chmod +x OpenUI-MC/gradlew
+      - name: Test ${{ matrix.target }}
+        run: ./gradlew :${{ matrix.target }}:test
 
-      - name: Publish every OpenUI-MC target to Maven Local
-        working-directory: OpenUI-MC
-        shell: bash
-        run: |
-          for target in :common-1.20.1 :fabric-1.20.1 :forge-1.20.1 :common-1.21.1 :fabric-1.21.1 :neoforge-1.21.1 :neoforge-26.1.2; do
-            ./gradlew "$target:publishToMavenLocal" --no-daemon
-          done
+      - name: Build ${{ matrix.target }}
+        if: matrix.build
+        run: ./gradlew :${{ matrix.target }}:build
 
-      - name: Test and build every Economy target
-        run: ./gradlew testAllVersions buildAll --no-daemon --no-parallel
-
-      - name: Upload release artifacts for every production target
+      - name: Upload release artifact
+        if: matrix.build
         uses: actions/upload-artifact@v4
         with:
-          name: economy-mod-jars
+          name: economy-${{ matrix.target }}
           path: |
-            fabric-1.20.1/build/libs/economy-fabric-1.20.1-*.jar
-            forge-1.20.1/build/libs/economy-forge-1.20.1-*.jar
-            fabric-1.21.1/build/libs/economy-fabric-1.21.1-*.jar
-            neoforge-1.21.1/build/libs/economy-neoforge-1.21.1-*.jar
-            !**/*-sources.jar
-            !**/*-dev-shadow.jar
+            ${{ matrix.target }}/build/libs/economy-${{ matrix.target }}-*.jar
+            !${{ matrix.target }}/build/libs/*-sources.jar
+            !${{ matrix.target }}/build/libs/*-dev-shadow.jar
+          if-no-files-found: error
 
   release:
-    needs: [build, cross-version-verification]
+    needs: [test-shared, verify-and-build]
     if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
@@ -132,7 +179,6 @@ jobs:
       - name: Download Build Artifacts
         uses: actions/download-artifact@v4
         with:
-          name: economy-mod-jars
           path: build/release-libs
       - name: Flatten downloaded jars
         shell: bash
