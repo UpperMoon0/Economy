@@ -42,7 +42,11 @@ public class MarketNetwork {
     public static final NetworkChannel CHANNEL = NetworkChannel.create(
             new ResourceLocation(Economy.MOD_ID, "market"));
 
-    public static void init() {
+    private static boolean initialized = false;
+
+    public static synchronized void init() {
+        if (initialized) return;
+        initialized = true;
         CHANNEL.register(SyncItemListPacket.class, SyncItemListPacket::encode, SyncItemListPacket::decode, SyncItemListPacket::handle);
         CHANNEL.register(RequestItemDetailPacket.class, RequestItemDetailPacket::encode, RequestItemDetailPacket::decode, RequestItemDetailPacket::handle);
         CHANNEL.register(SyncItemDetailPacket.class, SyncItemDetailPacket::encode, SyncItemDetailPacket::decode, SyncItemDetailPacket::handle);
