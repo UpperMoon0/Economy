@@ -130,9 +130,10 @@ jobs:
           - target: neoforge-1.21.1
             java: 21
             build: true
+          # Gradle runs on Java 21; ModDevGradle provisions the Java 25 toolchain.
           - target: neoforge-26.1.2
             java: 21
-            build: false
+            build: true
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -191,13 +192,14 @@ jobs:
       - name: Download Build Artifacts
         uses: actions/download-artifact@v4
         with:
+          pattern: economy-*
           path: build/release-libs
       - name: Flatten downloaded jars
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p build/release-libs-flat
-          find build/release-libs -type f -name '*.jar' -exec cp {} build/release-libs-flat/ \;
+          find build/release-libs -type f -name 'economy-*.jar' ! -name '*-sources.jar' ! -name '*-dev*.jar' -exec cp {} build/release-libs-flat/ \;
           rm -rf build/release-libs
           mv build/release-libs-flat build/release-libs
           ls -la build/release-libs
@@ -250,6 +252,7 @@ jobs:
             "forge-1.20.1:Forge:1.20.1:Java 17"
             "fabric-1.21.1:Fabric:1.21.1:Java 21"
             "neoforge-1.21.1:NeoForge:1.21.1:Java 21"
+            "neoforge-26.1.2:NeoForge:26.1.2:Java 25"
           )
 
           for entry in "${targets[@]}"; do
