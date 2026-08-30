@@ -37,7 +37,7 @@ public final class CoinText {
 
     public static String formatMoney(BigDecimal amount) {
         if (amount == null) return "0";
-        return amount.setScale(0, RoundingMode.HALF_UP).toPlainString();
+        return amount.setScale(6, RoundingMode.HALF_UP).stripTrailingZeros().toPlainString();
     }
 
     public static String formatMoney(String amount) {

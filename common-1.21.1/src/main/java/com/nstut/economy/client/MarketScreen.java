@@ -910,7 +910,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         String dispName = getItemDisplayName(id, id);
         boolean fluid = isFluidCommodity(id);
         String totalStr = inf ? "∞ (" + (fluid ? "Per bucket: " : "Per unit: ") + price.toPlainString() + ")"
-                : totalPrice(price, qty, id).setScale(2, java.math.RoundingMode.HALF_UP).stripTrailingZeros().toPlainString();
+                : totalPrice(price, qty, id).setScale(6, java.math.RoundingMode.HALF_UP).stripTrailingZeros().toPlainString();
         pendingConfirmation.set(new PendingConfirmation(id, qty, price.toPlainString(), createSellMode.get(), inf,
                  createSellMode.get() ? t("ui.economy.opt.sell") : t("ui.economy.opt.buy"), dispName, totalStr, commodityType));
         showConfirmation();

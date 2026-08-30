@@ -39,7 +39,7 @@ import java.util.function.Supplier;
 
 public class MarketNetwork {
     public static final NetworkChannel CHANNEL = NetworkChannel.create(
-            ResourceLocation.fromNamespaceAndPath(Economy.MOD_ID, "market"));
+            ResourceLocation.fromNamespaceAndPath(Economy.MOD_ID, "market_v2"));
 
     private static boolean initialized = false;
 
@@ -113,6 +113,10 @@ public class MarketNetwork {
                 ? FluidCommodity.pricePerBucket(pricePerUnit)
                 : pricePerUnit.setScale(0, RoundingMode.HALF_UP);
         return quoted.stripTrailingZeros().toPlainString();
+    }
+
+    private static String exactDecimal(BigDecimal value) {
+        return value.stripTrailingZeros().toPlainString();
     }
 
     public static boolean isValidQuantity(int quantity) {
@@ -662,7 +666,7 @@ public class MarketNetwork {
     private static void sendItemList(ServerPlayer player) {
         OrderManager orderManager = Economy.getOrderManager();
         var account = IAccountManager.getInstance().getOrCreatePlayerAccount(player.getUUID());
-        String balance = account.getBalance().setScale(0, RoundingMode.HALF_UP).toPlainString();
+        String balance = exactDecimal(account.getBalance());
         int vaultCount = VaultManager.getVaultRecords(player.getUUID()).size();
 
         java.util.Set<String> itemIds = new java.util.LinkedHashSet<>();
@@ -1188,9 +1192,9 @@ public class MarketNetwork {
         List<PortfolioPointData> points = new ArrayList<>();
         for (var pt : rawPoints) {
             points.add(new PortfolioPointData(pt.timestamp,
-                pt.netWorth.setScale(0, java.math.RoundingMode.HALF_UP).toPlainString(),
-                pt.balance.setScale(0, java.math.RoundingMode.HALF_UP).toPlainString(),
-                pt.assets.setScale(0, java.math.RoundingMode.HALF_UP).toPlainString()));
+                exactDecimal(pt.netWorth),
+                exactDecimal(pt.balance),
+                exactDecimal(pt.assets)));
         }
 
         List<com.nstut.economy.blocks.VaultBlockEntity> vaults = com.nstut.economy.blocks.VaultManager.getVaults(player.serverLevel(), player.getUUID());
@@ -1234,7 +1238,7 @@ public class MarketNetwork {
                 net.minecraft.world.item.Item it = BuiltInRegistries.ITEM.get(ResourceLocation.parse(id));
                 name = new ItemStack(it).getHoverName().getString();
             }
-            holdings.add(new AssetHoldingData(id, name, qty, totalVal.setScale(0, java.math.RoundingMode.HALF_UP).toPlainString()));
+            holdings.add(new AssetHoldingData(id, name, qty, exactDecimal(totalVal)));
         }
 
         holdings.sort((a, b) -> new BigDecimal(b.totalValue).compareTo(new BigDecimal(a.totalValue)));

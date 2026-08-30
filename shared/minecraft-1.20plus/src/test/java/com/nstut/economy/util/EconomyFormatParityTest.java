@@ -28,4 +28,11 @@ class EconomyFormatParityTest {
         assertEquals("+12.50%", EconomyFormatUtil.formatPriceChange(12.5));
         assertEquals("-12.50%", EconomyFormatUtil.formatPriceChange(-12.5));
     }
+
+    @Test
+    void moneyFormattingKeepsMicroValuesWithoutNoisyTrailingZeros() {
+        assertEquals("0.00001", CoinText.formatMoney(new BigDecimal("0.00001")));
+        assertEquals("0.005", CoinText.formatMoney(new BigDecimal("0.005000")));
+        assertEquals("42", CoinText.formatMoney(new BigDecimal("42.000000")));
+    }
 }

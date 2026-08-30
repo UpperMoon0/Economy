@@ -43,6 +43,20 @@ class MarketPacketTest extends MinecraftTestBase {
     }
 
     @Test
+    @DisplayName("Chart packets preserve fractional bucket prices in protocol v2")
+    void chartPointRoundTripsFractionalPrice() {
+        MarketNetwork.ChartPoint original = new MarketNetwork.ChartPoint(0.00001, 1, 1234L);
+        FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
+
+        original.write(buffer);
+        MarketNetwork.ChartPoint decoded = MarketNetwork.ChartPoint.read(buffer);
+
+        assertEquals(0.00001, decoded.price);
+        assertEquals(1, decoded.quantity);
+        assertEquals(1234L, decoded.timestamp);
+    }
+
+    @Test
     @DisplayName("Container overview packets preserve tank fluid and capacity")
     void tankContainerEntryRoundTrips() {
         MarketNetwork.VaultDetailEntry original = new MarketNetwork.VaultDetailEntry(
