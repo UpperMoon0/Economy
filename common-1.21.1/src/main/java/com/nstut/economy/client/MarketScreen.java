@@ -102,6 +102,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
     private final Signal<CommodityTypeFilter> activeOrderType = Signals.of(CommodityTypeFilter.ALL);
     private final Signal<ActiveOrderSort> activeOrderSort = Signals.of(ActiveOrderSort.NEWEST);
     private final Signal<String> selectedItemId = Signals.of(null);
+    private final Signal<String> selectedCommodityType = Signals.of(null);
 
     private final Signal<String> createCommodityQuery = Signals.of("");
     private final Signal<String> createQty = Signals.of("");
@@ -418,12 +419,12 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
             case CONTAINERS -> MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestVaultInfoPacket());
             case DETAIL -> {
                 String id = selectedItemId.get();
-                if (id != null) MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestItemDetailPacket(id));
+                if (id != null) MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestItemDetailPacket(id, selectedCommodityType.get()));
             }
             case NEW_ORDER -> {
                 MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestPortfolioPacket());
                 String id = createCommodityQuery.get();
-                if (id != null && !id.isEmpty()) MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestItemDetailPacket(id));
+                if (id != null && !id.isEmpty()) MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestItemDetailPacket(id, selectedCommodityType.get()));
             }
         }
     }
@@ -533,7 +534,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
             }
             @Override public boolean mouseClicked(double mx, double my, int button) {
                 if (mx >= x && mx < x + width && my >= y && my < y + height) {
-                    openDetail(card.itemId);
+                    openDetail(card.itemId, card.commodityType);
                     return true;
                 }
                 return false;
@@ -545,12 +546,13 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         return buildCommodityCard(card);
     }
 
-    private void openDetail(String id) {
+    private void openDetail(String id, String commodityType) {
         selectedItemId.set(id);
+        selectedCommodityType.set(commodityType);
         MarketClientStore.detail.set(null);
         detailChartOffset.set(0);
         switchView(MarketView.DETAIL);
-        MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestItemDetailPacket(id));
+        MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestItemDetailPacket(id, commodityType));
     }
 
     // ── DETAIL ─────────────────────────────────────────────────────────────
@@ -771,7 +773,11 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         v.addChild(qtyRow);
 
         TextField priceField = Ui.textField(createPrice);
-        priceField.placeholder(t("ui.economy.new_order.price_placeholder"));
+        Runnable updatePricePlaceholder = () -> priceField.placeholder(t(isFluidCommodity(createCommodityQuery.get())
+                ? "ui.economy.new_order.price_placeholder_fluid"
+                : "ui.economy.new_order.price_placeholder_item"));
+        updatePricePlaceholder.run();
+        subscriptions.add(createCommodityQuery.subscribe(q -> updatePricePlaceholder.run()));
         v.addChild(priceField);
 
         ButtonWidget submit = Ui.button(Component.translatable("ui.economy.action.submit"), this::submitOffer).primary();
@@ -867,7 +873,8 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         boolean knownFluid = BuiltInRegistries.FLUID.containsKey(id)
                 && CommodityUtil.isCanonicalFluid(BuiltInRegistries.FLUID.get(id));
         if (knownItem || knownFluid) {
-            MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestItemDetailPacket(id.toString()));
+            MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestItemDetailPacket(id.toString(),
+                    knownItem && knownFluid ? null : knownFluid ? "FLUID" : "ITEM"));
         }
     }
 
@@ -974,9 +981,10 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
             String id = p.itemId;
             pendingConfirmation.set(null);
             selectedItemId.set(id);
+            selectedCommodityType.set(p.commodityType);
             MarketClientStore.detail.set(null);
             switchView(MarketView.DETAIL);
-            MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestItemDetailPacket(id));
+            MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestItemDetailPacket(id, p.commodityType));
         }).primary());
 
         VStack body = new VStack().gap(10);
@@ -1184,7 +1192,9 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         qtyField.placeholder(t("ui.economy.new_order.qty_field"));
         qtyField.fillWidth();
         TextField priceField = Ui.textField(priceSig);
-        priceField.placeholder(t("ui.economy.new_order.price_field"));
+        priceField.placeholder(t(isFluidCommodity(e.itemId)
+                ? "ui.economy.new_order.price_field_fluid"
+                : "ui.economy.new_order.price_field_item"));
         priceField.fillWidth();
         ButtonWidget infBtn = Ui.button(t("ui.economy.action.infinite"), () -> infSig.set(!infSig.get())).ghost();
 

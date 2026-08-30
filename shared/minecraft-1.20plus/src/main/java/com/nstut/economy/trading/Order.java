@@ -340,7 +340,7 @@ public class Order implements IOrder {
         this.quantity -= delivered;
 
         BigDecimal chargedTotal = pricePerUnit.multiply(BigDecimal.valueOf(delivered));
-        TradeLedger.recordTrade(commodity.getId().toString(), pricePerUnit, delivered, buyer, owner);
+        recordTrade(pricePerUnit, delivered, buyer, owner);
         notifyPlayerTrade(level, buyer, owner, true, commodity.getDisplayName().getString(), commodity instanceof FluidCommodity, delivered, pricePerUnit, chargedTotal);
         notifyPlayerTrade(level, owner, buyer, false, commodity.getDisplayName().getString(), commodity instanceof FluidCommodity, delivered, pricePerUnit, chargedTotal);
         return TransactionResult.success("Purchase successful", chargedTotal, delivered);
@@ -477,7 +477,7 @@ public class Order implements IOrder {
         if (!isInfinite) {
             this.quantity -= delivered;
         }
-        TradeLedger.recordTrade(commodity.getId().toString(), pricePerUnit, delivered, owner, seller);
+        recordTrade(pricePerUnit, delivered, owner, seller);
         notifyPlayerTrade(level, owner, seller, true, commodity.getDisplayName().getString(), commodity instanceof FluidCommodity, delivered, pricePerUnit, chargeTotal);
         notifyPlayerTrade(level, seller, owner, false, commodity.getDisplayName().getString(), commodity instanceof FluidCommodity, delivered, pricePerUnit, chargeTotal);
         return TransactionResult.success("Sale successful", chargeTotal, delivered);
@@ -607,7 +607,7 @@ public class Order implements IOrder {
 
         this.quantity -= delivered;
         BigDecimal chargedTotal = pricePerUnit.multiply(BigDecimal.valueOf(delivered));
-        TradeLedger.recordTrade(commodity.getId().toString(), pricePerUnit, delivered, trader, owner);
+        recordTrade(pricePerUnit, delivered, trader, owner);
         notifyPlayerTrade(level, trader, owner, true, commodity.getDisplayName().getString(), commodity instanceof FluidCommodity, delivered, pricePerUnit, chargedTotal);
         notifyPlayerTrade(level, owner, trader, false, commodity.getDisplayName().getString(), commodity instanceof FluidCommodity, delivered, pricePerUnit, chargedTotal);
         if (level != null) {
@@ -718,7 +718,7 @@ public class Order implements IOrder {
             this.quantity -= delivered;
         }
         BigDecimal chargedTotal = pricePerUnit.multiply(BigDecimal.valueOf(delivered));
-        TradeLedger.recordTrade(commodity.getId().toString(), pricePerUnit, delivered, owner, trader);
+        recordTrade(pricePerUnit, delivered, owner, trader);
         notifyPlayerTrade(level, owner, trader, true, commodity.getDisplayName().getString(), commodity instanceof FluidCommodity, delivered, pricePerUnit, chargedTotal);
         notifyPlayerTrade(level, trader, owner, false, commodity.getDisplayName().getString(), commodity instanceof FluidCommodity, delivered, pricePerUnit, chargedTotal);
         if (level != null) {
@@ -734,6 +734,12 @@ public class Order implements IOrder {
             Economy.LOGGER.error("FAILED TO REFUND {} coins ({}) on order {} from {} to {}",
                     amount.toPlainString(), reason, orderId, from, to);
         }
+    }
+
+    private void recordTrade(BigDecimal price, int qty, UUID buyer, UUID seller) {
+        TradeLedger.recordTrade(commodity.getId().toString(),
+                commodity.getType() == ICommodity.CommodityType.FLUID ? "FLUID" : "ITEM",
+                price, qty, buyer, seller);
     }
 
     private static void notifyPlayerTrade(ServerLevel level, UUID playerUUID, UUID counterpartyUUID,

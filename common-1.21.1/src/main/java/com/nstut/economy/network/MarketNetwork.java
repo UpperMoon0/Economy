@@ -241,17 +241,29 @@ public class MarketNetwork {
 
     public static class RequestItemDetailPacket {
         public final String itemId;
+        public final String commodityType;
 
-        public RequestItemDetailPacket(String itemId) { this.itemId = itemId; }
+        public RequestItemDetailPacket(String itemId) { this(itemId, null); }
 
-        public static void encode(RequestItemDetailPacket pkt, FriendlyByteBuf buf) { buf.writeUtf(pkt.itemId); }
-        public static RequestItemDetailPacket decode(FriendlyByteBuf buf) { return new RequestItemDetailPacket(buf.readUtf()); }
+        public RequestItemDetailPacket(String itemId, String commodityType) {
+            this.itemId = itemId;
+            this.commodityType = commodityType;
+        }
+
+        public static void encode(RequestItemDetailPacket pkt, FriendlyByteBuf buf) {
+            buf.writeUtf(pkt.itemId);
+            buf.writeUtf(pkt.commodityType == null ? "" : pkt.commodityType);
+        }
+        public static RequestItemDetailPacket decode(FriendlyByteBuf buf) {
+            String type = buf.readUtf();
+            return new RequestItemDetailPacket(buf.readUtf(), type.isEmpty() ? null : type);
+        }
 
         public static void handle(RequestItemDetailPacket pkt, Supplier<NetworkManager.PacketContext> ctx) {
             ctx.get().queue(() -> {
                 ServerPlayer player = ctx.get().getPlayer() instanceof ServerPlayer sp ? sp : null;
                 if (player == null) return;
-                sendItemDetail(player, pkt.itemId);
+                sendItemDetail(player, pkt.itemId, pkt.commodityType);
             });
         }
     }
@@ -343,14 +355,14 @@ public class MarketNetwork {
                         com.nstut.Economy.LOGGER.warn("Rejected order packet with out-of-range quantity {} from {}", pkt.quantity, player.getName().getString());
                         var qtyError = com.nstut.economy.util.OrderInputValidator.validateQuantity(pkt.quantity);
                         sendActionResult(player, Action.CREATE_ORDER, Result.WARNING, qtyError.key(), qtyError.args().toArray(String[]::new));
-                        sendItemDetail(player, pkt.itemId);
+                        sendItemDetail(player, pkt.itemId, pkt.commodityType);
                         return;
                     }
                     var priceCheck = com.nstut.economy.util.OrderInputValidator.validatePrice(pkt.pricePerUnit);
                     if (!priceCheck.valid()) {
                         com.nstut.Economy.LOGGER.warn("Rejected order packet with invalid price from {}", player.getName().getString());
                         sendActionResult(player, Action.CREATE_ORDER, Result.WARNING, priceCheck.error().messageKey, priceCheck.error().args().toArray(String[]::new));
-                        sendItemDetail(player, pkt.itemId);
+                        sendItemDetail(player, pkt.itemId, pkt.commodityType);
                         return;
                     }
                     BigDecimal quotedPrice = priceCheck.value();
@@ -380,7 +392,7 @@ public class MarketNetwork {
                         if (pkt.isSell) {
                             if (TankManager.countFluidInTanks(level, player.getUUID(), fluid) < pkt.quantity) {
                                 sendActionResult(player, Action.CREATE_ORDER, Result.WARNING, "ui.economy.error.insufficient_stock");
-                                sendItemDetail(player, pkt.itemId);
+                                sendItemDetail(player, pkt.itemId, pkt.commodityType);
                                 return;
                             }
                             List<com.nstut.economy.trading.EconomyFluidStack> reservedFluids = new ArrayList<>();
@@ -390,7 +402,7 @@ public class MarketNetwork {
                                     TankManager.restoreFluidToTanks(level, player.getUUID(), reservedFluid);
                                 }
                                 sendActionResult(player, Action.CREATE_ORDER, Result.WARNING, "ui.economy.error.insufficient_stock");
-                                sendItemDetail(player, pkt.itemId);
+                                sendItemDetail(player, pkt.itemId, pkt.commodityType);
                                 return;
                             }
                             creation = orderManager.createSellOrder(player.getUUID(), commodity, pkt.quantity, price,
@@ -410,14 +422,14 @@ public class MarketNetwork {
                         if (pkt.isSell) {
                             if (VaultManager.countItemInVaults(level, player.getUUID(), item) < pkt.quantity) {
                                 sendActionResult(player, Action.CREATE_ORDER, Result.WARNING, "ui.economy.error.insufficient_stock");
-                                sendItemDetail(player, pkt.itemId);
+                                sendItemDetail(player, pkt.itemId, pkt.commodityType);
                                 return;
                             }
                             net.minecraft.core.NonNullList<net.minecraft.world.item.ItemStack> reserved = net.minecraft.core.NonNullList.create();
                             if (!VaultManager.extractItemFromVaults(level, player.getUUID(), item, pkt.quantity, reserved)) {
                                 VaultManager.insertItemStacksToVaults(level, player.getUUID(), reserved);
                                 sendActionResult(player, Action.CREATE_ORDER, Result.WARNING, "ui.economy.error.insufficient_stock");
-                                sendItemDetail(player, pkt.itemId);
+                                sendItemDetail(player, pkt.itemId, pkt.commodityType);
                                 return;
                             }
                             creation = orderManager.createSellOrder(player.getUUID(), commodity, pkt.quantity, price, reserved, level);
@@ -427,7 +439,7 @@ public class MarketNetwork {
                     }
                     sendCreateResult(player, creation);
                     orderManager.matchAllPendingOrders(level);
-                    sendItemDetail(player, pkt.itemId);
+                    sendItemDetail(player, pkt.itemId, pkt.commodityType);
                     sendItemList(player);
                 } catch (Exception e) {
                     com.nstut.Economy.LOGGER.warn("Error handling order packet from {}", player.getName().getString(), e);
@@ -456,9 +468,9 @@ public class MarketNetwork {
                 sendActionResult(player, Action.ACCEPT_ORDER, result.success ? Result.SUCCESS : Result.ERROR, result.success ? "ui.economy.toast.order_completed" : "ui.economy.error.transaction_failed");
                 orderManager.cleanupOrders();
                 if (order.getCommodity() instanceof ItemCommodity ic) {
-                    sendItemDetail(player, ic.getId().toString());
+                    sendItemDetail(player, ic.getId().toString(), "ITEM");
                 } else if (order.getCommodity() instanceof FluidCommodity fc) {
-                    sendItemDetail(player, fc.getId().toString());
+                    sendItemDetail(player, fc.getId().toString(), "FLUID");
                 } else {
                     sendItemList(player);
                 }
@@ -488,9 +500,9 @@ public class MarketNetwork {
                     }
                     sendActiveOrders(player);
                     if (opt.isPresent() && opt.get().getCommodity() instanceof ItemCommodity ic) {
-                        sendItemDetail(player, ic.getId().toString());
+                        sendItemDetail(player, ic.getId().toString(), "ITEM");
                     } else if (opt.isPresent() && opt.get().getCommodity() instanceof FluidCommodity fc) {
-                        sendItemDetail(player, fc.getId().toString());
+                        sendItemDetail(player, fc.getId().toString(), "FLUID");
                     } else {
                         sendItemList(player);
                     }
@@ -546,9 +558,9 @@ public class MarketNetwork {
                     sendActiveOrders(player);
                     sendItemList(player);
                     if (opt.isPresent() && opt.get().getCommodity() instanceof ItemCommodity ic) {
-                        sendItemDetail(player, ic.getId().toString());
+                        sendItemDetail(player, ic.getId().toString(), "ITEM");
                     } else if (opt.isPresent() && opt.get().getCommodity() instanceof FluidCommodity fc) {
-                        sendItemDetail(player, fc.getId().toString());
+                        sendItemDetail(player, fc.getId().toString(), "FLUID");
                     }
                 } catch (Exception e) {
                     com.nstut.Economy.LOGGER.warn("Error handling edit packet from {}", player.getName().getString(), e);
@@ -797,6 +809,10 @@ public class MarketNetwork {
     }
 
     private static void sendItemDetail(ServerPlayer player, String itemId) {
+        sendItemDetail(player, itemId, null);
+    }
+
+    private static void sendItemDetail(ServerPlayer player, String itemId, String commodityType) {
         OrderManager orderManager = Economy.getOrderManager();
         UUID playerId = player.getUUID();
 
@@ -807,7 +823,13 @@ public class MarketNetwork {
         Fluid fluid = BuiltInRegistries.FLUID.get(rl);
         Item item = BuiltInRegistries.ITEM.get(rl);
 
-        boolean isFluid = fluid != net.minecraft.world.level.material.Fluids.EMPTY && !com.nstut.economy.platform.Services.FLUID.isAir(fluid);
+        // Prefer the explicit commodity type when the client knows it; a mod can
+        // register an item and a fluid under the same id, so id-only inference
+        // is ambiguous.
+        boolean inferredFluid = fluid != net.minecraft.world.level.material.Fluids.EMPTY && !com.nstut.economy.platform.Services.FLUID.isAir(fluid);
+        boolean isFluid = commodityType != null && !commodityType.isEmpty()
+                ? ("FLUID".equalsIgnoreCase(commodityType) && inferredFluid)
+                : inferredFluid;
         if (isFluid) {
             displayName = com.nstut.economy.platform.Services.FLUID.displayName(fluid).getString();
             vaultCount = TankManager.countFluidInTanks(player.serverLevel(), playerId, fluid);
@@ -869,7 +891,8 @@ public class MarketNetwork {
         for (int i = trades.size() - 1; i >= 0; i--) {
             EconomyTradeData.TradeSnapshot t = trades.get(i);
             BigDecimal tradePrice = new BigDecimal(t.price);
-            chart.add(new ChartPoint((isFluid ? FluidCommodity.pricePerBucket(tradePrice) : tradePrice).doubleValue(), t.quantity, t.timestamp));
+            boolean tradeFluid = t.commodityType != null ? "FLUID".equalsIgnoreCase(t.commodityType) : isFluid;
+            chart.add(new ChartPoint((tradeFluid ? FluidCommodity.pricePerBucket(tradePrice) : tradePrice).doubleValue(), t.quantity, t.timestamp));
         }
         BigDecimal globalPrice = getGlobalPrice(orderManager, itemId);
         if (globalPrice != null) {
@@ -945,6 +968,8 @@ public class MarketNetwork {
                     displayName = t.itemId;
                 }
             }
+            // Persisted type wins over registry inference for ambiguous ids.
+            if (t.commodityType != null) fluidCommodity = "FLUID".equalsIgnoreCase(t.commodityType);
 
             // Resolve counterparty name
             UUID counterUUID = isSeller ? t.buyer : t.seller;
