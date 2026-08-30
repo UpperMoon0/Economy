@@ -22,13 +22,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 0
       - name: Check for version bump
         id: check
         shell: bash
         env:
           EVENT_NAME: ${{ github.event_name }}
           REF: ${{ github.ref }}
+          BEFORE: ${{ github.event.before }}
         run: |
           set -euo pipefail
           should_release=false
@@ -36,7 +37,7 @@ jobs:
             should_release=true
           elif [[ "$EVENT_NAME" == "push" && ( "$REF" == "refs/heads/main" || "$REF" == "refs/heads/master" ) ]]; then
             current="$(sed -n 's/^mod_version[[:space:]]*=[[:space:]]*//p' gradle.properties | head -n1 | tr -d '\r' | xargs)"
-            previous="$(git show HEAD^:gradle.properties 2>/dev/null | sed -n 's/^mod_version[[:space:]]*=[[:space:]]*//p' | head -n1 | tr -d '\r' | xargs || true)"
+            previous="$(git show "$BEFORE":gradle.properties 2>/dev/null | sed -n 's/^mod_version[[:space:]]*=[[:space:]]*//p' | head -n1 | tr -d '\r' | xargs || true)"
             if [[ -n "$current" && "$current" != "$previous" ]]; then
               should_release=true
             fi
