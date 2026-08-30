@@ -1,6 +1,7 @@
 name: Live client join test
 
 on:
+  workflow_call:
   workflow_dispatch:
   pull_request:
     paths:
@@ -26,13 +27,13 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.m2/repository/com/nstut
-          key: openui-maven-0.0.8-404a7e0bdba72f80c83651b782fb785baf652114
+          key: openui-maven-0.0.8-2500118e4b18fdd54a7ad910c73e5383c5600024
       - name: Checkout OpenUI MC
         if: steps.cache-openui.outputs.cache-hit != 'true'
         uses: actions/checkout@v4
         with:
           repository: UpperMoon0/OpenUI-MC
-          ref: 404a7e0bdba72f80c83651b782fb785baf652114
+          ref: 2500118e4b18fdd54a7ad910c73e5383c5600024
           path: .openui-mc
       - name: Set up OpenUI build JDK
         if: steps.cache-openui.outputs.cache-hit != 'true'
@@ -90,7 +91,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.m2/repository/com/nstut
-          key: openui-maven-0.0.8-404a7e0bdba72f80c83651b782fb785baf652114
+          key: openui-maven-0.0.8-2500118e4b18fdd54a7ad910c73e5383c5600024
       - name: Download OpenUI Maven Artifacts Fallback
         if: steps.cache-openui.outputs.cache-hit != 'true'
         uses: actions/download-artifact@v4

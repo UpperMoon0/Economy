@@ -65,6 +65,38 @@ public class MarketNetwork {
         CHANNEL.register(EditOrderPacket.class, EditOrderPacket::encode, EditOrderPacket::decode, EditOrderPacket::handle);
         CHANNEL.register(RequestActiveOrdersPacket.class, RequestActiveOrdersPacket::encode, RequestActiveOrdersPacket::decode, RequestActiveOrdersPacket::handle);
         CHANNEL.register(SyncActiveOrdersPacket.class, SyncActiveOrdersPacket::encode, SyncActiveOrdersPacket::decode, SyncActiveOrdersPacket::handle);
+        CHANNEL.register(MarketActionResultPacket.class, MarketActionResultPacket::encode, MarketActionResultPacket::decode, MarketActionResultPacket::handle);
+    }
+
+    public enum Action { CREATE_ORDER, ACCEPT_ORDER, CANCEL_ORDER, EDIT_ORDER }
+    public enum Result { SUCCESS, WARNING, ERROR }
+
+    public static final class MarketActionResultPacket {
+        public final Action action;
+        public final Result result;
+        public final String messageKey;
+        public final List<String> args;
+
+        public MarketActionResultPacket(Action action, Result result, String messageKey, List<String> args) {
+            this.action = action; this.result = result; this.messageKey = messageKey; this.args = List.copyOf(args);
+        }
+        public static void encode(MarketActionResultPacket pkt, FriendlyByteBuf buf) {
+            buf.writeEnum(pkt.action); buf.writeEnum(pkt.result); buf.writeUtf(pkt.messageKey);
+            buf.writeInt(pkt.args.size()); for (String arg : pkt.args) buf.writeUtf(arg);
+        }
+        public static MarketActionResultPacket decode(FriendlyByteBuf buf) {
+            Action action = buf.readEnum(Action.class); Result result = buf.readEnum(Result.class);
+            String key = buf.readUtf(); int count = Math.min(buf.readInt(), 8); List<String> args = new ArrayList<>();
+            for (int i = 0; i < count; i++) args.add(buf.readUtf());
+            return new MarketActionResultPacket(action, result, key, args);
+        }
+        public static void handle(MarketActionResultPacket pkt, Supplier<NetworkManager.PacketContext> ctx) {
+            ctx.get().queue(() -> com.nstut.economy.client.MarketScreen.handleActionResult(pkt));
+        }
+    }
+
+    private static void sendActionResult(ServerPlayer player, Action action, Result result, String key, String... args) {
+        CHANNEL.sendToPlayer(player, new MarketActionResultPacket(action, result, key, List.of(args)));
     }
 
     public static class ItemCardData {
@@ -356,7 +388,9 @@ public class MarketNetwork {
                             orderManager.createSellOrder(player.getUUID(), commodity, pkt.quantity, price,
                                     net.minecraft.core.NonNullList.create(), reservedFluids, level);
                         } else {
-                            orderManager.createBuyOrder(player.getUUID(), commodity, pkt.quantity, price, pkt.isInfinite, level);
+                            if (orderManager.createBuyOrder(player.getUUID(), commodity, pkt.quantity, price, pkt.isInfinite, level) == null) {
+                                sendActionResult(player, Action.CREATE_ORDER, Result.WARNING, "ui.economy.error.order_rejected");
+                            }
                         }
                     } else {
                         Item item = BuiltInRegistries.ITEM.get(commodityId);
@@ -373,7 +407,9 @@ public class MarketNetwork {
                             }
                             orderManager.createSellOrder(player.getUUID(), commodity, pkt.quantity, price, reserved, level);
                         } else {
-                            orderManager.createBuyOrder(player.getUUID(), commodity, pkt.quantity, price, pkt.isInfinite, level);
+                            if (orderManager.createBuyOrder(player.getUUID(), commodity, pkt.quantity, price, pkt.isInfinite, level) == null) {
+                                sendActionResult(player, Action.CREATE_ORDER, Result.WARNING, "ui.economy.error.order_rejected");
+                            }
                         }
                     }
                     orderManager.matchAllPendingOrders(level);
@@ -403,6 +439,8 @@ public class MarketNetwork {
                 if (opt.isEmpty() || opt.get().getOwner().equals(player.getUUID())) { sendItemList(player); return; }
                 Order order = opt.get();
                 IOrder.TransactionResult result = order.execute(player.getUUID(), player.serverLevel());
+                sendActionResult(player, Action.ACCEPT_ORDER, result.success ? Result.SUCCESS : Result.ERROR,
+                        result.success ? "ui.economy.toast.order_completed" : "ui.economy.error.transaction_failed");
                 orderManager.cleanupOrders();
                 if (order.getCommodity() instanceof ItemCommodity ic) {
                     sendItemDetail(player, ic.getId().toString());
@@ -432,10 +470,10 @@ public class MarketNetwork {
                     var opt = orderManager.getOrder(pkt.orderId);
                     if (opt.isPresent() && opt.get().getOwner().equals(player.getUUID())) {
                         boolean cancelled = orderManager.cancelOrder(pkt.orderId, player.getUUID(), player.serverLevel());
-                        if (!cancelled) {
-                            player.displayClientMessage(net.minecraft.network.chat.Component.literal(
-                                    "§c[Market] §fCannot cancel: your storage could not fit the reserved goods. Free up space and try again."), false);
-                        }
+                        if (!cancelled) sendActionResult(player, Action.CANCEL_ORDER, Result.WARNING,
+                                "ui.economy.error.cancel_storage_full");
+                        else sendActionResult(player, Action.CANCEL_ORDER, Result.SUCCESS,
+                                "ui.economy.toast.order_cancelled");
                     }
                     sendActiveOrders(player);
                     if (opt.isPresent() && opt.get().getCommodity() instanceof ItemCommodity ic) {
@@ -491,7 +529,9 @@ public class MarketNetwork {
                     if (!valid) {
                         com.nstut.Economy.LOGGER.warn("Rejected edit packet with invalid quantity/price from {}", player.getName().getString());
                     } else {
-                        orderManager.editOrder(pkt.orderId, player.getUUID(), pkt.quantity, price, pkt.isInfinite, level);
+                        boolean edited = orderManager.editOrder(pkt.orderId, player.getUUID(), pkt.quantity, price, pkt.isInfinite, level);
+                        sendActionResult(player, Action.EDIT_ORDER, edited ? Result.SUCCESS : Result.ERROR,
+                                edited ? "ui.economy.toast.order_edited" : "ui.economy.error.transaction_failed");
                     }
                     sendActiveOrders(player);
                     sendItemList(player);

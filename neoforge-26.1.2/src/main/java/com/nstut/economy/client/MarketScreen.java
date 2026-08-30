@@ -21,6 +21,7 @@ import com.nstut.openui.controls.Select;
 import com.nstut.openui.controls.Tabs;
 import com.nstut.openui.controls.TextField;
 import com.nstut.openui.controls.Tooltip;
+import com.nstut.openui.controls.Toast;
 import com.nstut.openui.controls.VirtualList;
 import com.nstut.openui.overlay.OverlayHandle;
 import com.nstut.openui.state.Computed;
@@ -238,6 +239,16 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
 
     public static void handleSyncActiveOrders(MarketNetwork.SyncActiveOrdersPacket pkt) {
         MarketClientStore.applySyncActiveOrders(pkt);
+    }
+
+    public static void handleActionResult(MarketNetwork.MarketActionResultPacket pkt) {
+        Component title = Component.translatable(pkt.result == MarketNetwork.Result.SUCCESS ? "ui.economy.toast.success" : pkt.result == MarketNetwork.Result.WARNING ? "ui.economy.toast.order_rejected" : "ui.economy.toast.error");
+        Component message = Component.translatable(pkt.messageKey, pkt.args.toArray());
+        Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft.screen instanceof EconomyUiContainerScreen<?> screen && screen.uiRuntime() != null) {
+            Toast toast = new Toast(switch (pkt.result) { case SUCCESS -> Toast.Type.SUCCESS; case WARNING -> Toast.Type.WARNING; case ERROR -> Toast.Type.ERROR; }, title, message, 3500, null);
+            Toast.show(screen.uiRuntime().overlays(), toast);
+        } else if (minecraft.gui != null) minecraft.gui.setOverlayMessage(message, false);
     }
 
     @Override
