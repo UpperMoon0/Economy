@@ -65,6 +65,10 @@ public final class OrderInputValidator {
      * where the request came from.
      */
     public static boolean isValidNewOrder(int quantity, BigDecimal pricePerUnit) {
+        return isValidNewOrder(quantity, pricePerUnit, false);
+    }
+
+    public static boolean isValidNewOrder(int quantity, BigDecimal pricePerUnit, boolean fluid) {
         EconomyConfig config = EconomyConfig.getInstance();
         if (!isValidQuantity(quantity)) {
             return false;
@@ -72,11 +76,14 @@ public final class OrderInputValidator {
         if (pricePerUnit == null || pricePerUnit.signum() <= 0) {
             return false;
         }
-        if (pricePerUnit.scale() > config.getMaxPriceScale()
-                || pricePerUnit.precision() - pricePerUnit.scale() > config.getMaxPriceDigits()) {
+        BigDecimal quotedPrice = fluid
+                ? com.nstut.economy.trading.FluidCommodity.pricePerBucket(pricePerUnit)
+                : pricePerUnit;
+        if (quotedPrice.scale() > config.getMaxPriceScale()
+                || quotedPrice.precision() - quotedPrice.scale() > config.getMaxPriceDigits()) {
             return false;
         }
-        return pricePerUnit.compareTo(config.getMinPrice()) >= 0
-                && pricePerUnit.compareTo(config.getMaxPrice()) <= 0;
+        return quotedPrice.compareTo(config.getMinPrice()) >= 0
+                && quotedPrice.compareTo(config.getMaxPrice()) <= 0;
     }
 }

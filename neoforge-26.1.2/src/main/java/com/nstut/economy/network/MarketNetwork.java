@@ -102,6 +102,13 @@ public class MarketNetwork {
         return com.nstut.economy.util.OrderInputValidator.parsePrice(raw);
     }
 
+    private static String priceForClient(BigDecimal pricePerUnit, boolean fluid) {
+        BigDecimal quoted = fluid
+                ? FluidCommodity.pricePerBucket(pricePerUnit)
+                : pricePerUnit.setScale(0, RoundingMode.HALF_UP);
+        return quoted.stripTrailingZeros().toPlainString();
+    }
+
     public static boolean isValidQuantity(int quantity) {
         return com.nstut.economy.util.OrderInputValidator.isValidQuantity(quantity);
     }
@@ -145,26 +152,26 @@ public class MarketNetwork {
     }
 
     public static class ChartPoint {
-        public final int price;
+        public final double price;
         public final int quantity;
         public final long timestamp;
 
-        public ChartPoint(int price, int quantity, long timestamp) {
+        public ChartPoint(double price, int quantity, long timestamp) {
             this.price = price; this.quantity = quantity; this.timestamp = timestamp;
         }
 
-        public ChartPoint(int price, int quantity) {
+        public ChartPoint(double price, int quantity) {
             this(price, quantity, System.currentTimeMillis());
         }
 
         public void write(FriendlyByteBuf buf) {
-            buf.writeInt(price);
+            buf.writeDouble(price);
             buf.writeInt(quantity);
             buf.writeLong(timestamp);
         }
 
         public static ChartPoint read(FriendlyByteBuf buf) {
-            return new ChartPoint(buf.readInt(), buf.readInt(), buf.readLong());
+            return new ChartPoint(buf.readDouble(), buf.readInt(), buf.readLong());
         }
     }
 
@@ -302,12 +309,15 @@ public class MarketNetwork {
                         sendItemDetail(player, pkt.itemId);
                         return;
                     }
-                    BigDecimal price = parsePrice(pkt.pricePerUnit);
-                    if (price == null) {
+                    BigDecimal quotedPrice = parsePrice(pkt.pricePerUnit);
+                    if (quotedPrice == null) {
                         com.nstut.Economy.LOGGER.warn("Rejected order packet with invalid price from {}", player.getName().getString());
                         sendItemDetail(player, pkt.itemId);
                         return;
                     }
+                    BigDecimal price = "FLUID".equals(pkt.commodityType)
+                            ? FluidCommodity.pricePerMb(quotedPrice)
+                            : quotedPrice;
                     Identifier commodityId = parseCommodityId(pkt.itemId);
                     if (commodityId == null) {
                         sendItemList(player);
@@ -458,7 +468,10 @@ public class MarketNetwork {
                     ServerLevel level = player.level();
                     OrderManager orderManager = Economy.getOrderManager();
                     var opt = orderManager.getOrder(pkt.orderId);
-                    BigDecimal price = parsePrice(pkt.pricePerUnit);
+                    boolean fluidOrder = opt.isPresent() && opt.get().getCommodity() instanceof FluidCommodity;
+                    BigDecimal quotedPrice = parsePrice(pkt.pricePerUnit);
+                    BigDecimal price = quotedPrice == null ? null
+                            : fluidOrder ? FluidCommodity.pricePerMb(quotedPrice) : quotedPrice;
                     // Quantity 0 is only meaningful for infinite buy orders
                     // (price-only edits); everything else needs a real quantity.
                     boolean isInfiniteBuyEdit = pkt.quantity == 0 && opt.isPresent()
@@ -571,7 +584,7 @@ public class MarketNetwork {
             } else {
                 continue;
             }
-            String priceStr = o.getPricePerUnit().setScale(0, RoundingMode.HALF_UP).toPlainString();
+            String priceStr = priceForClient(o.getPricePerUnit(), o.getCommodity() instanceof FluidCommodity);
             boolean isSell = o.getType() == IOrder.OrderType.SELL;
 
             entries.add(new ActiveOrderEntry(
@@ -715,7 +728,7 @@ public class MarketNetwork {
                 } catch (Exception ignored) {}
             }
 
-            String priceStr = effectivePrice.setScale(0, RoundingMode.HALF_UP).toPlainString();
+            String priceStr = priceForClient(effectivePrice, isFluid);
             String typeStr = isFluid ? "FLUID" : "ITEM";
             cards.add(new ItemCardData(commodityId, displayName, priceStr, counts.getOrDefault(commodityId, 0), priceChange, typeStr));
         }
@@ -734,7 +747,8 @@ public class MarketNetwork {
         Fluid fluid = BuiltInRegistries.FLUID.getValue(rl);
         Item item = BuiltInRegistries.ITEM.getValue(rl);
 
-        if (fluid != net.minecraft.world.level.material.Fluids.EMPTY && !com.nstut.economy.platform.Services.FLUID.isAir(fluid)) {
+        boolean isFluid = fluid != net.minecraft.world.level.material.Fluids.EMPTY && !com.nstut.economy.platform.Services.FLUID.isAir(fluid);
+        if (isFluid) {
             displayName = com.nstut.economy.platform.Services.FLUID.displayName(fluid).getString();
             vaultCount = TankManager.countFluidInTanks(player.level(), playerId, fluid);
         } else if (item != net.minecraft.world.item.Items.AIR) {
@@ -769,7 +783,7 @@ public class MarketNetwork {
 
             OrderEntry entry = new OrderEntry(
                 order.getOrderId(), order.getOwner(), sellerName,
-                order.getPricePerUnit().setScale(0, RoundingMode.HALF_UP).toPlainString(),
+                priceForClient(order.getPricePerUnit(), order.getCommodity() instanceof FluidCommodity),
                 order.getQuantity(), order.getInitialQuantity(), order.getOwner().equals(playerId), order.isServerOrder(), order.isInfinite());
 
             if (order.getType() == IOrder.OrderType.SELL) {
@@ -794,11 +808,12 @@ public class MarketNetwork {
         List<EconomyTradeData.TradeSnapshot> trades = TradeLedger.getRecentTrades(itemId, 50);
         for (int i = trades.size() - 1; i >= 0; i--) {
             EconomyTradeData.TradeSnapshot t = trades.get(i);
-            chart.add(new ChartPoint(new BigDecimal(t.price).intValue(), t.quantity, t.timestamp));
+            BigDecimal tradePrice = new BigDecimal(t.price);
+            chart.add(new ChartPoint((isFluid ? FluidCommodity.pricePerBucket(tradePrice) : tradePrice).doubleValue(), t.quantity, t.timestamp));
         }
         BigDecimal globalPrice = getGlobalPrice(orderManager, itemId);
         if (globalPrice != null) {
-            chart.add(new ChartPoint(globalPrice.intValue(), 1, System.currentTimeMillis()));
+            chart.add(new ChartPoint((isFluid ? FluidCommodity.pricePerBucket(globalPrice) : globalPrice).doubleValue(), 1, System.currentTimeMillis()));
         }
 
         CHANNEL.sendToPlayer(player, new SyncItemDetailPacket(itemId, displayName, vaultCount, asks, bids, chart));
@@ -858,11 +873,13 @@ public class MarketNetwork {
             net.minecraft.resources.Identifier rl = Identifier.parse(t.itemId);
             net.minecraft.world.item.Item item = net.minecraft.core.registries.BuiltInRegistries.ITEM.getValue(rl);
             String displayName;
+            boolean fluidCommodity = false;
             if (item != net.minecraft.world.item.Items.AIR) {
                 displayName = new net.minecraft.world.item.ItemStack(item).getHoverName().getString();
             } else {
                 net.minecraft.world.level.material.Fluid fluid = net.minecraft.core.registries.BuiltInRegistries.FLUID.getValue(rl);
                 if (fluid != net.minecraft.world.level.material.Fluids.EMPTY) {
+                    fluidCommodity = true;
                     displayName = com.nstut.economy.platform.Services.FLUID.displayName(fluid).getString();
                 } else {
                     displayName = t.itemId;
@@ -880,7 +897,7 @@ public class MarketNetwork {
             }
 
             entries.add(new HistoryEntry(t.itemId, displayName,
-                    new java.math.BigDecimal(t.price).setScale(0, java.math.RoundingMode.HALF_UP).toPlainString(),
+                    priceForClient(new java.math.BigDecimal(t.price), fluidCommodity),
                     t.quantity, isSeller, t.timestamp, counterName));
         }
 

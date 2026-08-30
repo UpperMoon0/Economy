@@ -42,6 +42,7 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.material.Fluid;
 import com.nstut.economy.trading.EconomyFluidStack;
+import com.nstut.economy.trading.FluidCommodity;
 
 import java.math.BigDecimal;
 import java.text.SimpleDateFormat;
@@ -609,8 +610,8 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
     private double detailChangePercent(MarketNetwork.SyncItemDetailPacket d) {
         if (d.chart == null || d.chart.isEmpty()) return Double.NaN;
         List<MarketNetwork.ChartPoint> pts = d.chart;
-        int cur = pts.get(pts.size() - 1).price;
-        int prev = cur;
+        double cur = pts.get(pts.size() - 1).price;
+        double prev = cur;
         for (int i = pts.size() - 2; i >= 0; i--) {
             if (pts.get(i).price != cur) { prev = pts.get(i).price; break; }
         }
@@ -800,7 +801,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         }
         hideItemSearch();
         VirtualList<ItemSearchResult> list = Ui.list(searchResults, this::buildSearchResultRow).itemHeight(16);
-        itemSearchPopover = Ui.popover(anchor, list);
+        itemSearchPopover = Ui.popover(anchor, list).matchAnchorWidth();
         itemSearchSubscription = createCommodityQuery.subscribe(q -> {
             requestCommodityDetailIfExact(q);
             if (q != null && q.length() >= 2) {
@@ -918,15 +919,16 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
             }
         } else if (!inf) {
             try {
-                BigDecimal total = price.multiply(BigDecimal.valueOf(qty));
+                BigDecimal total = totalPrice(price, qty, id);
                 BigDecimal bal = new BigDecimal(MarketClientStore.balance.get());
                 if (total.compareTo(bal) > 0) { createError.set(Component.translatable("ui.economy.error.insufficient_funds", bal).getString()); return; }
             } catch (NumberFormatException ignored) { createError.set(t("ui.economy.error.balance_verify")); return; }
         }
         String commodityType = isFluidCommodity(id) ? "FLUID" : "ITEM";
         String dispName = getItemDisplayName(id, id);
-        String totalStr = inf ? "∞ (Per unit: " + price.toPlainString() + ")"
-                : price.multiply(BigDecimal.valueOf(qty)).setScale(0, java.math.RoundingMode.HALF_UP).toPlainString();
+        boolean fluid = isFluidCommodity(id);
+        String totalStr = inf ? "∞ (" + (fluid ? "Per bucket: " : "Per unit: ") + price.toPlainString() + ")"
+                : totalPrice(price, qty, id).setScale(2, java.math.RoundingMode.HALF_UP).stripTrailingZeros().toPlainString();
         pendingConfirmation.set(new PendingConfirmation(id, qty, price.toPlainString(), createSellMode.get(), inf,
                  createSellMode.get() ? t("ui.economy.opt.sell") : t("ui.economy.opt.buy"), dispName, totalStr, commodityType));
         showConfirmation();
@@ -1719,6 +1721,12 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
     static String formatItemAmount(int a) { return EconomyFormatUtil.formatItemAmount(a); }
     static String formatQty(int q, boolean fluid) { return fluid ? formatFluidAmount(q) : formatItemAmount(q); }
 
+    static BigDecimal totalPrice(BigDecimal quotedPrice, int quantity, String itemId) {
+        return isFluidCommodity(itemId)
+                ? FluidCommodity.totalFromBucketQuote(quotedPrice, quantity)
+                : quotedPrice.multiply(BigDecimal.valueOf(quantity));
+    }
+
     private BigDecimal parsePrice(String s) {
         if (s == null || s.equals("--") || s.isEmpty()) return BigDecimal.valueOf(999999999);
         try { return new BigDecimal(s); } catch (Exception e) { return BigDecimal.valueOf(999999999); }
@@ -1821,8 +1829,8 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
             return switch (sort) {
                 case NEWEST -> Long.compare(b.timestamp, a.timestamp);
                 case OLDEST -> Long.compare(a.timestamp, b.timestamp);
-                case HIGHEST_TOTAL -> new BigDecimal(b.price).multiply(BigDecimal.valueOf(b.quantity))
-                        .compareTo(new BigDecimal(a.price).multiply(BigDecimal.valueOf(a.quantity)));
+                case HIGHEST_TOTAL -> totalPrice(new BigDecimal(b.price), b.quantity, b.itemId)
+                        .compareTo(totalPrice(new BigDecimal(a.price), a.quantity, a.itemId));
             };
         });
         return f;

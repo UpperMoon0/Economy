@@ -10,6 +10,8 @@ import com.nstut.economy.trading.EconomyFluidStack;
 import java.math.BigDecimal;
 
 public class FluidCommodity implements ICommodity {
+    public static final int QUOTE_AMOUNT_MB = 1_000;
+    private static final BigDecimal QUOTE_AMOUNT = BigDecimal.valueOf(QUOTE_AMOUNT_MB);
     private final ResourceLocation id;
     private final Fluid fluid;
     private final BigDecimal basePrice;
@@ -77,6 +79,21 @@ public class FluidCommodity implements ICommodity {
 
     public EconomyFluidStack createFluidStack(int amount) {
         return new EconomyFluidStack(fluid, amount);
+    }
+
+    /** Converts a player-facing bucket quote to the internal price for one mB. */
+    public static BigDecimal pricePerMb(BigDecimal pricePerBucket) {
+        return pricePerBucket.divide(QUOTE_AMOUNT);
+    }
+
+    /** Converts an internal one-mB price to the player-facing bucket quote. */
+    public static BigDecimal pricePerBucket(BigDecimal pricePerMb) {
+        return pricePerMb.multiply(QUOTE_AMOUNT).stripTrailingZeros();
+    }
+
+    /** Calculates the charge for an mB quantity from a player-facing bucket quote. */
+    public static BigDecimal totalFromBucketQuote(BigDecimal pricePerBucket, int amountMb) {
+        return pricePerMb(pricePerBucket).multiply(BigDecimal.valueOf(amountMb));
     }
 
     public static FluidCommodity fromFluid(Fluid fluid, BigDecimal basePrice) {

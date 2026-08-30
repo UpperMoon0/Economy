@@ -92,8 +92,9 @@ public class OrderManager {
      * where the request came from. The network layer validates earlier, but a
      * modified client must never be the only line of defense.
      */
-    private static boolean isValidNewOrder(int quantity, java.math.BigDecimal pricePerUnit) {
-        return com.nstut.economy.util.OrderInputValidator.isValidNewOrder(quantity, pricePerUnit);
+    private static boolean isValidNewOrder(ICommodity commodity, int quantity, java.math.BigDecimal pricePerUnit) {
+        return com.nstut.economy.util.OrderInputValidator.isValidNewOrder(
+                quantity, pricePerUnit, commodity instanceof FluidCommodity);
     }
 
     public Order createSellOrder(UUID owner, ICommodity commodity, int quantity,
@@ -116,7 +117,7 @@ public class OrderManager {
                                   java.math.BigDecimal pricePerUnit, NonNullList<ItemStack> reservedItems,
                                   List<com.nstut.economy.trading.EconomyFluidStack> reservedFluids,
                                   net.minecraft.server.level.ServerLevel level) {
-        if (!isValidNewOrder(quantity, pricePerUnit)) {
+        if (!isValidNewOrder(commodity, quantity, pricePerUnit)) {
             return null;
         }
         Order order = new Order(owner, commodity, quantity, quantity, pricePerUnit, IOrder.OrderType.SELL, null,
@@ -175,7 +176,7 @@ public class OrderManager {
 
     public Order createBuyOrder(UUID owner, ICommodity commodity, int quantity,
                                  java.math.BigDecimal pricePerUnit, boolean isInfinite, net.minecraft.server.level.ServerLevel level) {
-        if (!isValidNewOrder(quantity, pricePerUnit)) {
+        if (!isValidNewOrder(commodity, quantity, pricePerUnit)) {
             return null;
         }
         Order order = new Order(owner, commodity, quantity, quantity, pricePerUnit, IOrder.OrderType.BUY, null, NonNullList.create(), isInfinite);
@@ -215,12 +216,8 @@ public class OrderManager {
         if (order == null || !order.getOwner().equals(requester) || !order.isValid()) {
             return false;
         }
-        if (newPrice == null || newPrice.signum() <= 0) {
-            return false;
-        }
-        if (newPrice.scale() > com.nstut.economy.config.EconomyConfig.getInstance().getMaxPriceScale()
-                || newPrice.compareTo(com.nstut.economy.config.EconomyConfig.getInstance().getMaxPrice()) > 0
-                || newPrice.compareTo(com.nstut.economy.config.EconomyConfig.getInstance().getMinPrice()) < 0) {
+        if (!com.nstut.economy.util.OrderInputValidator.isValidNewOrder(
+                Math.max(1, newQuantity), newPrice, order.getCommodity() instanceof FluidCommodity)) {
             return false;
         }
         if (!order.isInfinite() || order.getType() == IOrder.OrderType.SELL) {
