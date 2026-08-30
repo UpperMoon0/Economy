@@ -9,6 +9,7 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -32,8 +33,12 @@ class RecipeJsonTest {
                                 resource + " key '" + entry.getKey() + "' must be an object ingredient with 'item'");
                     }
                     JsonObject result = json.getAsJsonObject("result");
-                    assertTrue(result.has("item") || result.has("id"),
-                            resource + " result must declare item or id");
+                    if (folder.equals("recipes")) {
+                        assertTrue(result.has("item"), resource + " 1.20 result must declare 'item'");
+                        assertFalse(result.has("id"), resource + " 1.20 result must not use the 1.21 'id' form");
+                    } else {
+                        assertTrue(result.has("id"), resource + " 1.21 result must declare 'id'");
+                    }
                 }
             }
         }
