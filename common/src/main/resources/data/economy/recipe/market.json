@@ -1,9 +1,9 @@
-﻿{
+{
     "key":  {
-                "G":  "minecraft:gold_ingot",
-                "E":  "minecraft:emerald",
-                "B":  "minecraft:book",
-                "S":  "minecraft:smooth_stone"
+                "G": {"item": "minecraft:gold_ingot"},
+                "E": {"item": "minecraft:emerald"},
+                "B": {"item": "minecraft:book"},
+                "S": {"item": "minecraft:smooth_stone"}
             },
     "pattern":  [
                     "GGG",

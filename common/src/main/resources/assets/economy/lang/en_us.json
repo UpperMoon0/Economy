@@ -119,6 +119,7 @@
   "ui.economy.toast.order_placed": "Order placed.",
   "ui.economy.toast.order_filled": "Order filled.",
   "ui.economy.toast.order_partially_filled": "Order partially filled; %s unit(s) executed, remainder posted.",
+  "ui.economy.toast.infinite_order_matched": "Infinite order posted; %s unit(s) matched immediately.",
   "ui.economy.error.price_zero": "Price must be > 0",
   "ui.economy.error.price_invalid": "Invalid price",
   "ui.economy.error.qty_zero": "Qty must be > 0",

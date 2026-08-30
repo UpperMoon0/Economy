@@ -1,8 +1,8 @@
-﻿{
+{
     "key":  {
-                "D":  "minecraft:diamond",
-                "I":  "minecraft:iron_ingot",
-                "C":  "minecraft:chest"
+                "D": {"item": "minecraft:diamond"},
+                "I": {"item": "minecraft:iron_ingot"},
+                "C": {"item": "minecraft:chest"}
             },
     "pattern":  [
                     "DID",

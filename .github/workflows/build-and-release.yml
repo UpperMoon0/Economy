@@ -6,7 +6,6 @@ on:
       - 'v*'
     branches:
       - main
-      - master
   pull_request:
   workflow_dispatch:
     inputs:
@@ -55,7 +54,7 @@ jobs:
             fi
           elif [[ "$REF" == refs/tags/* ]]; then
             should_release=true
-          elif [[ "$EVENT_NAME" == "push" && ( "$REF" == "refs/heads/main" || "$REF" == "refs/heads/master" ) ]]; then
+          elif [[ "$EVENT_NAME" == "push" && "$REF" == "refs/heads/main" ]]; then
             if ! git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
               echo "Cannot resolve previous push commit $BEFORE" >&2
               exit 1
@@ -79,14 +78,14 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.m2/repository/com/nstut
-          key: openui-maven-0.0.8-d801bbadca8f70fdda014079db4aa380ebf71056
+          key: openui-maven-0.0.8-27ad8583a926e3cee84aa35d935f72c3635450b9
 
       - name: Checkout OpenUI-MC
         if: steps.cache-openui.outputs.cache-hit != 'true'
         uses: actions/checkout@v4
         with:
           repository: UpperMoon0/OpenUI-MC
-          ref: d801bbadca8f70fdda014079db4aa380ebf71056
+          ref: 27ad8583a926e3cee84aa35d935f72c3635450b9
           path: OpenUI-MC
 
       - name: Verify OpenUI-MC version alignment
@@ -149,7 +148,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.m2/repository/com/nstut
-          key: openui-maven-0.0.8-d801bbadca8f70fdda014079db4aa380ebf71056
+          key: openui-maven-0.0.8-27ad8583a926e3cee84aa35d935f72c3635450b9
       - name: Download OpenUI Maven Artifacts Fallback
         if: steps.cache-openui.outputs.cache-hit != 'true'
         uses: actions/download-artifact@v4
@@ -197,7 +196,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.m2/repository/com/nstut
-          key: openui-maven-0.0.8-d801bbadca8f70fdda014079db4aa380ebf71056
+          key: openui-maven-0.0.8-27ad8583a926e3cee84aa35d935f72c3635450b9
 
       - name: Download OpenUI Maven Artifacts Fallback
         if: steps.cache-openui.outputs.cache-hit != 'true'

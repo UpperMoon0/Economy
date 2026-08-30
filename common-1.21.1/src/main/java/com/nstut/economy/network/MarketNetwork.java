@@ -85,7 +85,13 @@ public class MarketNetwork {
     private static void sendCreateResult(ServerPlayer player, CreateOrderResult creation) {
         switch (creation.status()) {
             case POSTED -> sendActionResult(player, Action.CREATE_ORDER, Result.SUCCESS, "ui.economy.toast.order_placed");
-            case PARTIALLY_FILLED -> sendActionResult(player, Action.CREATE_ORDER, Result.SUCCESS, "ui.economy.toast.order_partially_filled", String.valueOf(creation.filledQuantity()));
+            case PARTIALLY_FILLED -> {
+                if (creation.remainingOrder() != null && creation.remainingOrder().isInfinite()) {
+                    sendActionResult(player, Action.CREATE_ORDER, Result.SUCCESS, "ui.economy.toast.infinite_order_matched", String.valueOf(creation.filledQuantity()));
+                } else {
+                    sendActionResult(player, Action.CREATE_ORDER, Result.SUCCESS, "ui.economy.toast.order_partially_filled", String.valueOf(creation.filledQuantity()));
+                }
+            }
             case FILLED -> sendActionResult(player, Action.CREATE_ORDER, Result.SUCCESS, "ui.economy.toast.order_filled");
             case REJECTED -> sendActionResult(player, Action.CREATE_ORDER, Result.WARNING, creation.errorKey(), creation.errorArgs().toArray(String[]::new));
         }
@@ -255,8 +261,9 @@ public class MarketNetwork {
             buf.writeUtf(pkt.commodityType == null ? "" : pkt.commodityType);
         }
         public static RequestItemDetailPacket decode(FriendlyByteBuf buf) {
+            String itemId = buf.readUtf();
             String type = buf.readUtf();
-            return new RequestItemDetailPacket(buf.readUtf(), type.isEmpty() ? null : type);
+            return new RequestItemDetailPacket(itemId, type.isEmpty() ? null : type);
         }
 
         public static void handle(RequestItemDetailPacket pkt, Supplier<NetworkManager.PacketContext> ctx) {

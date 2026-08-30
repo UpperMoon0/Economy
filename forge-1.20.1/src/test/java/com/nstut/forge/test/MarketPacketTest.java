@@ -156,4 +156,49 @@ class MarketPacketTest extends MinecraftTestBase {
         assertEquals(448, decoded.totalItems);
         assertEquals(1, decoded.mode);
     }
+
+    @Test
+    @DisplayName("Detail request packets preserve item id and fluid type on the wire")
+    void itemDetailRequestRoundTripsFluidType() {
+        MarketNetwork.RequestItemDetailPacket original =
+                new MarketNetwork.RequestItemDetailPacket("minecraft:water", "FLUID");
+        FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
+
+        MarketNetwork.RequestItemDetailPacket.encode(original, buffer);
+        MarketNetwork.RequestItemDetailPacket decoded =
+                MarketNetwork.RequestItemDetailPacket.decode(buffer);
+
+        assertEquals("minecraft:water", decoded.itemId);
+        assertEquals("FLUID", decoded.commodityType);
+    }
+
+    @Test
+    @DisplayName("Detail request packets preserve item commodity types")
+    void itemDetailRequestRoundTripsItemType() {
+        MarketNetwork.RequestItemDetailPacket original =
+                new MarketNetwork.RequestItemDetailPacket("minecraft:diamond", "ITEM");
+        FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
+
+        MarketNetwork.RequestItemDetailPacket.encode(original, buffer);
+        MarketNetwork.RequestItemDetailPacket decoded =
+                MarketNetwork.RequestItemDetailPacket.decode(buffer);
+
+        assertEquals("minecraft:diamond", decoded.itemId);
+        assertEquals("ITEM", decoded.commodityType);
+    }
+
+    @Test
+    @DisplayName("Detail request packets treat an empty commodity type as untyped")
+    void itemDetailRequestRoundTripsWithoutType() {
+        MarketNetwork.RequestItemDetailPacket original =
+                new MarketNetwork.RequestItemDetailPacket("minecraft:diamond");
+        FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
+
+        MarketNetwork.RequestItemDetailPacket.encode(original, buffer);
+        MarketNetwork.RequestItemDetailPacket decoded =
+                MarketNetwork.RequestItemDetailPacket.decode(buffer);
+
+        assertEquals("minecraft:diamond", decoded.itemId);
+        assertNull(decoded.commodityType);
+    }
 }
