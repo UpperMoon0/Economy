@@ -117,7 +117,7 @@ public final class EconomyUiComponents {
                 drawCoin(g, x + 6, y + 4);
                 String bal;
                 try {
-                    bal = EconomyFormatUtil.formatCompact(new BigDecimal(balance.get()));
+                    bal = EconomyFormatUtil.formatMoneyCompact(new BigDecimal(balance.get()));
                 } catch (Exception ignored) {
                     bal = balance.get();
                 }

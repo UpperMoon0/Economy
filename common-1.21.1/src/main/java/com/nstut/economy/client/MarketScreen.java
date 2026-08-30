@@ -21,6 +21,7 @@ import com.nstut.openui.controls.Select;
 import com.nstut.openui.controls.Tabs;
 import com.nstut.openui.controls.TextField;
 import com.nstut.openui.controls.Tooltip;
+import com.nstut.openui.controls.Toast;
 import com.nstut.openui.controls.VirtualList;
 import com.nstut.openui.overlay.OverlayHandle;
 import com.nstut.openui.state.Computed;
@@ -42,6 +43,7 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.material.Fluid;
 import com.nstut.economy.trading.EconomyFluidStack;
+import com.nstut.economy.trading.FluidCommodity;
 
 import java.math.BigDecimal;
 import java.text.SimpleDateFormat;
@@ -100,6 +102,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
     private final Signal<CommodityTypeFilter> activeOrderType = Signals.of(CommodityTypeFilter.ALL);
     private final Signal<ActiveOrderSort> activeOrderSort = Signals.of(ActiveOrderSort.NEWEST);
     private final Signal<String> selectedItemId = Signals.of(null);
+    private final Signal<String> selectedCommodityType = Signals.of(null);
 
     private final Signal<String> createCommodityQuery = Signals.of("");
     private final Signal<String> createQty = Signals.of("");
@@ -138,7 +141,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         if (d != null && d.chart != null) {
             for (MarketNetwork.ChartPoint p : d.chart) {
                 out.add(new ChartSample(p.price, CHART_TIME_FMT.format(new Date(p.timestamp))
-                        + "\n" + Component.translatable("ui.economy.chart.tooltip.price", p.price).getString()
+                        + "\n" + Component.translatable("ui.economy.chart.tooltip.price", formatMoney(BigDecimal.valueOf(p.price))).getString()
                         + "\n" + Component.translatable("ui.economy.chart.tooltip.volume",
                         formatQty(p.quantity, isFluidCommodity(d.itemId))).getString()));
             }
@@ -151,11 +154,11 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         for (MarketNetwork.PortfolioPointData p : pts) {
             out.add(new ChartSample(Double.parseDouble(p.netWorth),
                     Component.translatable("ui.economy.chart.tooltip.net_worth",
-                            formatCompact(Double.parseDouble(p.netWorth))).getString()
+                            formatMoneyCompact(new BigDecimal(p.netWorth))).getString()
                             + "\n" + Component.translatable("ui.economy.chart.tooltip.cash",
-                            formatCompact(Double.parseDouble(p.balance))).getString()
+                            formatMoneyCompact(new BigDecimal(p.balance))).getString()
                             + "  |  " + Component.translatable("ui.economy.chart.tooltip.assets",
-                            formatCompact(Double.parseDouble(p.assets))).getString()));
+                            formatMoneyCompact(new BigDecimal(p.assets))).getString()));
         }
         return out;
     });
@@ -222,6 +225,24 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
 
     public static void handleSyncActiveOrders(MarketNetwork.SyncActiveOrdersPacket pkt) {
         MarketClientStore.applySyncActiveOrders(pkt);
+    }
+
+    public static void handleActionResult(MarketNetwork.MarketActionResultPacket pkt) {
+        Component title = Component.translatable(switch (pkt.result) {
+            case SUCCESS -> "ui.economy.toast.success";
+            case WARNING -> switch (pkt.action) {
+                case CANCEL_ORDER -> "ui.economy.toast.cancel_rejected";
+                case EDIT_ORDER -> "ui.economy.toast.edit_rejected";
+                default -> "ui.economy.toast.order_rejected";
+            };
+            case ERROR -> "ui.economy.toast.error";
+        });
+        Component message = Component.translatable(pkt.messageKey, pkt.args.toArray());
+        Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft.screen instanceof EconomyUiContainerScreen<?> screen && screen.uiRuntime() != null) {
+            Toast toast = new Toast(switch (pkt.result) { case SUCCESS -> Toast.Type.SUCCESS; case WARNING -> Toast.Type.WARNING; case ERROR -> Toast.Type.ERROR; }, title, message, 3500, null);
+            Toast.show(screen.uiRuntime().overlays(), toast);
+        } else if (minecraft.gui != null) minecraft.gui.setOverlayMessage(message, false);
     }
 
     @Override
@@ -398,12 +419,12 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
             case CONTAINERS -> MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestVaultInfoPacket());
             case DETAIL -> {
                 String id = selectedItemId.get();
-                if (id != null) MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestItemDetailPacket(id));
+                if (id != null) MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestItemDetailPacket(id, selectedCommodityType.get()));
             }
             case NEW_ORDER -> {
                 MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestPortfolioPacket());
                 String id = createCommodityQuery.get();
-                if (id != null && !id.isEmpty()) MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestItemDetailPacket(id));
+                if (id != null && !id.isEmpty()) MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestItemDetailPacket(id, selectedCommodityType.get()));
             }
         }
     }
@@ -504,7 +525,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                         : t("ui.economy.card.no_orders");
                 if (card.globalPrice != null && !card.globalPrice.isEmpty() && !card.globalPrice.equals("--")) {
                     String change = formatPriceChange(card.priceChangePercent);
-                    drawPriceChangeRowMarquee(g, f, formatCompact(parsePrice(card.globalPrice)), change,
+                    drawPriceChangeRowMarquee(g, f, formatMoneyCompact(parsePrice(card.globalPrice)), change,
                             textX, y + 16, textWidth, c.primary(), changeColor(card.priceChangePercent));
                 } else {
                     UiRender.text(g, f, "--", textX, y + 16, c.onSurfaceMuted());
@@ -513,7 +534,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
             }
             @Override public boolean mouseClicked(double mx, double my, int button) {
                 if (mx >= x && mx < x + width && my >= y && my < y + height) {
-                    openDetail(card.itemId);
+                    openDetail(card.itemId, card.commodityType);
                     return true;
                 }
                 return false;
@@ -525,12 +546,13 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         return buildCommodityCard(card);
     }
 
-    private void openDetail(String id) {
+    private void openDetail(String id, String commodityType) {
         selectedItemId.set(id);
+        selectedCommodityType.set(commodityType);
         MarketClientStore.detail.set(null);
         detailChartOffset.set(0);
         switchView(MarketView.DETAIL);
-        MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestItemDetailPacket(id));
+        MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestItemDetailPacket(id, commodityType));
     }
 
     // ── DETAIL ─────────────────────────────────────────────────────────────
@@ -591,8 +613,8 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
     private double detailChangePercent(MarketNetwork.SyncItemDetailPacket d) {
         if (d.chart == null || d.chart.isEmpty()) return Double.NaN;
         List<MarketNetwork.ChartPoint> pts = d.chart;
-        int cur = pts.get(pts.size() - 1).price;
-        int prev = cur;
+        double cur = pts.get(pts.size() - 1).price;
+        double prev = cur;
         for (int i = pts.size() - 2; i >= 0; i--) {
             if (pts.get(i).price != cur) { prev = pts.get(i).price; break; }
         }
@@ -751,7 +773,11 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         v.addChild(qtyRow);
 
         TextField priceField = Ui.textField(createPrice);
-        priceField.placeholder(t("ui.economy.new_order.price_placeholder"));
+        Runnable updatePricePlaceholder = () -> priceField.placeholder(t(isFluidCommodity(createCommodityQuery.get())
+                ? "ui.economy.new_order.price_placeholder_fluid"
+                : "ui.economy.new_order.price_placeholder_item"));
+        updatePricePlaceholder.run();
+        subscriptions.add(createCommodityQuery.subscribe(q -> updatePricePlaceholder.run()));
         v.addChild(priceField);
 
         ButtonWidget submit = Ui.button(Component.translatable("ui.economy.action.submit"), this::submitOffer).primary();
@@ -782,7 +808,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         }
         hideItemSearch();
         VirtualList<ItemSearchResult> list = Ui.list(searchResults, this::buildSearchResultRow).itemHeight(16);
-        itemSearchPopover = Ui.popover(anchor, list);
+        itemSearchPopover = Ui.popover(anchor, list).matchAnchorWidth();
         itemSearchSubscription = createCommodityQuery.subscribe(q -> {
             requestCommodityDetailIfExact(q);
             if (q != null && q.length() >= 2) {
@@ -847,7 +873,8 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         boolean knownFluid = BuiltInRegistries.FLUID.containsKey(id)
                 && CommodityUtil.isCanonicalFluid(BuiltInRegistries.FLUID.get(id));
         if (knownItem || knownFluid) {
-            MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestItemDetailPacket(id.toString()));
+            MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestItemDetailPacket(id.toString(),
+                    knownItem && knownFluid ? null : knownFluid ? "FLUID" : "ITEM"));
         }
     }
 
@@ -900,15 +927,16 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
             }
         } else if (!inf) {
             try {
-                BigDecimal total = price.multiply(BigDecimal.valueOf(qty));
+                BigDecimal total = totalPrice(price, qty, id);
                 BigDecimal bal = new BigDecimal(MarketClientStore.balance.get());
                 if (total.compareTo(bal) > 0) { createError.set(Component.translatable("ui.economy.error.insufficient_funds", bal).getString()); return; }
             } catch (NumberFormatException ignored) { createError.set(t("ui.economy.error.balance_verify")); return; }
         }
         String commodityType = isFluidCommodity(id) ? "FLUID" : "ITEM";
         String dispName = getItemDisplayName(id, id);
-        String totalStr = inf ? "∞ (Per unit: " + price.toPlainString() + ")"
-                : price.multiply(BigDecimal.valueOf(qty)).setScale(0, java.math.RoundingMode.HALF_UP).toPlainString();
+        boolean fluid = isFluidCommodity(id);
+        String totalStr = inf ? "∞ (" + (fluid ? "Per bucket: " : "Per unit: ") + price.toPlainString() + ")"
+                : formatMoney(totalPrice(price, qty, id));
         pendingConfirmation.set(new PendingConfirmation(id, qty, price.toPlainString(), createSellMode.get(), inf,
                  createSellMode.get() ? t("ui.economy.opt.sell") : t("ui.economy.opt.buy"), dispName, totalStr, commodityType));
         showConfirmation();
@@ -953,9 +981,10 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
             String id = p.itemId;
             pendingConfirmation.set(null);
             selectedItemId.set(id);
+            selectedCommodityType.set(p.commodityType);
             MarketClientStore.detail.set(null);
             switchView(MarketView.DETAIL);
-            MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestItemDetailPacket(id));
+            MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestItemDetailPacket(id, p.commodityType));
         }).primary());
 
         VStack body = new VStack().gap(10);
@@ -1163,7 +1192,9 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         qtyField.placeholder(t("ui.economy.new_order.qty_field"));
         qtyField.fillWidth();
         TextField priceField = Ui.textField(priceSig);
-        priceField.placeholder(t("ui.economy.new_order.price_field"));
+        priceField.placeholder(t(isFluidCommodity(e.itemId)
+                ? "ui.economy.new_order.price_field_fluid"
+                : "ui.economy.new_order.price_field_item"));
         priceField.fillWidth();
         ButtonWidget infBtn = Ui.button(t("ui.economy.action.infinite"), () -> infSig.set(!infSig.get())).ghost();
 
@@ -1301,9 +1332,9 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                     nw = new BigDecimal(last.netWorth); bal = new BigDecimal(last.balance); ass = new BigDecimal(last.assets);
                 }
                 int boxW = (width - 8) / 3;
-                drawStatBox(g, f, x, y, boxW, height, t("ui.economy.portfolio.net_worth"), formatCompact(nw), c.primary(), c);
-                drawStatBox(g, f, x + boxW + 4, y, boxW, height, t("ui.economy.portfolio.liquid_cash"), formatCompact(bal), c.success(), c);
-                drawStatBox(g, f, x + 2 * (boxW + 4), y, boxW, height, t("ui.economy.portfolio.vault_assets"), formatCompact(ass), c.primary(), c);
+                drawStatBox(g, f, x, y, boxW, height, t("ui.economy.portfolio.net_worth"), formatMoneyCompact(nw), c.primary(), c);
+                drawStatBox(g, f, x + boxW + 4, y, boxW, height, t("ui.economy.portfolio.liquid_cash"), formatMoneyCompact(bal), c.success(), c);
+                drawStatBox(g, f, x + 2 * (boxW + 4), y, boxW, height, t("ui.economy.portfolio.vault_assets"), formatMoneyCompact(ass), c.primary(), c);
                 if (my >= y && my < y + height) {
                     if (mx >= x && mx < x + boxW) {
                         deferredTooltip = Component.translatable("ui.economy.portfolio.tooltip.net_worth");
@@ -1417,7 +1448,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                 }
                 CommodityIconComponent.drawIcon(g, h.itemId, x + 4, y + 5, 16, 16);
                 String qty = isFluidCommodity(h.itemId) ? formatFluidAmount(h.quantity) : "x" + formatCompact(h.quantity);
-                String val = fitText(f, formatCompact(h.totalValue), Math.max(0, width / 3));
+                String val = fitText(f, formatMoneyCompact(new BigDecimal(h.totalValue)), Math.max(0, width / 3));
                 int valueX = x + width - f.width(val) - 4;
                 int coinX = valueX - 10;
                 qty = fitText(f, qty, Math.max(0, width / 3));
@@ -1554,15 +1585,10 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                 }
                 min = low;
                 max = high;
-                double rawRange = max - min;
-                double padding = rawRange <= 0.0
-                        ? Math.max(1.0, Math.abs(max) * 0.05)
-                        : Math.max(1.0, rawRange * 0.08);
-                graphMin = min >= 0 ? Math.max(0.0, min - padding) : min - padding;
-                double graphMax = max + padding;
-                graphRange = Math.max(1.0, graphMax - graphMin);
+                graphMin = EconomyFormatUtil.chartGraphMin(min, max);
+                graphRange = EconomyFormatUtil.chartGraphRange(min, max);
 
-                currentText = formatCompact(points.get(points.size() - 1).value);
+                currentText = formatChartMoney(points.get(points.size() - 1).value);
                 badgeW = EconomyUiComponents.coinBadgeWidth(f, currentText);
                 badgeH = 12;
                 badgeX = x + width - badgeW - 4;
@@ -1571,7 +1597,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                 liveH = 12;
                 liveX = badgeX - liveW - 4;
                 liveY = y + 2;
-                int axisWidth = Math.max(f.width(formatCompact(max)), f.width(formatCompact(min))) + 18;
+                int axisWidth = Math.max(f.width(formatChartMoney(max)), f.width(formatChartMoney(min))) + 18;
                 plotLeft = x + axisWidth;
                 plotRight = Math.max(plotLeft + 1, liveX - 6);
                 plotTop = y + 14;
@@ -1621,9 +1647,9 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
             List<ChartSample> vis = visiblePoints(pts, off);
             ChartLayout layout = new ChartLayout(f, vis, off);
             EconomyUiComponents.drawCoin(g, x + 3, y + 2);
-            UiRender.text(g, f, formatCompact(layout.max), x + 13, y + 3, c.onSurfaceMuted());
+            UiRender.text(g, f, formatChartMoney(layout.max), x + 13, y + 3, c.onSurfaceMuted());
             EconomyUiComponents.drawCoin(g, x + 3, y + height - 12);
-            UiRender.text(g, f, formatCompact(layout.min), x + 13, y + height - 11, c.onSurfaceMuted());
+            UiRender.text(g, f, formatChartMoney(layout.min), x + 13, y + height - 11, c.onSurfaceMuted());
             boolean liveHov = mx >= layout.liveX && mx < layout.liveX + layout.liveW && my >= layout.liveY && my < layout.liveY + layout.liveH;
             EconomyUiComponents.drawBadge(g, f, layout.liveText,
                     layout.liveX + layout.liveW, layout.liveY,
@@ -1690,6 +1716,9 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
     static String formatCompact(BigDecimal val) { return EconomyFormatUtil.formatCompact(val); }
     static String formatCompact(long val) { return EconomyFormatUtil.formatCompact(val); }
     static String formatCompact(String str) { return EconomyFormatUtil.formatCompact(str); }
+    static String formatMoney(BigDecimal val) { return EconomyFormatUtil.formatMoney(val); }
+    static String formatMoneyCompact(BigDecimal val) { return EconomyFormatUtil.formatMoneyCompact(val); }
+    static String formatChartMoney(double val) { return EconomyFormatUtil.formatMoneyCompact(BigDecimal.valueOf(val)); }
     static String formatPriceChange(double p) { return EconomyFormatUtil.formatPriceChange(p); }
     int changeColor(double p) {
         ColorScheme c = uiRuntime().theme().colors();
@@ -1700,6 +1729,12 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
     static String formatFluidAmountDetailed(int a) { return EconomyFormatUtil.formatFluidAmountDetailed(a); }
     static String formatItemAmount(int a) { return EconomyFormatUtil.formatItemAmount(a); }
     static String formatQty(int q, boolean fluid) { return fluid ? formatFluidAmount(q) : formatItemAmount(q); }
+
+    static BigDecimal totalPrice(BigDecimal quotedPrice, int quantity, String itemId) {
+        return isFluidCommodity(itemId)
+                ? FluidCommodity.totalFromBucketQuote(quotedPrice, quantity)
+                : quotedPrice.multiply(BigDecimal.valueOf(quantity));
+    }
 
     private BigDecimal parsePrice(String s) {
         if (s == null || s.equals("--") || s.isEmpty()) return BigDecimal.valueOf(999999999);
@@ -1803,8 +1838,8 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
             return switch (sort) {
                 case NEWEST -> Long.compare(b.timestamp, a.timestamp);
                 case OLDEST -> Long.compare(a.timestamp, b.timestamp);
-                case HIGHEST_TOTAL -> new BigDecimal(b.price).multiply(BigDecimal.valueOf(b.quantity))
-                        .compareTo(new BigDecimal(a.price).multiply(BigDecimal.valueOf(a.quantity)));
+                case HIGHEST_TOTAL -> totalPrice(new BigDecimal(b.price), b.quantity, b.itemId)
+                        .compareTo(totalPrice(new BigDecimal(a.price), a.quantity, a.itemId));
             };
         });
         return f;

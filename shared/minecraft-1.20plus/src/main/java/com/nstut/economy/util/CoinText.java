@@ -8,7 +8,6 @@ import net.minecraft.network.chat.Style;
 import net.minecraft.resources.ResourceLocation;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 
 /**
  * Inline chat representation of the Economy coin item texture.
@@ -37,7 +36,7 @@ public final class CoinText {
 
     public static String formatMoney(BigDecimal amount) {
         if (amount == null) return "0";
-        return amount.setScale(0, RoundingMode.HALF_UP).toPlainString();
+        return amount.stripTrailingZeros().toPlainString();
     }
 
     public static String formatMoney(String amount) {

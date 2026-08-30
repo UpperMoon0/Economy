@@ -16,6 +16,7 @@ public class EconomyTradeData extends SavedData {
 
     public static final class TradeSnapshot {
         public final String itemId;
+        public final String commodityType;
         public final String price;
         public final int quantity;
         public final UUID buyer;
@@ -24,7 +25,13 @@ public class EconomyTradeData extends SavedData {
 
         public TradeSnapshot(String itemId, String price, int quantity,
                              UUID buyer, UUID seller, long timestamp) {
+            this(itemId, null, price, quantity, buyer, seller, timestamp);
+        }
+
+        public TradeSnapshot(String itemId, String commodityType, String price, int quantity,
+                             UUID buyer, UUID seller, long timestamp) {
             this.itemId = itemId;
+            this.commodityType = commodityType;
             this.price = price;
             this.quantity = quantity;
             this.buyer = buyer;
@@ -38,7 +45,12 @@ public class EconomyTradeData extends SavedData {
 
     public void recordTrade(String itemId, BigDecimal price, int quantity,
                             UUID buyer, UUID seller) {
-        trades.add(new TradeSnapshot(itemId, price.toPlainString(), quantity,
+        recordTrade(itemId, null, price, quantity, buyer, seller);
+    }
+
+    public void recordTrade(String itemId, String commodityType, BigDecimal price, int quantity,
+                            UUID buyer, UUID seller) {
+        trades.add(new TradeSnapshot(itemId, commodityType, price.toPlainString(), quantity,
             buyer, seller, System.currentTimeMillis()));
         while (trades.size() > MAX_TRADES) {
             trades.remove(0);
@@ -74,6 +86,7 @@ public class EconomyTradeData extends SavedData {
             try {
                 data.trades.add(new TradeSnapshot(
                     t.getString("ItemId"),
+                    t.contains("CommodityType") ? t.getString("CommodityType") : null,
                     t.getString("Price"),
                     t.getInt("Quantity"),
                     t.getUUID("Buyer"),
@@ -94,6 +107,7 @@ public class EconomyTradeData extends SavedData {
             tTag.putString("ItemId", t.itemId);
             tTag.putString("Price", t.price);
             tTag.putInt("Quantity", t.quantity);
+            if (t.commodityType != null) tTag.putString("CommodityType", t.commodityType);
             tTag.putUUID("Buyer", t.buyer);
             tTag.putUUID("Seller", t.seller);
             tTag.putLong("Timestamp", t.timestamp);

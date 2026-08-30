@@ -15,8 +15,13 @@ public final class TradeLedger {
 
     public static void recordTrade(String itemId, BigDecimal price, int quantity,
                                     UUID buyer, UUID seller) {
+        recordTrade(itemId, null, price, quantity, buyer, seller);
+    }
+
+    public static void recordTrade(String itemId, String commodityType, BigDecimal price,
+                                    int quantity, UUID buyer, UUID seller) {
         if (data != null) {
-            data.recordTrade(itemId, price, quantity, buyer, seller);
+            data.recordTrade(itemId, commodityType, price, quantity, buyer, seller);
         }
     }
 

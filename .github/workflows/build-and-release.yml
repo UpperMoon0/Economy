@@ -6,14 +6,67 @@ on:
       - 'v*'
     branches:
       - main
-      - master
   pull_request:
   workflow_dispatch:
+    inputs:
+      release:
+        description: Publish a release from main
+        type: boolean
+        default: false
 
 permissions:
   contents: write
 
 jobs:
+  release-gate:
+    name: Check release trigger
+    runs-on: ubuntu-latest
+    outputs:
+      should_release: ${{ steps.check.outputs.should_release }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check for version bump
+        id: check
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          BEFORE: ${{ github.event.before }}
+          MANUAL_RELEASE: ${{ inputs.release || false }}
+        run: |
+          set -euo pipefail
+          should_release=false
+          current="$(sed -n 's/^mod_version[[:space:]]*=[[:space:]]*//p' gradle.properties | head -n1 | tr -d '\r' | xargs)"
+          if [[ -z "$current" ]]; then
+            echo "Failed to read mod_version" >&2
+            exit 1
+          fi
+          expected="v${current}"
+          if [[ "$REF" == refs/tags/* && "${REF#refs/tags/}" != "$expected" ]]; then
+            echo "Tag ${REF#refs/tags/} does not match mod_version $current" >&2
+            exit 1
+          fi
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            if [[ "$REF" == "refs/heads/main" && "$MANUAL_RELEASE" == "true" ]]; then
+              should_release=true
+            fi
+          elif [[ "$REF" == refs/tags/* ]]; then
+            should_release=true
+          elif [[ "$EVENT_NAME" == "push" && "$REF" == "refs/heads/main" ]]; then
+            if ! git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+              echo "Cannot resolve previous push commit $BEFORE" >&2
+              exit 1
+            fi
+            previous="$(git show "$BEFORE":gradle.properties | sed -n 's/^mod_version[[:space:]]*=[[:space:]]*//p' | head -n1 | tr -d '\r' | xargs)"
+            if [[ -n "$current" && "$current" != "$previous" ]]; then
+              should_release=true
+            fi
+          fi
+          echo "should_release=$should_release" >> "$GITHUB_OUTPUT"
+          echo "Release trigger: $should_release"
+
   prepare-openui:
     runs-on: ubuntu-latest
     steps:
@@ -25,14 +78,14 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.m2/repository/com/nstut
-          key: openui-maven-82a5dd2f0e6c6027f20ca2acf049858f7f96f597
+          key: openui-maven-0.0.8-f3f1954621f32606e732dd47d1de0eb430cf1eba
 
       - name: Checkout OpenUI-MC
         if: steps.cache-openui.outputs.cache-hit != 'true'
         uses: actions/checkout@v4
         with:
           repository: UpperMoon0/OpenUI-MC
-          ref: 82a5dd2f0e6c6027f20ca2acf049858f7f96f597
+          ref: f3f1954621f32606e732dd47d1de0eb430cf1eba
           path: OpenUI-MC
 
       - name: Verify OpenUI-MC version alignment
@@ -95,7 +148,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.m2/repository/com/nstut
-          key: openui-maven-82a5dd2f0e6c6027f20ca2acf049858f7f96f597
+          key: openui-maven-0.0.8-f3f1954621f32606e732dd47d1de0eb430cf1eba
       - name: Download OpenUI Maven Artifacts Fallback
         if: steps.cache-openui.outputs.cache-hit != 'true'
         uses: actions/download-artifact@v4
@@ -143,7 +196,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.m2/repository/com/nstut
-          key: openui-maven-82a5dd2f0e6c6027f20ca2acf049858f7f96f597
+          key: openui-maven-0.0.8-f3f1954621f32606e732dd47d1de0eb430cf1eba
 
       - name: Download OpenUI Maven Artifacts Fallback
         if: steps.cache-openui.outputs.cache-hit != 'true'
@@ -181,8 +234,8 @@ jobs:
           if-no-files-found: error
 
   release:
-    needs: [test-shared, verify-and-build]
-    if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.event_name == 'workflow_dispatch'
+    needs: [release-gate, test-shared, verify-and-build, live-client]
+    if: needs.release-gate.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -309,3 +362,8 @@ jobs:
               exit 1
             fi
           done
+
+  live-client:
+    name: Live client join compatibility
+    needs: prepare-openui
+    uses: ./.github/workflows/live-join-test.yml

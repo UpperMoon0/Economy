@@ -1,20 +1,10 @@
 name: Live client join test
 
+# Executed automatically by build-and-release.yml on PRs; the pull_request
+# trigger is omitted so PRs do not run the same suite twice.
 on:
+  workflow_call:
   workflow_dispatch:
-  pull_request:
-    paths:
-      - "common/**"
-      - "common-1.20.1/**"
-      - "common-1.21.1/**"
-      - "shared/**"
-      - "fabric-1.20.1/**"
-      - "forge-1.20.1/**"
-      - "fabric-1.21.1/**"
-      - "neoforge-1.21.1/**"
-      - "neoforge-26.1.2/**"
-      - "tools/live_join_test.py"
-      - ".github/workflows/live-join-test.yml"
 
 jobs:
   prepare-openui:
@@ -26,13 +16,13 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.m2/repository/com/nstut
-          key: openui-maven-82a5dd2f0e6c6027f20ca2acf049858f7f96f597
+          key: openui-maven-0.0.8-f3f1954621f32606e732dd47d1de0eb430cf1eba
       - name: Checkout OpenUI MC
         if: steps.cache-openui.outputs.cache-hit != 'true'
         uses: actions/checkout@v4
         with:
           repository: UpperMoon0/OpenUI-MC
-          ref: 82a5dd2f0e6c6027f20ca2acf049858f7f96f597
+          ref: f3f1954621f32606e732dd47d1de0eb430cf1eba
           path: .openui-mc
       - name: Set up OpenUI build JDK
         if: steps.cache-openui.outputs.cache-hit != 'true'
@@ -90,7 +80,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.m2/repository/com/nstut
-          key: openui-maven-82a5dd2f0e6c6027f20ca2acf049858f7f96f597
+          key: openui-maven-0.0.8-f3f1954621f32606e732dd47d1de0eb430cf1eba
       - name: Download OpenUI Maven Artifacts Fallback
         if: steps.cache-openui.outputs.cache-hit != 'true'
         uses: actions/download-artifact@v4

@@ -53,6 +53,53 @@ public class EconomyFormatUtil {
         }
     }
 
+    /** Detailed currency formatting; unlike count formatting this never rounds values below 1000. */
+    public static String formatMoney(BigDecimal val) {
+        if (val == null) return "0";
+        return val.stripTrailingZeros().toPlainString();
+    }
+
+    /** Currency formatting with compact suffixes only once the value reaches 1000. */
+    public static String formatMoneyCompact(BigDecimal val) {
+        if (val == null) return "0";
+        if (val.abs().compareTo(BigDecimal.valueOf(1000)) < 0) return formatMoney(val);
+        return formatCompact(val);
+    }
+
+    public static String formatMoneyCompact(String str) {
+        if (str == null || str.isEmpty()) return "0";
+        try {
+            return formatMoneyCompact(new BigDecimal(str));
+        } catch (NumberFormatException e) {
+            return str;
+        }
+    }
+
+    public static double chartEpsilon(double min, double max) {
+        double magnitude = Math.max(Math.abs(min), Math.abs(max));
+        return Math.max(1e-9, magnitude * 1e-6);
+    }
+
+    public static double chartPadding(double min, double max) {
+        double rawRange = max - min;
+        double epsilon = chartEpsilon(min, max);
+        double magnitude = Math.max(Math.abs(min), Math.abs(max));
+        return rawRange <= epsilon
+                ? Math.max(epsilon, magnitude * 0.05)
+                : Math.max(epsilon, rawRange * 0.08);
+    }
+
+    public static double chartGraphMin(double min, double max) {
+        double padding = chartPadding(min, max);
+        return min >= 0 ? Math.max(0.0, min - padding) : min - padding;
+    }
+
+    public static double chartGraphRange(double min, double max) {
+        double epsilon = chartEpsilon(min, max);
+        double graphMax = max + chartPadding(min, max);
+        return Math.max(epsilon, graphMax - chartGraphMin(min, max));
+    }
+
     public static String formatFluidAmount(int milliBuckets) {
         return formatCompact(milliBuckets) + " mB";
     }

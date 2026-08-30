@@ -34,7 +34,6 @@ import net.minecraft.world.level.material.Fluid;
 import net.minecraft.world.level.material.Fluids;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
@@ -81,7 +80,7 @@ public class EconomyCommands {
                             boolean isSelf = sender.getUUID().equals(receiver.getUUID());
                             if (senderAccount.transferTo(receiverAccount, amount,
                                 TransactionContext.transfer("Payment from " + sender.getName().getString(), receiver.getUUID()))) {
-                                String amtStr = com.nstut.economy.util.EconomyFormatUtil.formatCompact(amount);
+                                String amtStr = com.nstut.economy.util.EconomyFormatUtil.formatMoney(amount);
                                 if (isSelf) {
                                     context.getSource().sendSuccess(() ->
                                         marketMessage("Transferred ", amtStr, " to yourself."), false);
@@ -111,21 +110,43 @@ public class EconomyCommands {
             .then(Commands.literal("serverorder")
                 .requires(source -> source.hasPermission(2))
                 .then(Commands.literal("buy")
+                    // "perbucket" instead of "bucket" so the legacy shorthand for
+                    // the minecraft:bucket item commodity keeps working.
+                    .then(Commands.literal("perbucket")
+                        .then(Commands.argument("commodity", ResourceLocationArgument.id())
+                            .suggests((context, builder) -> suggestCommodityIds(builder))
+                            .then(Commands.argument("quantity", IntegerArgumentType.integer(1))
+                                .then(Commands.argument("price", DoubleArgumentType.doubleArg(0.01))
+                                    .executes(context -> createServerOrder(context, true, true))
+                                )
+                            )
+                        )
+                    )
                     .then(Commands.argument("commodity", ResourceLocationArgument.id())
                         .suggests((context, builder) -> suggestCommodityIds(builder))
                         .then(Commands.argument("quantity", IntegerArgumentType.integer(1))
                             .then(Commands.argument("price", DoubleArgumentType.doubleArg(0.01))
-                                .executes(context -> createServerOrder(context, true))
+                                .executes(context -> createServerOrder(context, true, false))
                             )
                         )
                     )
                 )
                 .then(Commands.literal("sell")
+                    .then(Commands.literal("perbucket")
+                        .then(Commands.argument("commodity", ResourceLocationArgument.id())
+                            .suggests((context, builder) -> suggestCommodityIds(builder))
+                            .then(Commands.argument("quantity", IntegerArgumentType.integer(1))
+                                .then(Commands.argument("price", DoubleArgumentType.doubleArg(0.01))
+                                    .executes(context -> createServerOrder(context, false, true))
+                                )
+                            )
+                        )
+                    )
                     .then(Commands.argument("commodity", ResourceLocationArgument.id())
                         .suggests((context, builder) -> suggestCommodityIds(builder))
                         .then(Commands.argument("quantity", IntegerArgumentType.integer(1))
                             .then(Commands.argument("price", DoubleArgumentType.doubleArg(0.01))
-                                .executes(context -> createServerOrder(context, false))
+                                .executes(context -> createServerOrder(context, false, false))
                             )
                         )
                     )
@@ -219,10 +240,11 @@ public class EconomyCommands {
         return 1;
     }
 
-    private static int createServerOrder(CommandContext<CommandSourceStack> context, boolean isBuy) {
+    private static int createServerOrder(CommandContext<CommandSourceStack> context, boolean isBuy,
+                                         boolean bucketQuote) {
         ResourceLocation id = ResourceLocationArgument.getId(context, "commodity");
         int quantity = IntegerArgumentType.getInteger(context, "quantity");
-        BigDecimal pricePerUnit = BigDecimal.valueOf(DoubleArgumentType.getDouble(context, "price"));
+        BigDecimal quotedPrice = BigDecimal.valueOf(DoubleArgumentType.getDouble(context, "price"));
 
         Fluid fluid = BuiltInRegistries.FLUID.get(id);
         boolean isFluid = fluid != Fluids.EMPTY && !com.nstut.economy.platform.Services.FLUID.isAir(fluid);
@@ -237,6 +259,11 @@ public class EconomyCommands {
             }
             commodity = new FluidCommodity(id, fluid, BigDecimal.ZERO);
         } else {
+            if (bucketQuote) {
+                context.getSource().sendFailure(Component.literal(
+                        "The bucket price form can only be used with fluids."));
+                return 0;
+            }
             Item item = BuiltInRegistries.ITEM.get(id);
             if (item == net.minecraft.world.item.Items.AIR) {
                 context.getSource().sendFailure(Component.literal("Unknown commodity: " + id));
@@ -245,20 +272,29 @@ public class EconomyCommands {
             commodity = new ItemCommodity(id, item, BigDecimal.ZERO);
         }
 
+        BigDecimal pricePerUnit = isFluid && bucketQuote
+                ? FluidCommodity.pricePerMb(quotedPrice)
+                : quotedPrice;
+
         OrderManager orderManager = Economy.getOrderManager();
         Order order = isBuy
                 ? orderManager.createServerBuyOrder(commodity, quantity, pricePerUnit)
                 : orderManager.createServerSellOrder(commodity, quantity, pricePerUnit);
+        if (order == null) {
+            context.getSource().sendFailure(Component.literal("Server order violates the configured quantity or price limits."));
+            return 0;
+        }
 
-        String priceStr = order.getTotalPrice().setScale(0, RoundingMode.HALF_UP).toPlainString();
+        String priceStr = order.getTotalPrice().stripTrailingZeros().toPlainString();
         String amount = com.nstut.economy.util.EconomyFormatUtil
                 .formatCommodityQuantityDetailed(quantity, isFluid);
         String side = isBuy ? "buy" : "sell";
-        String priceUnit = isFluid ? "per mB" : "each";
+        BigDecimal displayedPrice = isFluid && bucketQuote ? quotedPrice : pricePerUnit;
+        String priceUnit = isFluid ? (bucketQuote ? "per bucket" : "per mB (legacy)") : "each";
         context.getSource().sendSuccess(() ->
             Component.literal("Server " + side + " order created: " + amount + " of "
                 + commodity.getDisplayName().getString() + " @ ")
-                .append(CoinText.amount(pricePerUnit))
+                .append(CoinText.amount(displayedPrice))
                 .append(Component.literal(" " + priceUnit + " (total: "))
                 .append(CoinText.amount(priceStr))
                 .append(Component.literal(")")),

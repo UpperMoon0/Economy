@@ -88,36 +88,44 @@ public class OrderManager {
     }
 
     /**
-     * Domain-level validation applied on every order creation regardless of
-     * where the request came from. The network layer validates earlier, but a
-     * modified client must never be the only line of defense.
+     * Exact rejection for an invalid new order, or null when the order passes
+     * domain validation. The network layer validates earlier with the same
+     * rules, so a modified client is never the only line of defense.
      */
-    private static boolean isValidNewOrder(int quantity, java.math.BigDecimal pricePerUnit) {
-        return com.nstut.economy.util.OrderInputValidator.isValidNewOrder(quantity, pricePerUnit);
+    private static CreateOrderResult rejection(ICommodity commodity, int quantity,
+                                               java.math.BigDecimal pricePerUnit) {
+        com.nstut.economy.util.OrderInputValidator.Rejection invalid =
+                com.nstut.economy.util.OrderInputValidator.validateNewOrder(
+                        quantity, pricePerUnit, commodity instanceof FluidCommodity);
+        if (invalid == null) {
+            return null;
+        }
+        return CreateOrderResult.rejected(quantity, invalid.key(), invalid.args());
     }
 
-    public Order createSellOrder(UUID owner, ICommodity commodity, int quantity,
-                                  java.math.BigDecimal pricePerUnit) {
+    public CreateOrderResult createSellOrder(UUID owner, ICommodity commodity, int quantity,
+                                   java.math.BigDecimal pricePerUnit) {
         return createSellOrder(owner, commodity, quantity, pricePerUnit, NonNullList.create(), null);
     }
 
-    public Order createSellOrder(UUID owner, ICommodity commodity, int quantity,
-                                  java.math.BigDecimal pricePerUnit, NonNullList<ItemStack> reservedItems) {
+    public CreateOrderResult createSellOrder(UUID owner, ICommodity commodity, int quantity,
+                                   java.math.BigDecimal pricePerUnit, NonNullList<ItemStack> reservedItems) {
         return createSellOrder(owner, commodity, quantity, pricePerUnit, reservedItems, null);
     }
 
-    public Order createSellOrder(UUID owner, ICommodity commodity, int quantity,
-                                  java.math.BigDecimal pricePerUnit, NonNullList<ItemStack> reservedItems,
-                                  net.minecraft.server.level.ServerLevel level) {
+    public CreateOrderResult createSellOrder(UUID owner, ICommodity commodity, int quantity,
+                                   java.math.BigDecimal pricePerUnit, NonNullList<ItemStack> reservedItems,
+                                   net.minecraft.server.level.ServerLevel level) {
         return createSellOrder(owner, commodity, quantity, pricePerUnit, reservedItems, new ArrayList<>(), level);
     }
 
-    public Order createSellOrder(UUID owner, ICommodity commodity, int quantity,
-                                  java.math.BigDecimal pricePerUnit, NonNullList<ItemStack> reservedItems,
-                                  List<com.nstut.economy.trading.EconomyFluidStack> reservedFluids,
-                                  net.minecraft.server.level.ServerLevel level) {
-        if (!isValidNewOrder(quantity, pricePerUnit)) {
-            return null;
+    public CreateOrderResult createSellOrder(UUID owner, ICommodity commodity, int quantity,
+                                   java.math.BigDecimal pricePerUnit, NonNullList<ItemStack> reservedItems,
+                                   List<com.nstut.economy.trading.EconomyFluidStack> reservedFluids,
+                                   net.minecraft.server.level.ServerLevel level) {
+        CreateOrderResult invalid = rejection(commodity, quantity, pricePerUnit);
+        if (invalid != null) {
+            return invalid;
         }
         Order order = new Order(owner, commodity, quantity, quantity, pricePerUnit, IOrder.OrderType.SELL, null,
                 copyStacks(reservedItems), copyFluidStacks(reservedFluids), false);
@@ -127,11 +135,13 @@ public class OrderManager {
                 .sorted(Comparator.comparing(Order::getPricePerUnit).reversed().thenComparing(Order::getCreatedAt))
                 .collect(Collectors.toList());
 
+        int filled = 0;
         for (Order buyOrder : matchingBuyOrders) {
             if (order.getQuantity() <= 0) break;
             int matchQty = Math.min(order.getQuantity(), buyOrder.getQuantity());
                 IOrder.TransactionResult result = order.executePartial(buyOrder.getOwner(), matchQty, level);
                 if (result.success) {
+                    filled += result.quantityTransferred;
                     buyOrder.reduceQuantity(result.quantityTransferred);
                 if (backingData != null) {
                     if (buyOrder.getQuantity() == 0) backingData.removeOrder(buyOrder.getOrderId());
@@ -143,11 +153,13 @@ public class OrderManager {
 
         if (order.getQuantity() > 0) {
             registerOrder(order);
-            return order;
+            return CreateOrderResult.posted(order, quantity, filled);
+        } else if (filled > 0) {
+            return CreateOrderResult.filled(quantity, filled);
         } else if (backingData != null) {
             backingData.removeOrder(order.getOrderId());
         }
-        return null;
+        return CreateOrderResult.rejected(quantity, "ui.economy.error.order_rejected", List.of());
     }
 
     private static List<com.nstut.economy.trading.EconomyFluidStack> copyFluidStacks(
@@ -163,20 +175,21 @@ public class OrderManager {
         return copy;
     }
 
-    public Order createBuyOrder(UUID owner, ICommodity commodity, int quantity,
+    public CreateOrderResult createBuyOrder(UUID owner, ICommodity commodity, int quantity,
                                  java.math.BigDecimal pricePerUnit) {
         return createBuyOrder(owner, commodity, quantity, pricePerUnit, false, null);
     }
 
-    public Order createBuyOrder(UUID owner, ICommodity commodity, int quantity,
+    public CreateOrderResult createBuyOrder(UUID owner, ICommodity commodity, int quantity,
                                  java.math.BigDecimal pricePerUnit, net.minecraft.server.level.ServerLevel level) {
         return createBuyOrder(owner, commodity, quantity, pricePerUnit, false, level);
     }
 
-    public Order createBuyOrder(UUID owner, ICommodity commodity, int quantity,
+    public CreateOrderResult createBuyOrder(UUID owner, ICommodity commodity, int quantity,
                                  java.math.BigDecimal pricePerUnit, boolean isInfinite, net.minecraft.server.level.ServerLevel level) {
-        if (!isValidNewOrder(quantity, pricePerUnit)) {
-            return null;
+        CreateOrderResult invalid = rejection(commodity, quantity, pricePerUnit);
+        if (invalid != null) {
+            return invalid;
         }
         Order order = new Order(owner, commodity, quantity, quantity, pricePerUnit, IOrder.OrderType.BUY, null, NonNullList.create(), isInfinite);
 
@@ -185,11 +198,13 @@ public class OrderManager {
                 .sorted(Comparator.comparing(Order::getPricePerUnit).thenComparing(Order::getCreatedAt))
                 .collect(Collectors.toList());
 
+        int filled = 0;
         for (Order sellOrder : matchingSellOrders) {
             if (!order.isInfinite() && order.getQuantity() <= 0) break;
             int matchQty = order.isInfinite() ? sellOrder.getQuantity() : Math.min(order.getQuantity(), sellOrder.getQuantity());
             IOrder.TransactionResult result = sellOrder.executePartial(owner, matchQty, level);
             if (result.success) {
+                filled += result.quantityTransferred;
                 if (!order.isInfinite()) {
                     order.reduceQuantity(result.quantityTransferred);
                 }
@@ -203,11 +218,13 @@ public class OrderManager {
 
         if (order.isValid()) {
             registerOrder(order);
-            return order;
+            return CreateOrderResult.posted(order, quantity, filled);
+        } else if (filled > 0) {
+            return CreateOrderResult.filled(quantity, filled);
         } else if (backingData != null) {
             backingData.removeOrder(order.getOrderId());
         }
-        return null;
+        return CreateOrderResult.rejected(quantity, "ui.economy.error.order_rejected", List.of());
     }
 
     public boolean editOrder(UUID orderId, UUID requester, int newQuantity, java.math.BigDecimal newPrice, boolean isInfinite, net.minecraft.server.level.ServerLevel level) {
@@ -215,12 +232,8 @@ public class OrderManager {
         if (order == null || !order.getOwner().equals(requester) || !order.isValid()) {
             return false;
         }
-        if (newPrice == null || newPrice.signum() <= 0) {
-            return false;
-        }
-        if (newPrice.scale() > com.nstut.economy.config.EconomyConfig.getInstance().getMaxPriceScale()
-                || newPrice.compareTo(com.nstut.economy.config.EconomyConfig.getInstance().getMaxPrice()) > 0
-                || newPrice.compareTo(com.nstut.economy.config.EconomyConfig.getInstance().getMinPrice()) < 0) {
+        if (!com.nstut.economy.util.OrderInputValidator.isValidNewOrder(
+                Math.max(1, newQuantity), newPrice, order.getCommodity() instanceof FluidCommodity)) {
             return false;
         }
         if (!order.isInfinite() || order.getType() == IOrder.OrderType.SELL) {
@@ -392,6 +405,8 @@ public class OrderManager {
 
     public Order createServerBuyOrder(ICommodity commodity, int quantity,
                                        java.math.BigDecimal pricePerUnit) {
+        if (!com.nstut.economy.util.OrderInputValidator.isValidNewOrder(
+                quantity, pricePerUnit, commodity instanceof FluidCommodity)) return null;
         Order order = new Order(SERVER_ID, commodity, quantity, pricePerUnit,
                                 IOrder.OrderType.BUY, null);
         order.setServerOrder(true);
@@ -401,6 +416,8 @@ public class OrderManager {
 
     public Order createServerSellOrder(ICommodity commodity, int quantity,
                                         java.math.BigDecimal pricePerUnit) {
+        if (!com.nstut.economy.util.OrderInputValidator.isValidNewOrder(
+                quantity, pricePerUnit, commodity instanceof FluidCommodity)) return null;
         Order order = new Order(SERVER_ID, commodity, quantity, pricePerUnit,
                                 IOrder.OrderType.SELL, null);
         order.setServerOrder(true);
