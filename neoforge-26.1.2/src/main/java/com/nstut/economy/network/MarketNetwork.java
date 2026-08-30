@@ -105,7 +105,7 @@ public class MarketNetwork {
     private static String priceForClient(BigDecimal pricePerUnit, boolean fluid) {
         BigDecimal quoted = fluid
                 ? FluidCommodity.pricePerBucket(pricePerUnit)
-                : pricePerUnit.setScale(0, RoundingMode.HALF_UP);
+                : pricePerUnit;
         return quoted.stripTrailingZeros().toPlainString();
     }
 

@@ -169,11 +169,11 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         for (MarketNetwork.PortfolioPointData p : pts) {
             out.add(new ChartSample(Double.parseDouble(p.netWorth),
                     Component.translatable("ui.economy.chart.tooltip.net_worth",
-                            formatCompact(Double.parseDouble(p.netWorth))).getString()
+                            formatMoneyCompact(new BigDecimal(p.netWorth))).getString()
                             + "\n" + Component.translatable("ui.economy.chart.tooltip.cash",
-                            formatCompact(Double.parseDouble(p.balance))).getString()
+                            formatMoneyCompact(new BigDecimal(p.balance))).getString()
                             + "  |  " + Component.translatable("ui.economy.chart.tooltip.assets",
-                            formatCompact(Double.parseDouble(p.assets))).getString()));
+                            formatMoneyCompact(new BigDecimal(p.assets))).getString()));
         }
         return out;
     });
@@ -523,7 +523,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                         : t("ui.economy.card.no_orders");
                 if (card.globalPrice != null && !card.globalPrice.isEmpty() && !card.globalPrice.equals("--")) {
                     String change = formatPriceChange(card.priceChangePercent);
-                    drawPriceChangeRowMarquee(g, f, formatCompact(parsePrice(card.globalPrice)), change,
+                    drawPriceChangeRowMarquee(g, f, formatMoneyCompact(parsePrice(card.globalPrice)), change,
                             textX, y + 16, textWidth, c.primary(), changeColor(card.priceChangePercent));
                 } else {
                     UiRender.text(g, f, "--", textX, y + 16, c.onSurfaceMuted());
@@ -928,7 +928,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         String dispName = getItemDisplayName(id, id);
         boolean fluid = isFluidCommodity(id);
         String totalStr = inf ? "∞ (" + (fluid ? "Per bucket: " : "Per unit: ") + price.toPlainString() + ")"
-                : totalPrice(price, qty, id).setScale(6, java.math.RoundingMode.HALF_UP).stripTrailingZeros().toPlainString();
+                : formatMoney(totalPrice(price, qty, id));
         pendingConfirmation.set(new PendingConfirmation(id, qty, price.toPlainString(), createSellMode.get(), inf,
                  createSellMode.get() ? t("ui.economy.opt.sell") : t("ui.economy.opt.buy"), dispName, totalStr, commodityType));
         showConfirmation();
@@ -1321,9 +1321,9 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                     nw = new BigDecimal(last.netWorth); bal = new BigDecimal(last.balance); ass = new BigDecimal(last.assets);
                 }
                 int boxW = (width - 8) / 3;
-                drawStatBox(g, f, x, y, boxW, height, t("ui.economy.portfolio.net_worth"), formatCompact(nw), c.primary(), c);
-                drawStatBox(g, f, x + boxW + 4, y, boxW, height, t("ui.economy.portfolio.liquid_cash"), formatCompact(bal), c.success(), c);
-                drawStatBox(g, f, x + 2 * (boxW + 4), y, boxW, height, t("ui.economy.portfolio.vault_assets"), formatCompact(ass), c.primary(), c);
+                drawStatBox(g, f, x, y, boxW, height, t("ui.economy.portfolio.net_worth"), formatMoneyCompact(nw), c.primary(), c);
+                drawStatBox(g, f, x + boxW + 4, y, boxW, height, t("ui.economy.portfolio.liquid_cash"), formatMoneyCompact(bal), c.success(), c);
+                drawStatBox(g, f, x + 2 * (boxW + 4), y, boxW, height, t("ui.economy.portfolio.vault_assets"), formatMoneyCompact(ass), c.primary(), c);
                 if (my >= y && my < y + height) {
                     if (mx >= x && mx < x + boxW) {
                         deferredTooltip = Component.translatable("ui.economy.portfolio.tooltip.net_worth");
@@ -1437,7 +1437,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                 }
                 CommodityIconComponent.drawIcon(g, h.itemId, x + 4, y + 5, 16, 16);
                 String qty = isFluidCommodity(h.itemId) ? formatFluidAmount(h.quantity) : "x" + formatCompact(h.quantity);
-                String val = fitText(f, formatCompact(h.totalValue), Math.max(0, width / 3));
+                String val = fitText(f, formatMoneyCompact(new BigDecimal(h.totalValue)), Math.max(0, width / 3));
                 int valueX = x + width - f.width(val) - 4;
                 int coinX = valueX - 10;
                 qty = fitText(f, qty, Math.max(0, width / 3));
@@ -1710,6 +1710,8 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
     static String formatCompact(BigDecimal val) { return EconomyFormatUtil.formatCompact(val); }
     static String formatCompact(long val) { return EconomyFormatUtil.formatCompact(val); }
     static String formatCompact(String str) { return EconomyFormatUtil.formatCompact(str); }
+    static String formatMoney(BigDecimal val) { return EconomyFormatUtil.formatMoney(val); }
+    static String formatMoneyCompact(BigDecimal val) { return EconomyFormatUtil.formatMoneyCompact(val); }
     static String formatPriceChange(double p) { return EconomyFormatUtil.formatPriceChange(p); }
     int changeColor(double p) {
         ColorScheme c = uiRuntime().theme().colors();

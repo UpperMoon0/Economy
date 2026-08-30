@@ -17,6 +17,9 @@ class EconomyFormatParityTest {
         assertEquals("1.5m", EconomyFormatUtil.formatCompact(new BigDecimal("1500000")));
         assertEquals("2.5b", EconomyFormatUtil.formatCompact("2500000000"));
         assertEquals("3t", EconomyFormatUtil.formatCompact(3_000_000_000_000L));
+        assertEquals("0.01", EconomyFormatUtil.formatMoneyCompact(new BigDecimal("0.01")));
+        assertEquals("0.25", EconomyFormatUtil.formatMoneyCompact(new BigDecimal("0.25")));
+        assertEquals("1.25k", EconomyFormatUtil.formatMoneyCompact(new BigDecimal("1250")));
     }
 
     @Test

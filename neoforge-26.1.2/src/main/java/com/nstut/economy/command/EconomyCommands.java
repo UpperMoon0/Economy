@@ -80,7 +80,7 @@ public class EconomyCommands {
                             boolean isSelf = sender.getUUID().equals(receiver.getUUID());
                             if (senderAccount.transferTo(receiverAccount, amount,
                                 TransactionContext.transfer("Payment from " + sender.getName().getString(), receiver.getUUID()))) {
-                                String amtStr = com.nstut.economy.util.EconomyFormatUtil.formatCompact(amount);
+                                String amtStr = com.nstut.economy.util.EconomyFormatUtil.formatMoney(amount);
                                 if (isSelf) {
                                     context.getSource().sendSuccess(() ->
                                         marketMessage("Transferred ", amtStr, " to yourself."), false);
@@ -278,6 +278,10 @@ public class EconomyCommands {
         Order order = isBuy
                 ? orderManager.createServerBuyOrder(commodity, quantity, pricePerUnit)
                 : orderManager.createServerSellOrder(commodity, quantity, pricePerUnit);
+        if (order == null) {
+            context.getSource().sendFailure(Component.literal("Server order violates the configured quantity or price limits."));
+            return 0;
+        }
 
         String priceStr = order.getTotalPrice().stripTrailingZeros().toPlainString();
         String amount = com.nstut.economy.util.EconomyFormatUtil

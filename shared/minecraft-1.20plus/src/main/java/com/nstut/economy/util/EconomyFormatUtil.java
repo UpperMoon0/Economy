@@ -53,6 +53,28 @@ public class EconomyFormatUtil {
         }
     }
 
+    /** Detailed currency formatting; unlike count formatting this never rounds values below 1000. */
+    public static String formatMoney(BigDecimal val) {
+        if (val == null) return "0";
+        return val.stripTrailingZeros().toPlainString();
+    }
+
+    /** Currency formatting with compact suffixes only once the value reaches 1000. */
+    public static String formatMoneyCompact(BigDecimal val) {
+        if (val == null) return "0";
+        if (val.abs().compareTo(BigDecimal.valueOf(1000)) < 0) return formatMoney(val);
+        return formatCompact(val);
+    }
+
+    public static String formatMoneyCompact(String str) {
+        if (str == null || str.isEmpty()) return "0";
+        try {
+            return formatMoneyCompact(new BigDecimal(str));
+        } catch (NumberFormatException e) {
+            return str;
+        }
+    }
+
     public static String formatFluidAmount(int milliBuckets) {
         return formatCompact(milliBuckets) + " mB";
     }

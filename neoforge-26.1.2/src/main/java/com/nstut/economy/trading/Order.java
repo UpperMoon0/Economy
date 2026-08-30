@@ -749,13 +749,16 @@ public class Order implements IOrder {
             String counterpartyName = getPlayerName(level, counterpartyUUID);
             String action = isBuy ? "Bought" : "Sold";
             String prep = isBuy ? "from" : "to";
-            String formattedTotal = com.nstut.economy.util.EconomyFormatUtil.formatCompact(totalPrice);
-            String formattedUnit = com.nstut.economy.util.EconomyFormatUtil.formatCompact(pricePerUnit);
+            BigDecimal displayUnitPrice = isFluid
+                    ? FluidCommodity.pricePerBucket(pricePerUnit)
+                    : pricePerUnit;
+            String formattedTotal = com.nstut.economy.util.EconomyFormatUtil.formatMoney(totalPrice);
+            String formattedUnit = com.nstut.economy.util.EconomyFormatUtil.formatMoney(displayUnitPrice);
             String formattedQuantity = com.nstut.economy.util.EconomyFormatUtil
                     .formatCommodityQuantity(qty, isFluid);
 
             String costDetails = (qty > 1)
-                ? ("§e" + formattedUnit + (isFluid ? " §fcoins per mB" : " §fcoins each")
+                ? ("§e" + formattedUnit + (isFluid ? " §fcoins per 1000 mB" : " §fcoins each")
                     + " (Total: §e" + formattedTotal + " §fcoins)")
                 : ("§e" + formattedTotal + " §fcoins");
 

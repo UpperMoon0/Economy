@@ -389,6 +389,8 @@ public class OrderManager {
 
     public Order createServerBuyOrder(ICommodity commodity, int quantity,
                                        java.math.BigDecimal pricePerUnit) {
+        if (!com.nstut.economy.util.OrderInputValidator.isValidNewOrder(
+                quantity, pricePerUnit, commodity instanceof FluidCommodity)) return null;
         Order order = new Order(SERVER_ID, commodity, quantity, pricePerUnit,
                                 IOrder.OrderType.BUY, null);
         order.setServerOrder(true);
@@ -398,6 +400,8 @@ public class OrderManager {
 
     public Order createServerSellOrder(ICommodity commodity, int quantity,
                                         java.math.BigDecimal pricePerUnit) {
+        if (!com.nstut.economy.util.OrderInputValidator.isValidNewOrder(
+                quantity, pricePerUnit, commodity instanceof FluidCommodity)) return null;
         Order order = new Order(SERVER_ID, commodity, quantity, pricePerUnit,
                                 IOrder.OrderType.SELL, null);
         order.setServerOrder(true);
