@@ -11,6 +11,7 @@ import com.nstut.economy.blocks.VaultManager;
 import com.nstut.economy.config.EconomyConfig;
 import com.nstut.economy.data.EconomyTradeData;
 import com.nstut.economy.data.TradeLedger;
+import com.nstut.economy.trading.CreateOrderResult;
 import com.nstut.economy.trading.FluidCommodity;
 import com.nstut.economy.trading.ItemCommodity;
 import com.nstut.economy.trading.Order;
@@ -70,14 +71,25 @@ public class MarketNetwork {
 
     public enum Action { CREATE_ORDER, ACCEPT_ORDER, CANCEL_ORDER, EDIT_ORDER }
     public enum Result { SUCCESS, WARNING, ERROR }
+    // Enum identity is serialized by ordinal; never reorder or insert constants.
+    public static final int MAX_RESULT_ARGS = 8;
     public static final class MarketActionResultPacket {
         public final Action action; public final Result result; public final String messageKey; public final List<String> args;
         public MarketActionResultPacket(Action action, Result result, String messageKey, List<String> args) { this.action = action; this.result = result; this.messageKey = messageKey; this.args = List.copyOf(args); }
-        public static void encode(MarketActionResultPacket pkt, FriendlyByteBuf buf) { buf.writeEnum(pkt.action); buf.writeEnum(pkt.result); buf.writeUtf(pkt.messageKey); buf.writeInt(pkt.args.size()); for (String arg : pkt.args) buf.writeUtf(arg); }
-        public static MarketActionResultPacket decode(FriendlyByteBuf buf) { Action a=buf.readEnum(Action.class); Result r=buf.readEnum(Result.class); String k=buf.readUtf(); int n=Math.min(buf.readInt(),8); List<String> args=new ArrayList<>(); for(int i=0;i<n;i++) args.add(buf.readUtf()); return new MarketActionResultPacket(a,r,k,args); }
+        public static void encode(MarketActionResultPacket pkt, FriendlyByteBuf buf) { buf.writeEnum(pkt.action); buf.writeEnum(pkt.result); buf.writeUtf(pkt.messageKey); buf.writeInt(Math.min(pkt.args.size(), MAX_RESULT_ARGS)); for (int i = 0; i < Math.min(pkt.args.size(), MAX_RESULT_ARGS); i++) buf.writeUtf(pkt.args.get(i)); }
+        public static MarketActionResultPacket decode(FriendlyByteBuf buf) { Action a=buf.readEnum(Action.class); Result r=buf.readEnum(Result.class); String k=buf.readUtf(); int n=buf.readInt(); if (n < 0 || n > MAX_RESULT_ARGS) throw new io.netty.handler.codec.DecoderException("Invalid action result argument count: " + n); List<String> args=new ArrayList<>(); for(int i=0;i<n;i++) args.add(buf.readUtf()); return new MarketActionResultPacket(a,r,k,args); }
         public static void handle(MarketActionResultPacket pkt, Supplier<NetworkManager.PacketContext> ctx) { ctx.get().queue(() -> com.nstut.economy.client.MarketScreen.handleActionResult(pkt)); }
     }
     private static void sendActionResult(ServerPlayer player, Action action, Result result, String key, String... args) { CHANNEL.sendToPlayer(player, new MarketActionResultPacket(action, result, key, List.of(args))); }
+
+    private static void sendCreateResult(ServerPlayer player, CreateOrderResult creation) {
+        switch (creation.status()) {
+            case POSTED -> sendActionResult(player, Action.CREATE_ORDER, Result.SUCCESS, "ui.economy.toast.order_placed");
+            case PARTIALLY_FILLED -> sendActionResult(player, Action.CREATE_ORDER, Result.SUCCESS, "ui.economy.toast.order_partially_filled", String.valueOf(creation.filledQuantity()));
+            case FILLED -> sendActionResult(player, Action.CREATE_ORDER, Result.SUCCESS, "ui.economy.toast.order_filled");
+            case REJECTED -> sendActionResult(player, Action.CREATE_ORDER, Result.WARNING, creation.errorKey(), creation.errorArgs().toArray(String[]::new));
+        }
+    }
 
     public static class ItemCardData {
         public final String itemId;
@@ -324,70 +336,96 @@ public class MarketNetwork {
                 try {
                     if (!"ITEM".equals(pkt.commodityType) && !"FLUID".equals(pkt.commodityType)) {
                         com.nstut.Economy.LOGGER.warn("Rejected order packet with unknown commodity type {} from {}", pkt.commodityType, player.getName().getString());
+                        sendActionResult(player, Action.CREATE_ORDER, Result.ERROR, "ui.economy.error.commodity_invalid");
                         return;
                     }
                     if (!isValidQuantity(pkt.quantity)) {
                         com.nstut.Economy.LOGGER.warn("Rejected order packet with out-of-range quantity {} from {}", pkt.quantity, player.getName().getString());
+                        var qtyError = com.nstut.economy.util.OrderInputValidator.validateQuantity(pkt.quantity);
+                        sendActionResult(player, Action.CREATE_ORDER, Result.WARNING, qtyError.key(), qtyError.args().toArray(String[]::new));
                         sendItemDetail(player, pkt.itemId);
                         return;
                     }
-                    BigDecimal quotedPrice = parsePrice(pkt.pricePerUnit);
-                    if (quotedPrice == null) {
+                    var priceCheck = com.nstut.economy.util.OrderInputValidator.validatePrice(pkt.pricePerUnit);
+                    if (!priceCheck.valid()) {
                         com.nstut.Economy.LOGGER.warn("Rejected order packet with invalid price from {}", player.getName().getString());
+                        sendActionResult(player, Action.CREATE_ORDER, Result.WARNING, priceCheck.error().messageKey, priceCheck.error().args().toArray(String[]::new));
                         sendItemDetail(player, pkt.itemId);
                         return;
                     }
+                    BigDecimal quotedPrice = priceCheck.value();
                     BigDecimal price = "FLUID".equals(pkt.commodityType)
                             ? FluidCommodity.pricePerMb(quotedPrice)
                             : quotedPrice;
                     ResourceLocation commodityId = parseCommodityId(pkt.itemId);
                     if (commodityId == null) {
+                        sendActionResult(player, Action.CREATE_ORDER, Result.ERROR, "ui.economy.error.commodity_invalid");
                         sendItemList(player);
                         return;
                     }
 
                     ServerLevel level = player.serverLevel();
                     OrderManager orderManager = Economy.getOrderManager();
+                    CreateOrderResult creation;
 
                     if ("FLUID".equals(pkt.commodityType)) {
                         Fluid fluid = BuiltInRegistries.FLUID.get(commodityId);
-                        if (!CommodityUtil.isCanonicalFluid(fluid)) { sendItemList(player); return; }
+                        if (!CommodityUtil.isCanonicalFluid(fluid)) {
+                            sendActionResult(player, Action.CREATE_ORDER, Result.ERROR, "ui.economy.error.commodity_invalid");
+                            sendItemList(player);
+                            return;
+                        }
                         FluidCommodity commodity = new FluidCommodity(commodityId, fluid, BigDecimal.ZERO);
 
                         if (pkt.isSell) {
-                            if (TankManager.countFluidInTanks(level, player.getUUID(), fluid) < pkt.quantity) { sendItemDetail(player, pkt.itemId); return; }
+                            if (TankManager.countFluidInTanks(level, player.getUUID(), fluid) < pkt.quantity) {
+                                sendActionResult(player, Action.CREATE_ORDER, Result.WARNING, "ui.economy.error.insufficient_stock");
+                                sendItemDetail(player, pkt.itemId);
+                                return;
+                            }
                             List<com.nstut.economy.trading.EconomyFluidStack> reservedFluids = new ArrayList<>();
                             int drained = TankManager.extractFluidFromTanks(level, player.getUUID(), fluid, pkt.quantity, reservedFluids);
                             if (drained < pkt.quantity) {
                                 for (var reservedFluid : reservedFluids) {
                                     TankManager.restoreFluidToTanks(level, player.getUUID(), reservedFluid);
                                 }
+                                sendActionResult(player, Action.CREATE_ORDER, Result.WARNING, "ui.economy.error.insufficient_stock");
                                 sendItemDetail(player, pkt.itemId);
                                 return;
                             }
-                            orderManager.createSellOrder(player.getUUID(), commodity, pkt.quantity, price,
+                            creation = orderManager.createSellOrder(player.getUUID(), commodity, pkt.quantity, price,
                                     net.minecraft.core.NonNullList.create(), reservedFluids, level);
                         } else {
-                            if (orderManager.createBuyOrder(player.getUUID(), commodity, pkt.quantity, price, pkt.isInfinite, level) == null) sendActionResult(player, Action.CREATE_ORDER, Result.WARNING, "ui.economy.error.order_rejected");
+                            creation = orderManager.createBuyOrder(player.getUUID(), commodity, pkt.quantity, price, pkt.isInfinite, level);
                         }
                     } else {
                         Item item = BuiltInRegistries.ITEM.get(commodityId);
-                        if (item == net.minecraft.world.item.Items.AIR) { sendItemList(player); return; }
+                        if (item == net.minecraft.world.item.Items.AIR) {
+                            sendActionResult(player, Action.CREATE_ORDER, Result.ERROR, "ui.economy.error.commodity_invalid");
+                            sendItemList(player);
+                            return;
+                        }
                         ItemCommodity commodity = new ItemCommodity(commodityId, item, BigDecimal.ZERO);
 
                         if (pkt.isSell) {
-                            if (VaultManager.countItemInVaults(level, player.getUUID(), item) < pkt.quantity) { sendItemDetail(player, pkt.itemId); return; }
-                            net.minecraft.core.NonNullList<net.minecraft.world.item.ItemStack> reserved = net.minecraft.core.NonNullList.create();
-                            if (!VaultManager.extractItemFromVaults(level, player.getUUID(), item, pkt.quantity, reserved)) {
-                                VaultManager.insertItemStacksToVaults(level, player.getUUID(), reserved);
+                            if (VaultManager.countItemInVaults(level, player.getUUID(), item) < pkt.quantity) {
+                                sendActionResult(player, Action.CREATE_ORDER, Result.WARNING, "ui.economy.error.insufficient_stock");
                                 sendItemDetail(player, pkt.itemId);
                                 return;
                             }
-                            orderManager.createSellOrder(player.getUUID(), commodity, pkt.quantity, price, reserved, level);
+                            net.minecraft.core.NonNullList<net.minecraft.world.item.ItemStack> reserved = net.minecraft.core.NonNullList.create();
+                            if (!VaultManager.extractItemFromVaults(level, player.getUUID(), item, pkt.quantity, reserved)) {
+                                VaultManager.insertItemStacksToVaults(level, player.getUUID(), reserved);
+                                sendActionResult(player, Action.CREATE_ORDER, Result.WARNING, "ui.economy.error.insufficient_stock");
+                                sendItemDetail(player, pkt.itemId);
+                                return;
+                            }
+                            creation = orderManager.createSellOrder(player.getUUID(), commodity, pkt.quantity, price, reserved, level);
                         } else {
-                            if (orderManager.createBuyOrder(player.getUUID(), commodity, pkt.quantity, price, pkt.isInfinite, level) == null) sendActionResult(player, Action.CREATE_ORDER, Result.WARNING, "ui.economy.error.order_rejected");
+                            creation = orderManager.createBuyOrder(player.getUUID(), commodity, pkt.quantity, price, pkt.isInfinite, level);
                         }
                     }
+                    sendCreateResult(player, creation);
                     orderManager.matchAllPendingOrders(level);
                     sendItemDetail(player, pkt.itemId);
                     sendItemList(player);

@@ -242,7 +242,15 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
     }
 
     public static void handleActionResult(MarketNetwork.MarketActionResultPacket pkt) {
-        Component title = Component.translatable(pkt.result == MarketNetwork.Result.SUCCESS ? "ui.economy.toast.success" : pkt.result == MarketNetwork.Result.WARNING ? "ui.economy.toast.order_rejected" : "ui.economy.toast.error");
+        Component title = Component.translatable(switch (pkt.result) {
+            case SUCCESS -> "ui.economy.toast.success";
+            case WARNING -> switch (pkt.action) {
+                case CANCEL_ORDER -> "ui.economy.toast.cancel_rejected";
+                case EDIT_ORDER -> "ui.economy.toast.edit_rejected";
+                default -> "ui.economy.toast.order_rejected";
+            };
+            case ERROR -> "ui.economy.toast.error";
+        });
         Component message = Component.translatable(pkt.messageKey, pkt.args.toArray());
         Minecraft minecraft = Minecraft.getInstance();
         if (minecraft.screen instanceof EconomyUiContainerScreen<?> screen && screen.uiRuntime() != null) {

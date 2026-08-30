@@ -55,7 +55,7 @@ class OrderManagerTest extends MinecraftTestBase {
         ItemCommodity iron = new ItemCommodity(new ResourceLocation("minecraft", "iron_ingot"),
                 Items.IRON_INGOT, BigDecimal.ZERO);
         UUID owner = UUID.randomUUID();
-        Order order = manager.createSellOrder(owner, iron, 4, BigDecimal.ONE);
+        Order order = manager.createSellOrder(owner, iron, 4, BigDecimal.ONE).remainingOrder();
 
         assertFalse(manager.cancelOrder(order.getOrderId(), UUID.randomUUID()));
         assertTrue(manager.cancelOrder(order.getOrderId(), owner));

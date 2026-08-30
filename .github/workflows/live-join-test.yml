@@ -1,21 +1,10 @@
 name: Live client join test
 
+# Executed automatically by build-and-release.yml on PRs; the pull_request
+# trigger is omitted so PRs do not run the same suite twice.
 on:
   workflow_call:
   workflow_dispatch:
-  pull_request:
-    paths:
-      - "common/**"
-      - "common-1.20.1/**"
-      - "common-1.21.1/**"
-      - "shared/**"
-      - "fabric-1.20.1/**"
-      - "forge-1.20.1/**"
-      - "fabric-1.21.1/**"
-      - "neoforge-1.21.1/**"
-      - "neoforge-26.1.2/**"
-      - "tools/live_join_test.py"
-      - ".github/workflows/live-join-test.yml"
 
 jobs:
   prepare-openui:

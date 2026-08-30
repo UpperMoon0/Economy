@@ -6,6 +6,8 @@ import net.minecraft.network.FriendlyByteBuf;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 class MarketPacketTest extends MinecraftTestBase {
@@ -54,6 +56,67 @@ class MarketPacketTest extends MinecraftTestBase {
         assertEquals(0.00001, decoded.price);
         assertEquals(1, decoded.quantity);
         assertEquals(1234L, decoded.timestamp);
+    }
+
+    @Test
+    @DisplayName("Action result packets preserve action, severity, key and args")
+    void actionResultPacketRoundTrips() {
+        MarketNetwork.MarketActionResultPacket original = new MarketNetwork.MarketActionResultPacket(
+                MarketNetwork.Action.CREATE_ORDER, MarketNetwork.Result.WARNING,
+                "ui.economy.error.price_above_max", List.of("1000000"));
+        FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
+
+        MarketNetwork.MarketActionResultPacket.encode(original, buffer);
+        MarketNetwork.MarketActionResultPacket decoded = MarketNetwork.MarketActionResultPacket.decode(buffer);
+
+        assertEquals(MarketNetwork.Action.CREATE_ORDER, decoded.action);
+        assertEquals(MarketNetwork.Result.WARNING, decoded.result);
+        assertEquals("ui.economy.error.price_above_max", decoded.messageKey);
+        assertEquals(List.of("1000000"), decoded.args);
+    }
+
+    @Test
+    @DisplayName("Action result packets preserve zero-argument messages")
+    void actionResultPacketRoundTripsWithoutArgs() {
+        MarketNetwork.MarketActionResultPacket original = new MarketNetwork.MarketActionResultPacket(
+                MarketNetwork.Action.CANCEL_ORDER, MarketNetwork.Result.SUCCESS,
+                "ui.economy.toast.order_cancelled", List.of());
+        FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
+
+        MarketNetwork.MarketActionResultPacket.encode(original, buffer);
+        MarketNetwork.MarketActionResultPacket decoded = MarketNetwork.MarketActionResultPacket.decode(buffer);
+
+        assertTrue(decoded.args.isEmpty());
+        assertEquals(MarketNetwork.Action.CANCEL_ORDER, decoded.action);
+        assertEquals(MarketNetwork.Result.SUCCESS, decoded.result);
+    }
+
+    @Test
+    @DisplayName("Action result packets preserve the maximum argument count")
+    void actionResultPacketRoundTripsMaxArgs() {
+        List<String> args = List.of("1", "2", "3", "4", "5", "6", "7", "8");
+        MarketNetwork.MarketActionResultPacket original = new MarketNetwork.MarketActionResultPacket(
+                MarketNetwork.Action.EDIT_ORDER, MarketNetwork.Result.ERROR,
+                "ui.economy.error.transaction_failed", args);
+        FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
+
+        MarketNetwork.MarketActionResultPacket.encode(original, buffer);
+        MarketNetwork.MarketActionResultPacket decoded = MarketNetwork.MarketActionResultPacket.decode(buffer);
+
+        assertEquals(args, decoded.args);
+    }
+
+    @Test
+    @DisplayName("Action result packets reject malformed argument counts")
+    void actionResultPacketRejectsInvalidArgCount() {
+        FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
+        buffer.writeEnum(MarketNetwork.Action.CREATE_ORDER);
+        buffer.writeEnum(MarketNetwork.Result.WARNING);
+        buffer.writeUtf("ui.economy.error.order_rejected");
+        buffer.writeInt(99);
+
+        assertThrows(io.netty.handler.codec.DecoderException.class,
+                () -> MarketNetwork.MarketActionResultPacket.decode(buffer));
     }
 
     @Test

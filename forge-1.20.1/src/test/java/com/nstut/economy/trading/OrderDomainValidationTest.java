@@ -22,26 +22,33 @@ class OrderDomainValidationTest extends MinecraftTestBase {
     @Test
     @DisplayName("Zero and negative prices are rejected at creation, not just in packets")
     void rejectsNonPositivePrices() {
-        assertNull(manager.createSellOrder(owner, iron, 4, BigDecimal.ZERO));
-        assertNull(manager.createSellOrder(owner, iron, 4, new BigDecimal("-5")));
-        assertNull(manager.createBuyOrder(owner, iron, 4, BigDecimal.ZERO));
-        assertNull(manager.createBuyOrder(owner, iron, 4, new BigDecimal("-1")));
+        assertEquals(CreateOrderResult.Status.REJECTED,
+                manager.createSellOrder(owner, iron, 4, BigDecimal.ZERO).status());
+        assertEquals(CreateOrderResult.Status.REJECTED,
+                manager.createSellOrder(owner, iron, 4, new BigDecimal("-5")).status());
+        assertEquals(CreateOrderResult.Status.REJECTED,
+                manager.createBuyOrder(owner, iron, 4, BigDecimal.ZERO).status());
+        assertEquals(CreateOrderResult.Status.REJECTED,
+                manager.createBuyOrder(owner, iron, 4, new BigDecimal("-1")).status());
         assertTrue(manager.getAllOrders().isEmpty());
     }
 
     @Test
     @DisplayName("Out-of-range quantities are rejected at creation")
     void rejectsInvalidQuantities() {
-        assertNull(manager.createSellOrder(owner, iron, 0, BigDecimal.ONE));
-        assertNull(manager.createSellOrder(owner, iron, -3, BigDecimal.ONE));
-        assertNull(manager.createBuyOrder(owner, iron, Integer.MAX_VALUE, BigDecimal.ONE));
+        assertEquals(CreateOrderResult.Status.REJECTED,
+                manager.createSellOrder(owner, iron, 0, BigDecimal.ONE).status());
+        assertEquals(CreateOrderResult.Status.REJECTED,
+                manager.createSellOrder(owner, iron, -3, BigDecimal.ONE).status());
+        assertEquals(CreateOrderResult.Status.REJECTED,
+                manager.createBuyOrder(owner, iron, Integer.MAX_VALUE, BigDecimal.ONE).status());
         assertTrue(manager.getAllOrders().isEmpty());
     }
 
     @Test
     @DisplayName("Editing an order to a zero price is refused")
     void editRejectsInvalidPrice() {
-        Order order = manager.createSellOrder(owner, iron, 4, BigDecimal.ONE);
+        Order order = manager.createSellOrder(owner, iron, 4, BigDecimal.ONE).remainingOrder();
         assertNotNull(order);
 
         assertFalse(manager.editOrder(order.getOrderId(), owner, 4, BigDecimal.ZERO, false, null));

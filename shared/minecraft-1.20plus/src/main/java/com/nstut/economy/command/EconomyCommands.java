@@ -110,7 +110,9 @@ public class EconomyCommands {
             .then(Commands.literal("serverorder")
                 .requires(source -> source.hasPermission(2))
                 .then(Commands.literal("buy")
-                    .then(Commands.literal("bucket")
+                    // "perbucket" instead of "bucket" so the legacy shorthand for
+                    // the minecraft:bucket item commodity keeps working.
+                    .then(Commands.literal("perbucket")
                         .then(Commands.argument("commodity", ResourceLocationArgument.id())
                             .suggests((context, builder) -> suggestCommodityIds(builder))
                             .then(Commands.argument("quantity", IntegerArgumentType.integer(1))
@@ -130,7 +132,7 @@ public class EconomyCommands {
                     )
                 )
                 .then(Commands.literal("sell")
-                    .then(Commands.literal("bucket")
+                    .then(Commands.literal("perbucket")
                         .then(Commands.argument("commodity", ResourceLocationArgument.id())
                             .suggests((context, builder) -> suggestCommodityIds(builder))
                             .then(Commands.argument("quantity", IntegerArgumentType.integer(1))
