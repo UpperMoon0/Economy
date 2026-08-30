@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import java.math.BigDecimal;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Shared format contract compiled against every 1.20.1 and 1.21.1 common module. */
 class EconomyFormatParityTest {
@@ -37,5 +38,13 @@ class EconomyFormatParityTest {
         assertEquals("0.00001", CoinText.formatMoney(new BigDecimal("0.00001")));
         assertEquals("0.005", CoinText.formatMoney(new BigDecimal("0.005000")));
         assertEquals("42", CoinText.formatMoney(new BigDecimal("42.000000")));
+    }
+
+    @Test
+    void chartScalingPreservesSmallFractionalPriceMovement() {
+        double graphRange = EconomyFormatUtil.chartGraphRange(0.01, 0.02);
+
+        assertTrue(graphRange > 0.01, "chart padding should preserve the data range");
+        assertTrue(graphRange < 0.1, "fractional prices must not be forced into a one-coin range");
     }
 }

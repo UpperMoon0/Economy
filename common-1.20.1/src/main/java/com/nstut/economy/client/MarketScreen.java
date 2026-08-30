@@ -139,7 +139,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         if (d != null && d.chart != null) {
             for (MarketNetwork.ChartPoint p : d.chart) {
                 out.add(new ChartSample(p.price, CHART_TIME_FMT.format(new Date(p.timestamp))
-                        + "\n" + Component.translatable("ui.economy.chart.tooltip.price", p.price).getString()
+                        + "\n" + Component.translatable("ui.economy.chart.tooltip.price", formatMoney(BigDecimal.valueOf(p.price))).getString()
                         + "\n" + Component.translatable("ui.economy.chart.tooltip.volume",
                         formatQty(p.quantity, isFluidCommodity(d.itemId))).getString()));
             }
@@ -1556,15 +1556,10 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                 }
                 min = low;
                 max = high;
-                double rawRange = max - min;
-                double padding = rawRange <= 0.0
-                        ? Math.max(1.0, Math.abs(max) * 0.05)
-                        : Math.max(1.0, rawRange * 0.08);
-                graphMin = min >= 0 ? Math.max(0.0, min - padding) : min - padding;
-                double graphMax = max + padding;
-                graphRange = Math.max(1.0, graphMax - graphMin);
+                graphMin = EconomyFormatUtil.chartGraphMin(min, max);
+                graphRange = EconomyFormatUtil.chartGraphRange(min, max);
 
-                currentText = formatCompact(points.get(points.size() - 1).value);
+                currentText = formatChartMoney(points.get(points.size() - 1).value);
                 badgeW = EconomyUiComponents.coinBadgeWidth(f, currentText);
                 badgeH = 12;
                 badgeX = x + width - badgeW - 4;
@@ -1573,7 +1568,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                 liveH = 12;
                 liveX = badgeX - liveW - 4;
                 liveY = y + 2;
-                int axisWidth = Math.max(f.width(formatCompact(max)), f.width(formatCompact(min))) + 18;
+                int axisWidth = Math.max(f.width(formatChartMoney(max)), f.width(formatChartMoney(min))) + 18;
                 plotLeft = x + axisWidth;
                 plotRight = Math.max(plotLeft + 1, liveX - 6);
                 plotTop = y + 14;
@@ -1623,9 +1618,9 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
             List<ChartSample> vis = visiblePoints(pts, off);
             ChartLayout layout = new ChartLayout(f, vis, off);
             EconomyUiComponents.drawCoin(g, x + 3, y + 2);
-            UiRender.text(g, f, formatCompact(layout.max), x + 13, y + 3, c.onSurfaceMuted());
+            UiRender.text(g, f, formatChartMoney(layout.max), x + 13, y + 3, c.onSurfaceMuted());
             EconomyUiComponents.drawCoin(g, x + 3, y + height - 12);
-            UiRender.text(g, f, formatCompact(layout.min), x + 13, y + height - 11, c.onSurfaceMuted());
+            UiRender.text(g, f, formatChartMoney(layout.min), x + 13, y + height - 11, c.onSurfaceMuted());
             boolean liveHov = mx >= layout.liveX && mx < layout.liveX + layout.liveW && my >= layout.liveY && my < layout.liveY + layout.liveH;
             EconomyUiComponents.drawBadge(g, f, layout.liveText,
                     layout.liveX + layout.liveW, layout.liveY,
@@ -1694,6 +1689,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
     static String formatCompact(String str) { return EconomyFormatUtil.formatCompact(str); }
     static String formatMoney(BigDecimal val) { return EconomyFormatUtil.formatMoney(val); }
     static String formatMoneyCompact(BigDecimal val) { return EconomyFormatUtil.formatMoneyCompact(val); }
+    static String formatChartMoney(double val) { return EconomyFormatUtil.formatMoneyCompact(BigDecimal.valueOf(val)); }
     static String formatPriceChange(double p) { return EconomyFormatUtil.formatPriceChange(p); }
     int changeColor(double p) {
         ColorScheme c = uiRuntime().theme().colors();
