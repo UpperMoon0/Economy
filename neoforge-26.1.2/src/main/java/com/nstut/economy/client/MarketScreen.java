@@ -200,7 +200,6 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
     private ButtonWidget newOrderSellBtn, newOrderBuyBtn;
     private Popover itemSearchPopover;
     private OverlayHandle itemSearchHandle;
-    private boolean itemSearchShown;
 
     private static String t(String key) { return Component.translatable(key).getString(); }
 
@@ -305,7 +304,6 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         hideItemSearch();
         itemSearchHandle = null;
         itemSearchPopover = null;
-        itemSearchShown = false;
         computedList.clear();
         subscriptions.clear();
         super.removed();
@@ -834,9 +832,8 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                 searchResults.set(results);
                 if (results.isEmpty()) {
                     hideItemSearch();
-                } else if (!itemSearchShown && uiRuntime() != null) {
+                } else if (!isItemSearchOpen() && uiRuntime() != null) {
                     itemSearchHandle = itemSearchPopover.show(uiRuntime().overlays());
-                    itemSearchShown = true;
                 }
             } else {
                 searchResults.set(List.of());
@@ -872,10 +869,14 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
     }
 
     private void hideItemSearch() {
-        if (itemSearchShown && itemSearchHandle != null) {
+        if (itemSearchHandle != null) {
             itemSearchHandle.close();
-            itemSearchShown = false;
+            itemSearchHandle = null;
         }
+    }
+
+    private boolean isItemSearchOpen() {
+        return itemSearchHandle != null && itemSearchHandle.isOpen();
     }
 
     private void selectCommodity(String id) {
