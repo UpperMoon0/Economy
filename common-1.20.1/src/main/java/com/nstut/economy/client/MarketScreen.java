@@ -756,21 +756,12 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
             }
         });
 
-        HStack qtyRow = new HStack().gap(4);
-        TextField qtyField = Ui.textField(createQty);
-        qtyField.placeholder(t("ui.economy.new_order.qty_placeholder"));
-        qtyField.flex();
-        qtyRow.addChild(qtyField);
-        qtyRow.addChild(Ui.button(t("ui.economy.action.max"), () -> {
+        v.addChild(new OrderQuantityControl(createQty, createSellMode, createInfinite, () -> {
             String id = createCommodityQuery.get();
             int stock = getVaultStockForItem(id);
             if (stock > 0) createQty.set(String.valueOf(stock));
-        }).ghost());
-        qtyRow.addChild(Ui.switcher(createSellMode)
-                .when(true, Ui::spacer)
-                .when(false, () -> Ui.button(t("ui.economy.action.infinite"),
-                        () -> createInfinite.set(!createInfinite.get())).ghost()));
-        v.addChild(qtyRow);
+        }, t("ui.economy.new_order.qty_placeholder"), t("ui.economy.new_order.unlimited"),
+                t("ui.economy.action.max"), t("ui.economy.action.infinite")));
 
         TextField priceField = Ui.textField(createPrice);
         Runnable updatePricePlaceholder = () -> priceField.placeholder(t(isFluidCommodity(createCommodityQuery.get())
@@ -1186,26 +1177,24 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
     }
 
     private void showEditDialog(MarketNetwork.ActiveOrderEntry e) {
-        Signal<String> qtySig = Signals.of(e.isInfinite ? "∞" : String.valueOf(e.quantity));
+        Signal<String> qtySig = Signals.of(String.valueOf(Math.max(1, e.quantity)));
         Signal<String> priceSig = Signals.of(e.price);
         Signal<Boolean> infSig = Signals.of(e.isInfinite);
         Signal<String> errSig = Signals.of((String) null);
 
-        TextField qtyField = Ui.textField(qtySig);
-        qtyField.placeholder(t("ui.economy.new_order.qty_field"));
-        qtyField.fillWidth();
+        OrderQuantityControl qtyControl = new OrderQuantityControl(qtySig, Signals.of(e.isSell), infSig, null,
+                t("ui.economy.new_order.qty_field"), t("ui.economy.new_order.unlimited"),
+                t("ui.economy.action.max"), t("ui.economy.action.infinite"));
+        qtyControl.fillWidth();
         TextField priceField = Ui.textField(priceSig);
         priceField.placeholder(t(isFluidCommodity(e.itemId)
                 ? "ui.economy.new_order.price_field_fluid"
                 : "ui.economy.new_order.price_field_item"));
         priceField.fillWidth();
-        ButtonWidget infBtn = Ui.button(t("ui.economy.action.infinite"), () -> infSig.set(!infSig.get())).ghost();
-
         VStack body = new VStack().gap(4);
         body.addChild(Ui.text(Component.translatable(e.isSell ? "ui.economy.new_order.title_sell" : "ui.economy.new_order.title_buy")).style(TextStyle.HEADING));
         body.addChild(Ui.text(getItemDisplayName(e.itemId, e.displayName)).style(TextStyle.LABEL));
-        if (!e.isSell) body.addChild(infBtn);
-        body.addChild(qtyField);
+        body.addChild(qtyControl);
         body.addChild(priceField);
         body.addChild(new UIComponent() {
             @Override public int preferredWidth(Font f) { return 0; }
