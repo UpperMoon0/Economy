@@ -45,6 +45,10 @@ if (needsWholeWorkspace || targetedProjects.isEmpty()) {
             case 'neoforge-1.21.1':
                 selected.addAll(['common', 'common-1.21.1', projectName])
                 break
+            case 'common-1.20.1':
+            case 'common-1.21.1':
+                selected.addAll(['common', projectName])
+                break
             default:
                 selected.add(projectName)
         }

@@ -23,6 +23,7 @@ public final class OrderQuantityControl extends HStack {
     private final String maximumLabel;
     private final String infiniteLabel;
     private final Function<Signal<String>, UIComponent> quantityFieldFactory;
+    private ButtonWidget infiniteButton;
     private Subscription sellSubscription = Subscription.EMPTY;
     private Subscription infiniteSubscription = Subscription.EMPTY;
     private Mode displayedMode;
@@ -89,14 +90,18 @@ public final class OrderQuantityControl extends HStack {
         maximumVisible = nextMode == Mode.SELL_QUANTITY && maximumAction != null;
         quantityInputVisible = nextMode != Mode.BUY_INFINITE;
         unlimitedVisible = nextMode == Mode.BUY_INFINITE;
+        for (UIComponent child : children()) {
+            if (child.isFocused()) child.clearFocus();
+        }
         clearChildren();
 
         UIComponent quantityDisplay;
         if (unlimitedVisible) {
-            quantityDisplay = Ui.button(unlimitedLabel, () -> { })
-                    .outline()
-                    .enabled(false)
-                    .alignLeft();
+            ButtonWidget unlimitedButton = Ui.button(unlimitedLabel, () -> { }).outline();
+            unlimitedButton.enabled(false);
+            unlimitedButton.focusable(false);
+            unlimitedButton.alignLeft();
+            quantityDisplay = unlimitedButton;
         } else {
             quantityDisplay = quantityFieldFactory.apply(quantity);
         }
@@ -106,7 +111,9 @@ public final class OrderQuantityControl extends HStack {
         if (maximumVisible) {
             addChild(Ui.button(maximumLabel, maximumAction).ghost());
         } else if (nextMode != Mode.SELL_QUANTITY) {
-            ButtonWidget infiniteButton = Ui.button(infiniteLabel, () -> infinite.set(!infinite.get())).ghost();
+            if (infiniteButton == null) {
+                infiniteButton = Ui.button(infiniteLabel, () -> infinite.set(!infinite.get())).ghost();
+            }
             infiniteButton.setActive(nextMode == Mode.BUY_INFINITE);
             addChild(infiniteButton);
         }
