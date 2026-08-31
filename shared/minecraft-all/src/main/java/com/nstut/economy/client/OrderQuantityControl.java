@@ -90,6 +90,7 @@ public final class OrderQuantityControl extends HStack {
         maximumVisible = nextMode == Mode.SELL_QUANTITY && maximumAction != null;
         quantityInputVisible = nextMode != Mode.BUY_INFINITE;
         unlimitedVisible = nextMode == Mode.BUY_INFINITE;
+        boolean restoreInfiniteFocus = infiniteButton != null && infiniteButton.isFocused();
         for (UIComponent child : children()) {
             if (child.isFocused()) child.clearFocus();
         }
@@ -116,6 +117,7 @@ public final class OrderQuantityControl extends HStack {
             }
             infiniteButton.setActive(nextMode == Mode.BUY_INFINITE);
             addChild(infiniteButton);
+            if (restoreInfiniteFocus) infiniteButton.requestFocus();
         }
     }
 

@@ -1,6 +1,7 @@
 package com.nstut.economy.client;
 
 import com.nstut.openui.api.Ui;
+import com.nstut.openui.api.ButtonWidget;
 import com.nstut.openui.runtime.NativeWidgetHost;
 import com.nstut.openui.runtime.UiRuntime;
 import com.nstut.openui.state.Signal;
@@ -35,16 +36,33 @@ class OrderQuantityControlTest {
                 "Quantity", "∞ Unlimited", "MAX", "∞", ignored -> Ui.spacer());
         UiRuntime runtime = new UiRuntime(testFont(), dummyHost);
         runtime.setRoot(control);
+        control.layoutTree(testFont(), 0, 0, 300, 40);
 
         assertEquals(OrderQuantityControl.Mode.SELL_QUANTITY, control.displayedMode());
         assertTrue(control.isMaximumVisible());
         assertTrue(control.isQuantityInputVisible());
         assertFalse(control.isInfiniteActive());
 
+        ButtonWidget maxButton = onlyButton(control);
+        maxButton.mouseClicked(maxButton.getX() + 1, maxButton.getY() + 1, 0);
+        assertEquals("128", quantity.get());
+
         sellMode.set(false);
+        control.layoutTree(testFont(), 0, 0, 300, 40);
         assertEquals(OrderQuantityControl.Mode.BUY_QUANTITY, control.displayedMode());
         assertFalse(control.isMaximumVisible());
         assertTrue(control.isQuantityInputVisible());
+        assertFalse(control.isInfiniteActive());
+
+        ButtonWidget infiniteButton = onlyButton(control);
+        infiniteButton.requestFocus();
+        infiniteButton.mouseClicked(infiniteButton.getX() + 1, infiniteButton.getY() + 1, 0);
+        assertTrue(infinite.get());
+        assertTrue(control.isInfiniteActive());
+        assertTrue(infiniteButton.isFocused(), "toggling infinity should preserve keyboard focus");
+
+        infiniteButton.mouseClicked(infiniteButton.getX() + 1, infiniteButton.getY() + 1, 0);
+        assertFalse(infinite.get());
         assertFalse(control.isInfiniteActive());
 
         infinite.set(true);
@@ -62,6 +80,14 @@ class OrderQuantityControlTest {
 
         resetInfiniteForSell.close();
         runtime.close();
+    }
+
+    private static ButtonWidget onlyButton(OrderQuantityControl control) {
+        return control.children().stream()
+                .filter(ButtonWidget.class::isInstance)
+                .map(ButtonWidget.class::cast)
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("Missing action button"));
     }
 
     private static Font testFont() {
