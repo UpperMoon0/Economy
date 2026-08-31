@@ -81,6 +81,7 @@
   "ui.economy.new_order.vault_stock": "Vault Stock: %s",
   "ui.economy.new_order.tank_stock": "Tank Stock: %s",
   "ui.economy.new_order.qty_placeholder": "Quantity (e.g. 10)",
+  "ui.economy.new_order.unlimited": "∞ Unlimited",
   "ui.economy.new_order.price_placeholder_item": "Price per item",
   "ui.economy.new_order.price_placeholder_fluid": "Price per 1,000 mB",
   "ui.economy.new_order.search_placeholder": "Search item name or ID...",

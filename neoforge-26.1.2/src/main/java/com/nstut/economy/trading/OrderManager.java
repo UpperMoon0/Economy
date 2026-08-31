@@ -236,7 +236,8 @@ public class OrderManager {
                 Math.max(1, newQuantity), newPrice, order.getCommodity() instanceof FluidCommodity)) {
             return false;
         }
-        if (!order.isInfinite() || order.getType() == IOrder.OrderType.SELL) {
+        boolean requiresQuantity = order.getType() == IOrder.OrderType.SELL || !isInfinite;
+        if (requiresQuantity) {
             if (newQuantity <= 0 || newQuantity > com.nstut.economy.config.EconomyConfig.getInstance().getMaxOrderQuantity()) {
                 return false;
             }
