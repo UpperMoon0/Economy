@@ -1,46 +1,34 @@
 package com.nstut.economy.api;
 
 import java.time.Instant;
+import java.util.Map;
 import java.util.UUID;
 
-/**
- * Context information for a transaction.
- */
+/** Context information for a transaction. */
 public interface ITransactionContext {
-    
-    /**
-     * Gets the unique transaction ID.
-     * @return The transaction UUID
-     */
     UUID getTransactionId();
-    
-    /**
-     * Gets the timestamp when the transaction was created.
-     * @return The timestamp as Instant
-     */
     Instant getTimestamp();
-    
+
     /**
-     * Gets the type of transaction.
-     * @return The transaction type
+     * Legacy built-in classification. New integrations should use
+     * {@link #getCauseId()} so addon-defined causes do not require an enum change.
      */
+    @Deprecated
     TransactionType getType();
-    
-    /**
-     * Gets a description of the transaction purpose.
-     * @return The description string
-     */
+
     String getDescription();
-    
-    /**
-     * Gets the source of the transaction (e.g., player UUID, "SERVER", "MARKET").
-     * @return The source identifier
-     */
     String getSource();
-    
-    /**
-     * Enum representing different types of transactions.
-     */
+
+    /** Stable, namespaced transaction cause, e.g. economy:trade or myaddon:salary. */
+    default EconomyId getCauseId() {
+        return TransactionCauses.fromLegacy(getType());
+    }
+
+    /** Immutable structured metadata supplied by the transaction initiator. */
+    default Map<String, String> getMetadata() {
+        return Map.of();
+    }
+
     enum TransactionType {
         CREDIT,
         DEBIT,
@@ -49,6 +37,8 @@ public interface ITransactionContext {
         TAX,
         ADMIN_GIVE,
         ADMIN_TAKE,
-        STARTING_BALANCE
+        STARTING_BALANCE,
+        /** Legacy projection for a namespaced cause not owned by Economy. */
+        CUSTOM
     }
 }
