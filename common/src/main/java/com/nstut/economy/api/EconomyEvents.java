@@ -8,35 +8,24 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
 
 /**
- * Loader-neutral domain event bus. Economy publishes domain events here from
- * the same code paths used by commands, UI/network handlers, and addon calls.
- * Listeners execute synchronously on the thread performing the economy action.
+ * Loader-neutral synchronous domain event bus. Pre-events run before mutation;
+ * post-events are emitted only after the corresponding operation commits.
  */
 public final class EconomyEvents {
     private static final ConcurrentHashMap<Class<?>, CopyOnWriteArrayList<Consumer<?>>> LISTENERS =
             new ConcurrentHashMap<>();
 
     private EconomyEvents() { }
-
     public interface Event { }
 
     public abstract static class CancellableEvent implements Event {
         private boolean cancelled;
-
-        public final boolean isCancelled() {
-            return cancelled;
-        }
-
-        public final void cancel() {
-            this.cancelled = true;
-        }
+        public final boolean isCancelled() { return cancelled; }
+        public final void cancel() { cancelled = true; }
     }
 
     @FunctionalInterface
-    public interface Subscription extends AutoCloseable {
-        @Override
-        void close();
-    }
+    public interface Subscription extends AutoCloseable { @Override void close(); }
 
     public static <E extends Event> Subscription listen(Class<E> eventType, Consumer<E> listener) {
         Objects.requireNonNull(eventType, "eventType");
@@ -46,13 +35,10 @@ public final class EconomyEvents {
         listeners.add(listener);
         return () -> {
             listeners.remove(listener);
-            if (listeners.isEmpty()) {
-                LISTENERS.remove(eventType, listeners);
-            }
+            if (listeners.isEmpty()) LISTENERS.remove(eventType, listeners);
         };
     }
 
-    /** Publishes synchronously and returns the same event for cancellation checks. */
     @SuppressWarnings("unchecked")
     public static <E extends Event> E post(E event) {
         Objects.requireNonNull(event, "event");
@@ -62,25 +48,17 @@ public final class EconomyEvents {
         return event;
     }
 
-    /** Internal/test lifecycle cleanup; addon subscriptions should normally close themselves. */
-    public static void clearListeners() {
-        LISTENERS.clear();
-    }
+    public static void clearListeners() { LISTENERS.clear(); }
 
     public static final class BalanceChangePre extends CancellableEvent {
         private final UUID owner;
         private final BigDecimal previousBalance;
         private final BigDecimal delta;
         private final ITransactionContext context;
-
-        public BalanceChangePre(UUID owner, BigDecimal previousBalance, BigDecimal delta,
-                                ITransactionContext context) {
-            this.owner = Objects.requireNonNull(owner, "owner");
-            this.previousBalance = Objects.requireNonNull(previousBalance, "previousBalance");
-            this.delta = Objects.requireNonNull(delta, "delta");
-            this.context = Objects.requireNonNull(context, "context");
+        public BalanceChangePre(UUID owner, BigDecimal previousBalance, BigDecimal delta, ITransactionContext context) {
+            this.owner = Objects.requireNonNull(owner); this.previousBalance = Objects.requireNonNull(previousBalance);
+            this.delta = Objects.requireNonNull(delta); this.context = Objects.requireNonNull(context);
         }
-
         public UUID owner() { return owner; }
         public BigDecimal previousBalance() { return previousBalance; }
         public BigDecimal delta() { return delta; }
@@ -89,29 +67,15 @@ public final class EconomyEvents {
     }
 
     public record BalanceChanged(UUID owner, BigDecimal previousBalance, BigDecimal balance,
-                                 BigDecimal delta, ITransactionContext context) implements Event {
-        public BalanceChanged {
-            Objects.requireNonNull(owner, "owner");
-            Objects.requireNonNull(previousBalance, "previousBalance");
-            Objects.requireNonNull(balance, "balance");
-            Objects.requireNonNull(delta, "delta");
-            Objects.requireNonNull(context, "context");
-        }
-    }
+                                 BigDecimal delta, ITransactionContext context) implements Event { }
 
     public static final class TransferPre extends CancellableEvent {
-        private final UUID source;
-        private final UUID target;
-        private final BigDecimal amount;
+        private final UUID source; private final UUID target; private final BigDecimal amount;
         private final ITransactionContext context;
-
         public TransferPre(UUID source, UUID target, BigDecimal amount, ITransactionContext context) {
-            this.source = Objects.requireNonNull(source, "source");
-            this.target = Objects.requireNonNull(target, "target");
-            this.amount = Objects.requireNonNull(amount, "amount");
-            this.context = Objects.requireNonNull(context, "context");
+            this.source = Objects.requireNonNull(source); this.target = Objects.requireNonNull(target);
+            this.amount = Objects.requireNonNull(amount); this.context = Objects.requireNonNull(context);
         }
-
         public UUID source() { return source; }
         public UUID target() { return target; }
         public BigDecimal amount() { return amount; }
@@ -119,12 +83,24 @@ public final class EconomyEvents {
     }
 
     public record TransferCompleted(UUID source, UUID target, BigDecimal amount,
-                                    ITransactionContext context) implements Event {
-        public TransferCompleted {
-            Objects.requireNonNull(source, "source");
-            Objects.requireNonNull(target, "target");
-            Objects.requireNonNull(amount, "amount");
-            Objects.requireNonNull(context, "context");
+                                    ITransactionContext context) implements Event { }
+
+    public static final class OrderCreatePre extends CancellableEvent {
+        private final UUID owner; private final ICommodity commodity; private final IOrder.OrderType type;
+        private final int quantity; private final BigDecimal pricePerUnit;
+        public OrderCreatePre(UUID owner, ICommodity commodity, IOrder.OrderType type, int quantity, BigDecimal pricePerUnit) {
+            this.owner = Objects.requireNonNull(owner); this.commodity = Objects.requireNonNull(commodity);
+            this.type = Objects.requireNonNull(type); this.quantity = quantity; this.pricePerUnit = Objects.requireNonNull(pricePerUnit);
         }
+        public UUID owner() { return owner; }
+        public ICommodity commodity() { return commodity; }
+        public IOrder.OrderType type() { return type; }
+        public int quantity() { return quantity; }
+        public BigDecimal pricePerUnit() { return pricePerUnit; }
     }
+
+    public record OrderCreated(IOrder order, int requestedQuantity, int filledQuantity) implements Event { }
+    public record OrderEdited(IOrder order) implements Event { }
+    public record OrderCancelled(UUID orderId, UUID owner) implements Event { }
+    public record TradeCompleted(TradeView trade) implements Event { }
 }
