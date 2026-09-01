@@ -1,5 +1,6 @@
 package com.nstut.economy.trading;
 
+import com.nstut.economy.api.EconomyId;
 import com.nstut.economy.api.ICommodity;
 import net.minecraft.core.NonNullList;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -12,7 +13,8 @@ import net.minecraft.world.item.ItemStack;
 import java.math.BigDecimal;
 
 public class ItemCommodity implements ICommodity {
-    private final Identifier id;
+    private final Identifier platformId;
+    private final EconomyId id;
     private final Item item;
     private final BigDecimal basePrice;
     private final boolean dynamicPricing;
@@ -20,7 +22,8 @@ public class ItemCommodity implements ICommodity {
 
     public ItemCommodity(Identifier id, Item item, BigDecimal basePrice,
                          boolean dynamicPricing, boolean matchNBT) {
-        this.id = id;
+        this.platformId = id;
+        this.id = EconomyId.parse(id.toString());
         this.item = item;
         this.basePrice = basePrice;
         this.dynamicPricing = dynamicPricing;
@@ -31,53 +34,20 @@ public class ItemCommodity implements ICommodity {
         this(id, item, basePrice, true, false);
     }
 
-    @Override
-    public Identifier getId() {
-        return id;
-    }
-
-    @Override
-    public CommodityType getType() {
-        return CommodityType.ITEM;
-    }
-
-    @Override
-    public Component getDisplayName() {
-        return new ItemStack(item).getHoverName();
-    }
-
-    @Override
-    public BigDecimal getBasePrice() {
-        return basePrice;
-    }
-
-    @Override
-    public boolean hasDynamicPricing() {
-        return dynamicPricing;
-    }
+    @Override public EconomyId getId() { return id; }
+    @Override public CommodityType getType() { return CommodityType.ITEM; }
+    @Override public Component getDisplayName() { return new ItemStack(item).getHoverName(); }
+    @Override public BigDecimal getBasePrice() { return basePrice; }
+    @Override public boolean hasDynamicPricing() { return dynamicPricing; }
 
     @Override
     public boolean canExtractFrom(IStorage storage, int amount) {
-        if (storage instanceof Container container) {
-            return countInContainer(container) >= amount;
-        }
-        return false;
+        return storage instanceof Container container && countInContainer(container) >= amount;
     }
 
-    @Override
-    public boolean canInsertInto(IStorage storage, int amount) {
-        return storage instanceof Container;
-    }
-
-    @Override
-    public boolean extractFrom(IStorage storage, int amount) {
-        return false;
-    }
-
-    @Override
-    public boolean insertInto(IStorage storage, int amount) {
-        return false;
-    }
+    @Override public boolean canInsertInto(IStorage storage, int amount) { return storage instanceof Container; }
+    @Override public boolean extractFrom(IStorage storage, int amount) { return false; }
+    @Override public boolean insertInto(IStorage storage, int amount) { return false; }
 
     public boolean extractFrom(Container container, int amount, NonNullList<ItemStack> destination) {
         if (countInContainer(container) < amount) return false;
@@ -123,31 +93,21 @@ public class ItemCommodity implements ICommodity {
         return count;
     }
 
-    public Item getItem() {
-        return item;
-    }
-
-    public boolean shouldMatchNBT() {
-        return matchNBT;
-    }
+    public Identifier getPlatformId() { return platformId; }
+    public Item getItem() { return item; }
+    public boolean shouldMatchNBT() { return matchNBT; }
 
     public static ItemCommodity fromItemStack(ItemStack stack, BigDecimal basePrice) {
         Identifier id = BuiltInRegistries.ITEM.getKey(stack.getItem());
         if (id == null) {
-            id = com.nstut.economy.compat.Compat.rl("minecraft", stack.getItem().toString().toLowerCase().replace(':' ,'_'));
+            id = com.nstut.economy.compat.Compat.rl("minecraft", stack.getItem().toString().toLowerCase().replace(':', '_'));
         }
         return new ItemCommodity(id, stack.getItem(), basePrice);
     }
 
-    @Override
-    public boolean equals(Object o) {
-        if (this == o) return true;
-        if (!(o instanceof ItemCommodity that)) return false;
-        return id != null && id.equals(that.id);
+    @Override public boolean equals(Object o) {
+        return this == o || (o instanceof ItemCommodity that && id.equals(that.id));
     }
 
-    @Override
-    public int hashCode() {
-        return 31 * ItemCommodity.class.hashCode() + (id != null ? id.hashCode() : 0);
-    }
+    @Override public int hashCode() { return 31 * ItemCommodity.class.hashCode() + id.hashCode(); }
 }
