@@ -26,4 +26,12 @@ public interface IOrderManager {
 
     boolean cancelOrder(UUID orderId, UUID requester);
     boolean editOrder(UUID orderId, UUID requester, int newQuantity, BigDecimal newPrice, boolean infinite);
+
+    /**
+     * Recovery hook used by the storage registry when a provider has already created escrow
+     * that cannot be safely released. Implementations must persist the reservation in a
+     * non-active/quarantined form so a provider bug cannot orphan the only durable token.
+     */
+    void preserveProviderReservation(UUID escrowOwner, ICommodity commodity, StorageReservation reservation,
+                                     BigDecimal referencePrice, String reason);
 }
