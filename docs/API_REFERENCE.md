@@ -38,6 +38,17 @@ EconomyId parsed = EconomyId.parse("minecraft:iron_ingot");
 
 Use your own addon namespace for extension IDs.
 
+### `CommodityKey`
+
+Full stable market identity: commodity type plus commodity ID.
+
+- `EconomyId commodityTypeId()`
+- `EconomyId commodityId()`
+- `static CommodityKey of(ICommodity commodity)`
+- `boolean matches(ICommodity commodity)`
+
+Use `CommodityKey` for analytics and persistent keys where two commodity types could expose the same commodity ID.
+
 ## Accounts
 
 ### `IAccountManager`
@@ -137,7 +148,7 @@ Account events:
 
 Market event payloads published through `EconomyEvents`.
 
-- `OrderCreatePre` — cancellable order proposal.
+- `OrderCreatePre` — cancellable order proposal, before Economy creates new provider escrow.
 - `OrderCreated` — resulting order plus requested/filled quantity.
 - `OrderEdited`
 - `OrderCancelled`
@@ -151,7 +162,7 @@ Event delivery is synchronous; listeners should return quickly.
 
 Tradeable product contract.
 
-- `EconomyId getId()` — stable commodity identity.
+- `EconomyId getId()` — stable product ID inside its commodity type.
 - `CommodityType getType()` — broad legacy category.
 - `EconomyId getTypeId()` — namespaced handler/codec type.
 - `Component getDisplayName()`
@@ -215,19 +226,19 @@ Supported order-book service.
 
 Creation:
 
-- `createBuyOrder(UUID owner, ICommodity commodity, int quantity, BigDecimal pricePerUnit)`
-- `createSellOrder(UUID owner, ICommodity commodity, int quantity, BigDecimal pricePerUnit)`
-- `createServerBuyOrder(ICommodity commodity, int quantity, BigDecimal pricePerUnit)`
-- `createServerSellOrder(ICommodity commodity, int quantity, BigDecimal pricePerUnit)`
+- `OrderCreateResult createBuyOrder(UUID owner, ICommodity commodity, int quantity, BigDecimal pricePerUnit)`
+- `OrderCreateResult createSellOrder(UUID owner, ICommodity commodity, int quantity, BigDecimal pricePerUnit)`
+- `IOrder createServerBuyOrder(ICommodity commodity, int quantity, BigDecimal pricePerUnit)`
+- `IOrder createServerSellOrder(ICommodity commodity, int quantity, BigDecimal pricePerUnit)`
 
 Queries:
 
-- `Optional<IOrder> getOrder(UUID orderId)`
-- `List<IOrder> getAllOrders()`
-- `List<IOrder> getOrders(ICommodity commodity)`
-- `List<IOrder> getPlayerOrders(UUID player)`
-- `List<IOrder> getBuyOrders(ICommodity commodity)`
-- `List<IOrder> getSellOrders(ICommodity commodity)`
+- `Optional<? extends IOrder> getOrder(UUID orderId)`
+- `List<? extends IOrder> getAllOrders()`
+- `List<? extends IOrder> getOrders(ICommodity commodity)`
+- `List<? extends IOrder> getPlayerOrders(UUID player)`
+- `List<? extends IOrder> getBuyOrders(ICommodity commodity)`
+- `List<? extends IOrder> getSellOrders(ICommodity commodity)`
 
 Mutation:
 
@@ -276,13 +287,13 @@ Read/operation contract for one order.
 
 ### `IMarketDataService`
 
-Read-only analytics surface.
+Read-only analytics surface. Commodity-specific queries require the full `CommodityKey` identity.
 
 - `List<TradeView> recentTrades(int limit)`
-- `List<TradeView> recentTrades(EconomyId commodityId, int limit)`
-- `Optional<BigDecimal> lastTradePrice(EconomyId commodityId)`
-- `long tradedVolume(EconomyId commodityId)`
-- `int activeOrderCount(EconomyId commodityId)`
+- `List<TradeView> recentTrades(CommodityKey commodity, int limit)`
+- `Optional<BigDecimal> lastTradePrice(CommodityKey commodity)`
+- `long tradedVolume(CommodityKey commodity)`
+- `int activeOrderCount(CommodityKey commodity)`
 
 ### `TradeView`
 
@@ -315,15 +326,17 @@ Side-effect-free simulation:
 
 Reservation lifecycle:
 
-- `Optional<StorageReservation> reserve(...)`
-- `int deliverReserved(ServerLevel level, StorageReservation reservation, UUID receiver, int amount)`
+- `Optional<StorageReservation> reserve(ServerLevel level, UUID owner, ICommodity commodity, int amount)`
+- `StorageDeliveryResult deliverReserved(ServerLevel level, StorageReservation reservation, UUID receiver, int amount)`
 - `boolean release(ServerLevel level, StorageReservation reservation)`
+
+`reserve` is atomic: empty means no mutation. `deliverReserved` is one provider-owned transition and must return the exact remaining reservation after the actual delivery. `release` is all-or-nothing: `false` means the entire input reservation must still be treated as escrowed.
 
 Diagnostics:
 
 - `String describe(ServerLevel level, UUID owner)`
 
-See [Extending Economy](EXTENDING_ECONOMY.md) for the atomicity and losslessness requirements.
+See [Extending Economy](EXTENDING_ECONOMY.md) for the atomicity, exact-state, and losslessness requirements.
 
 ### `StorageReservation`
 
@@ -332,10 +345,30 @@ Durable opaque reservation persisted by Economy.
 - `EconomyId providerId()`
 - `EconomyId commodityId()`
 - `int amount()` — positive.
-- `String token()` — provider-owned durable lookup token.
-- `Map<String, String> metadata()` — immutable optional data.
+- `String token()` — provider-owned durable token.
+- `Map<String, String> metadata()` — small immutable optional metadata.
+- `CompoundTag providerState()` — defensive copy of structured provider-owned durable state.
 
-The provider must be able to resolve the reservation after save/reload.
+Use `providerState` for exact inventories/components or potentially large state. Do not pack arbitrary escrow into one Base64/SNBT metadata string.
+
+### `StorageDeliveryResult`
+
+Atomic result of a provider delivery.
+
+- `int deliveredAmount()`
+- `Optional<StorageReservation> remainingReservation()`
+- `static unchanged(StorageReservation)`
+- `static complete(int deliveredAmount)`
+- `static partial(int deliveredAmount, StorageReservation remainingReservation)`
+- `validateAgainst(StorageReservation before, int requestedAmount)` — validates amount and provider/commodity identity invariants.
+
+Economy expects:
+
+```text
+deliveredAmount + remainingReservation.amount = previousReservation.amount
+```
+
+The remainder must describe the exact state that still belongs to escrow, not a reconstruction from a delivered count.
 
 ### `StorageProviderRegistry`
 
@@ -348,7 +381,7 @@ Registry/dispatcher reached through `EconomyApi.storage()`.
 - `int available(...)`
 - `int receivable(...)`
 - `Optional<StorageReservation> reserve(...)`
-- `int deliver(...)`
+- `StorageDeliveryResult deliver(...)`
 - `boolean release(...)`
 
 Registration changes emit `StorageProviderRegistered` and `StorageProviderUnregistered` through `EconomyEvents`.
@@ -360,9 +393,13 @@ Registration changes emit `StorageProviderRegistered` and `StorageProviderUnregi
 - Do not cache runtime service instances across server restarts.
 - Register commodity handlers and storage providers once during mod initialization.
 - Use namespaced `EconomyId` values owned by your addon.
+- Use `CommodityKey` for commodity-specific market analytics.
 - Prefer `getCauseId()` over deprecated transaction enums.
 - Keep event listeners fast and close short-lived subscriptions.
 - Make storage simulation side-effect free.
-- Make reservations durable and delivery/release lossless.
+- Make reservation creation atomic.
+- Return exact provider-owned remainder state from every partial delivery.
+- Make failed release perform zero externally visible mutation.
+- Persist structured/large escrow in `providerState`, not one string.
 - Keep old commodity payload schema decoders when released worlds may still contain them.
 - Compile/run against the matching Minecraft and loader artifact.
