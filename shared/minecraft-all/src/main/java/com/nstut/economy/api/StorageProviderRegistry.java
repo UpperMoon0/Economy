@@ -69,10 +69,44 @@ public final class StorageProviderRegistry {
         if (amount <= 0) return Optional.empty();
         for (IStorageProvider provider : providers()) {
             if (!provider.supports(commodity) || provider.available(level, owner, commodity) < amount) continue;
-            Optional<StorageReservation> reservation = provider.reserve(level, owner, commodity, amount);
-            if (reservation.isPresent()) return reservation;
+            Optional<StorageReservation> candidate = provider.reserve(level, owner, commodity, amount);
+            if (candidate.isEmpty()) continue;
+
+            StorageReservation reservation = candidate.get();
+            String violation = reservationViolation(provider, commodity, amount, reservation);
+            if (violation != null) {
+                IllegalStateException invalid = new IllegalStateException(
+                        "Storage provider " + provider.id() + " returned invalid reservation: " + violation);
+                try {
+                    if (!provider.release(level, reservation)) {
+                        invalid.addSuppressed(new IllegalStateException(
+                                "Provider could not release its invalid reservation " + reservation.token()));
+                    }
+                } catch (RuntimeException releaseFailure) {
+                    invalid.addSuppressed(releaseFailure);
+                }
+                throw invalid;
+            }
+            return candidate;
         }
         return Optional.empty();
+    }
+
+    private static String reservationViolation(IStorageProvider provider, ICommodity commodity, int requested,
+                                               StorageReservation reservation) {
+        if (!provider.id().equals(reservation.providerId())) {
+            return "providerId=" + reservation.providerId() + " expected=" + provider.id();
+        }
+        if (!commodity.getId().equals(reservation.commodityId())) {
+            return "commodityId=" + reservation.commodityId() + " expected=" + commodity.getId();
+        }
+        if (reservation.amount() != requested) {
+            return "amount=" + reservation.amount() + " expected=" + requested;
+        }
+        if (reservation.token().isBlank()) {
+            return "blank reservation token";
+        }
+        return null;
     }
 
     public StorageDeliveryResult deliver(ServerLevel level, StorageReservation reservation, UUID receiver, int amount) {
