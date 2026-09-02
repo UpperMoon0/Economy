@@ -166,7 +166,8 @@ jobs:
 
   verify-and-build:
     needs: prepare-openui
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -210,10 +211,34 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x gradlew
 
-      # Gradle's build lifecycle already includes check -> test. Running test
-      # first was an extra Gradle configuration/startup pass with no coverage gain.
+      # Gradle's build lifecycle already includes check -> test. One invocation
+      # preserves the same JVM coverage without a second configuration/startup.
       - name: Verify and build ${{ matrix.target }}
         run: ./gradlew :${{ matrix.target }}:build --build-cache
+
+      - name: Install virtual display
+        run: sudo apt-get update -o Acquire::Retries=3 || true; sudo apt-get install -y --no-install-recommends xvfb || true
+
+      # Shared real-world block/BE behavior needs one canonical server runtime,
+      # not five duplicate server boots. Loader/version-specific behavior stays
+      # covered by JVM tests plus the real join below on every target.
+      - name: Run real-world Economy GameTests
+        if: matrix.target == 'forge-1.20.1'
+        run: ./gradlew :forge-1.20.1:runGameTestServer --no-daemon --console=plain --build-cache
+
+      - name: Run real client/server join ${{ matrix.target }}
+        run: python3 tools/live_join_test.py --target "${{ matrix.target }}"
+
+      - name: Upload integration logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-logs-${{ matrix.target }}
+          path: |
+            ${{ matrix.target }}/run/gametest/logs
+            ${{ matrix.target }}/run/live-join/client/logs
+            ${{ matrix.target }}/run/live-join/server/logs
+          if-no-files-found: ignore
 
       - name: Upload release artifact
         uses: actions/upload-artifact@v4
@@ -226,7 +251,7 @@ jobs:
           if-no-files-found: error
 
   release:
-    needs: [release-gate, test-shared, verify-and-build, live-client]
+    needs: [release-gate, test-shared, verify-and-build]
     if: needs.release-gate.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -357,8 +382,3 @@ jobs:
               exit 1
             fi
           done
-
-  live-client:
-    name: Live client join compatibility
-    needs: prepare-openui
-    uses: ./.github/workflows/live-join-test.yml
