@@ -1,0 +1,42 @@
+name: Lily PR22 review fix retry
+on:
+  push:
+    branches: [feat/addon-api-platform]
+    paths: [.github/workflows/lily-pr22-fix2.yml]
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/addon-api-platform
+          fetch-depth: 0
+      - name: Apply existing Lily patch
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          import textwrap
+          source = Path('.github/workflows/lily-pr22-fix.yml').read_text()
+          script = source.split("python3 <<'PY'\n", 1)[1].split("\n          PY", 1)[0]
+          exec(textwrap.dedent(script), {})
+          for path in [
+              'common-1.21.1/src/main/java/com/nstut/economy/compat/Compat.java',
+              'neoforge-26.1.2/src/main/java/com/nstut/economy/compat/Compat.java',
+          ]:
+              p = Path(path)
+              p.write_text(p.read_text().rstrip() + '\n')
+          Path('.github/workflows/lily-pr22-fix2.yml').unlink()
+          PY
+          git diff --check
+          git status --short
+      - name: Commit fixes
+        shell: bash
+        run: |
+          git config user.name Lily
+          git config user.email lily@local.invalid
+          git add -A
+          git commit -m "fix: honor addon API review contracts"
+          git push origin HEAD:feat/addon-api-platform
