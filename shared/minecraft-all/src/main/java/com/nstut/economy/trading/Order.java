@@ -575,7 +575,25 @@ public class Order implements IOrder {
     public NonNullList<ItemStack> getReservedItems() { return reservedItems; }
     public List<EconomyFluidStack> getReservedFluids() { return reservedFluids; }
     public boolean canCancel() { return !cancelled && (quantity > 0 || infinite); }
-    @Override public boolean cancel() { if (!canCancel()) return false; cancelled = true; if (!infinite) quantity = 0; return true; }
+
+    @Override
+    public boolean cancel() {
+        if (!canCancel() || !EconomyApi.isReady()) return false;
+        try {
+            return EconomyApi.orders().cancelOrder(orderId, owner);
+        } catch (RuntimeException unavailable) {
+            Economy.LOGGER.error("Could not route legacy cancel for order {} through the active OrderManager", orderId, unavailable);
+            return false;
+        }
+    }
+
+    boolean cancelInternal() {
+        if (!canCancel()) return false;
+        cancelled = true;
+        if (!infinite) quantity = 0;
+        return true;
+    }
+
     public void reduceQuantity(int amount) { if (!infinite) quantity = Math.max(0, quantity - amount); }
 
     private static NonNullList<ItemStack> generateItemStacks(Item item, int amount) {
