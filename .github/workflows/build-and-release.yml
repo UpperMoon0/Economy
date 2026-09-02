@@ -162,7 +162,7 @@ jobs:
           cache: 'gradle'
       - run: chmod +x gradlew
       - name: Run shared unit tests
-        run: ./gradlew :common:test :common-1.20.1:test :common-1.21.1:test
+        run: ./gradlew :common:test :common-1.20.1:test :common-1.21.1:test --build-cache
 
   verify-and-build:
     needs: prepare-openui
@@ -173,20 +173,15 @@ jobs:
         include:
           - target: fabric-1.20.1
             java: 21
-            build: true
           - target: forge-1.20.1
             java: 21
-            build: true
           - target: fabric-1.21.1
             java: 21
-            build: true
           - target: neoforge-1.21.1
             java: 21
-            build: true
           # Gradle runs on Java 21; ModDevGradle provisions the Java 25 toolchain.
           - target: neoforge-26.1.2
             java: 21
-            build: true
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -215,15 +210,12 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x gradlew
 
-      - name: Test ${{ matrix.target }}
-        run: ./gradlew :${{ matrix.target }}:test
-
-      - name: Build ${{ matrix.target }}
-        if: matrix.build
-        run: ./gradlew :${{ matrix.target }}:build
+      # Gradle's build lifecycle already includes check -> test. Running test
+      # first was an extra Gradle configuration/startup pass with no coverage gain.
+      - name: Verify and build ${{ matrix.target }}
+        run: ./gradlew :${{ matrix.target }}:build --build-cache
 
       - name: Upload release artifact
-        if: matrix.build
         uses: actions/upload-artifact@v4
         with:
           name: economy-${{ matrix.target }}
