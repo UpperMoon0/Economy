@@ -13,7 +13,7 @@ public interface IOrderManager {
     OrderCreateResult createBuyOrder(UUID owner, ICommodity commodity, int quantity, BigDecimal pricePerUnit);
     OrderCreateResult createSellOrder(UUID owner, ICommodity commodity, int quantity, BigDecimal pricePerUnit);
 
-    /** Server orders use the same concrete order object and return null only when domain validation rejects creation. */
+    /** Server orders use the same concrete order object and return null when domain validation rejects creation or OrderCreatePre cancels it. */
     IOrder createServerBuyOrder(ICommodity commodity, int quantity, BigDecimal pricePerUnit);
     IOrder createServerSellOrder(ICommodity commodity, int quantity, BigDecimal pricePerUnit);
 

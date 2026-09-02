@@ -8,6 +8,7 @@ import com.nstut.economy.api.IOrder;
 import com.nstut.economy.api.IOrderManager;
 import com.nstut.economy.api.MarketEvents;
 import com.nstut.economy.api.StorageReservation;
+import com.nstut.economy.api.internal.AtomicStorageRestore;
 import com.nstut.economy.blocks.VaultInventoryOps;
 import com.nstut.economy.data.EconomyOrderData;
 import com.nstut.Economy;
@@ -198,25 +199,10 @@ public class OrderManager implements IOrderManager {
         NonNullList<ItemStack> itemRemainder = copyStacks(reservedItems);
         List<EconomyFluidStack> fluidRemainder = copyFluidStacks(reservedFluids);
 
-        if (level != null && !itemRemainder.isEmpty()) {
-            NonNullList<ItemStack> simulated = com.nstut.economy.blocks.VaultManager
-                    .simulateInsertItemStacksToVaults(level, owner, itemRemainder);
-            if (simulated.isEmpty()) {
-                itemRemainder = com.nstut.economy.blocks.VaultManager
-                        .insertItemStacksToVaults(level, owner, itemRemainder);
-            }
-        }
-
-        if (level != null && !fluidRemainder.isEmpty()) {
-            int total = fluidRemainder.stream().mapToInt(EconomyFluidStack::getAmount).sum();
-            EconomyFluidStack merged = com.nstut.economy.blocks.TankManager.mergeFluids(fluidRemainder);
-            if (com.nstut.economy.blocks.TankManager.simulateInsertFluidToTanks(level, owner, merged) >= total) {
-                int restored = 0;
-                for (EconomyFluidStack stack : fluidRemainder) {
-                    restored += com.nstut.economy.blocks.TankManager.restoreFluidToTanks(level, owner, stack.copy());
-                }
-                fluidRemainder = dropFluidPrefix(fluidRemainder, restored);
-            }
+        if (level != null && (!itemRemainder.isEmpty() || !fluidRemainder.isEmpty())
+                && AtomicStorageRestore.restoreEscrow(level, owner, itemRemainder, fluidRemainder)) {
+            itemRemainder.clear();
+            fluidRemainder.clear();
         }
 
         int retainedItems = VaultInventoryOps.total(itemRemainder);
@@ -344,7 +330,9 @@ public class OrderManager implements IOrderManager {
                     if (available < needed) return false;
                     NonNullList<ItemStack> extracted = NonNullList.create();
                     if (!com.nstut.economy.blocks.VaultManager.extractItemFromVaults(level, requester, item, needed, extracted)) {
-                        if (!extracted.isEmpty()) com.nstut.economy.blocks.VaultManager.insertItemStacksToVaults(level, requester, extracted);
+                        if (!extracted.isEmpty() && !AtomicStorageRestore.restoreEscrow(level, requester, extracted, List.of())) {
+                            Economy.LOGGER.error("Could not atomically restore partial Vault extraction while editing order {}", orderId);
+                        }
                         return false;
                     }
                     order.getReservedItems().addAll(extracted);
@@ -363,7 +351,9 @@ public class OrderManager implements IOrderManager {
                     List<EconomyFluidStack> drained = new ArrayList<>();
                     int drainedAmount = com.nstut.economy.blocks.TankManager.extractFluidFromTanks(level, requester, fluid, needed, drained);
                     if (drainedAmount < needed) {
-                        for (EconomyFluidStack fs : drained) com.nstut.economy.blocks.TankManager.restoreFluidToTanks(level, requester, fs);
+                        if (!drained.isEmpty() && !AtomicStorageRestore.restoreEscrow(level, requester, List.of(), drained)) {
+                            Economy.LOGGER.error("Could not atomically restore partial Tank extraction while editing order {}", orderId);
+                        }
                         return false;
                     }
                     order.getReservedFluids().addAll(drained);
@@ -397,11 +387,8 @@ public class OrderManager implements IOrderManager {
             ItemStack part = stack.copy(); part.setCount(take); returnItems.add(part); countToReturn -= take;
         }
         if (countToReturn > 0 || returnItems.isEmpty()) return false;
-        NonNullList<ItemStack> leftover = com.nstut.economy.blocks.VaultManager.simulateInsertItemStacksToVaults(level, requester, returnItems);
-        if (!leftover.isEmpty()) return false;
-        leftover = com.nstut.economy.blocks.VaultManager.insertItemStacksToVaults(level, requester, returnItems);
-        if (!leftover.isEmpty()) {
-            Economy.LOGGER.error("Vault insertion diverged from simulation while editing order {}; escrow left untouched", orderIdSafe(order));
+        if (!AtomicStorageRestore.restoreEscrow(level, requester, returnItems, List.of())) {
+            Economy.LOGGER.error("Vault restoration failed atomically while editing order {}; escrow left untouched", orderIdSafe(order));
             return false;
         }
         order.consumeEscrow(qty);
@@ -418,12 +405,8 @@ public class OrderManager implements IOrderManager {
             EconomyFluidStack part = fs.copy(); part.setAmount(Math.min(toTake, fs.getAmount())); parts.add(part); toTake -= part.getAmount();
         }
         if (toTake > 0 || parts.isEmpty()) return false;
-        EconomyFluidStack merged = com.nstut.economy.blocks.TankManager.mergeFluids(parts);
-        if (com.nstut.economy.blocks.TankManager.simulateInsertFluidToTanks(level, requester, merged) < qty) return false;
-        int restored = 0;
-        for (EconomyFluidStack part : parts) restored += com.nstut.economy.blocks.TankManager.restoreFluidToTanks(level, requester, part);
-        if (restored < qty) {
-            Economy.LOGGER.error("Tank restoration diverged from simulation while editing order {}; escrow left untouched", orderIdSafe(order));
+        if (!AtomicStorageRestore.restoreEscrow(level, requester, List.of(), parts)) {
+            Economy.LOGGER.error("Tank restoration failed atomically while editing order {}; escrow left untouched", orderIdSafe(order));
             return false;
         }
         order.consumeEscrow(qty);
@@ -489,26 +472,10 @@ public class OrderManager implements IOrderManager {
                 Economy.LOGGER.warn("Refusing to cancel order {} without a world to restore escrow into", orderId);
                 return false;
             }
-            if (!order.getReservedItems().isEmpty()) {
-                NonNullList<ItemStack> copies = copyStacks(order.getReservedItems());
-                NonNullList<ItemStack> leftover = com.nstut.economy.blocks.VaultManager.simulateInsertItemStacksToVaults(level, requester, copies);
-                if (!leftover.isEmpty()) return false;
-                leftover = com.nstut.economy.blocks.VaultManager.insertItemStacksToVaults(level, requester, copies);
-                if (!leftover.isEmpty()) {
-                    Economy.LOGGER.error("Vault restoration diverged from simulation while cancelling order {}; order kept intact", orderId);
-                    return false;
-                }
-            }
-            if (!order.getReservedFluids().isEmpty()) {
-                int escrowed = order.getReservedFluids().stream().mapToInt(EconomyFluidStack::getAmount).sum();
-                EconomyFluidStack merged = com.nstut.economy.blocks.TankManager.mergeFluids(order.getReservedFluids());
-                if (com.nstut.economy.blocks.TankManager.simulateInsertFluidToTanks(level, requester, merged) < escrowed) return false;
-                int restored = 0;
-                for (EconomyFluidStack fs : new ArrayList<>(order.getReservedFluids())) restored += com.nstut.economy.blocks.TankManager.restoreFluidToTanks(level, requester, fs);
-                if (restored < escrowed) {
-                    Economy.LOGGER.error("Tank restoration diverged from simulation while cancelling order {}; order kept intact", orderId);
-                    return false;
-                }
+            if (!AtomicStorageRestore.restoreEscrow(level, requester,
+                    order.getReservedItems(), order.getReservedFluids())) {
+                Economy.LOGGER.error("Storage restoration failed atomically while cancelling order {}; order kept intact", orderId);
+                return false;
             }
         }
 

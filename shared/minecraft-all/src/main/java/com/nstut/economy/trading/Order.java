@@ -97,7 +97,8 @@ public class Order implements IOrder {
         this.externalReservation = externalReservation;
         this.addonMetadata = addonMetadata == null ? Map.of() : Map.copyOf(addonMetadata);
         this.persistedTypeId = persistedTypeId != null ? persistedTypeId : commodity.getTypeId();
-        this.persistedPayload = persistedPayload != null ? persistedPayload : encodeSafely(commodity);
+        CommodityPayload initialPayload = persistedPayload != null ? persistedPayload : encodeSafely(commodity);
+        this.persistedPayload = initialPayload != null ? initialPayload : CommodityPayload.empty(1);
     }
 
     public static Order fromSnapshot(EconomyOrderData.OrderSnapshot snap) {
@@ -116,7 +117,10 @@ public class Order implements IOrder {
 
     public EconomyOrderData.OrderSnapshot toSnapshot() {
         CommodityPayload payload = encodeSafely(commodity);
-        if (payload != null) persistedPayload = payload;
+        if (payload != null) {
+            persistedTypeId = commodity.getTypeId();
+            persistedPayload = payload;
+        }
         String legacyType = commodity.getType() == ICommodity.CommodityType.FLUID ? "FLUID"
                 : commodity.getType() == ICommodity.CommodityType.ITEM ? "ITEM" : commodity.getType().name();
         return new EconomyOrderData.OrderSnapshot(orderId, owner, commodity.getId().toString(), quantity, initialQuantity,
@@ -127,7 +131,7 @@ public class Order implements IOrder {
 
     private static CommodityPayload encodeSafely(ICommodity commodity) {
         try { return EconomyApi.commodityTypes().handlerFor(commodity).encode(commodity); }
-        catch (RuntimeException unavailable) { return CommodityPayload.empty(1); }
+        catch (RuntimeException unavailable) { return null; }
     }
 
     public boolean isServerOrder() { return serverOrder; }
