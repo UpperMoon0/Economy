@@ -82,8 +82,8 @@ public final class EconomyNeoForge {
     }
 
     private void onServerStopping(ServerStoppingEvent event) {
-        EconomyServerLifecycle.save();
-        Economy.LOGGER.info("Economy data saved");
+        EconomyServerLifecycle.stop();
+        Economy.LOGGER.info("Economy data saved and API runtime unbound");
     }
 
     private void onServerTick(ServerTickEvent.Post event) {

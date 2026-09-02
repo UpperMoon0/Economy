@@ -13,6 +13,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.event.level.BlockEvent;
 import net.minecraftforge.event.level.LevelEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.minecraftforge.event.server.ServerStoppingEvent;
 import net.minecraftforge.fml.common.Mod;
 
 import java.util.UUID;
@@ -62,6 +63,12 @@ public class EconomyEvents {
             if (!Level.OVERWORLD.equals(serverLevel.dimension())) return;
             EconomyServerLifecycle.tick(serverLevel.getServer());
         }
+    }
+
+    @SubscribeEvent
+    public static void onServerStopping(ServerStoppingEvent event) {
+        EconomyServerLifecycle.stop();
+        Economy.LOGGER.info("Economy data saved and API runtime unbound");
     }
 
     @SubscribeEvent

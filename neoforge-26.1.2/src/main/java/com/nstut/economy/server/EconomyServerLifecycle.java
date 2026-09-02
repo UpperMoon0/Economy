@@ -1,6 +1,8 @@
 package com.nstut.economy.server;
 
 import com.nstut.Economy;
+import com.nstut.economy.api.EconomyApi;
+import com.nstut.economy.api.internal.DefaultMarketDataService;
 import com.nstut.economy.blocks.TankManager;
 import com.nstut.economy.blocks.VaultManager;
 import com.nstut.economy.data.EconomyAccountData;
@@ -17,6 +19,7 @@ public final class EconomyServerLifecycle {
 
     /** Loads persistent state only after the overworld and its data storage exist. */
     public static void load(ServerLevel overworld) {
+        Economy.ensureApiRegistrations();
         EconomyAccountData accountData = EconomyAccountData.get(overworld);
         EconomyOrderData orderData = EconomyOrderData.get(overworld);
         EconomyTradeData tradeData = EconomyTradeData.get(overworld);
@@ -30,12 +33,22 @@ public final class EconomyServerLifecycle {
         TradeLedger.setTradeData(tradeData);
         VaultManager.setAccountData(accountData);
         TankManager.setAccountData(accountData);
+        EconomyApi.bindRuntime(Economy.getAccountManager(), orderManager,
+                new DefaultMarketDataService(orderManager), overworld);
         Economy.LOGGER.info("Economy data loaded for dimension {}", overworld.dimension().identifier());
     }
 
     public static void save() {
         Economy.getAccountManager().saveAll();
         Economy.getOrderManager().saveAll();
+    }
+
+    public static void stop() {
+        try {
+            save();
+        } finally {
+            EconomyApi.unbindRuntime();
+        }
     }
 
     public static void tick(MinecraftServer server) {

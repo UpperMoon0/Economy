@@ -256,9 +256,11 @@ public class Order implements IOrder {
                 TransactionContext.transfer("Purchase of " + commodity.getDisplayName().getString(), buyerId))) {
             return TransactionResult.failure("Payment failed");
         }
-        int delivered = provider.deliverReserved(level, externalReservation, serverBuyer ? OrderManager.SERVER_ID : buyerId, amount);
+        StorageReservation beforeDelivery = externalReservation;
+        int delivered = provider.deliverReserved(level, beforeDelivery, serverBuyer ? OrderManager.SERVER_ID : buyerId, amount);
+        if (delivered < 0 || delivered > amount) throw new IllegalStateException("Storage provider returned invalid delivery amount: " + delivered);
         if (delivered < amount) refund(sellerAccount, buyerAccount, buyerId, totalFor(amount - delivered), "Refund - partial provider delivery");
-        shrinkExternalReservation(delivered);
+        externalReservation = provider.remainingAfterDelivery(level, beforeDelivery, delivered).orElse(null);
         reduceAfterFill(delivered);
         return delivered <= 0 ? TransactionResult.failure("Nothing could be delivered")
                 : completeTrade(level, buyerId, owner, delivered, totalFor(delivered));
@@ -335,9 +337,11 @@ public class Order implements IOrder {
             provider.release(level, reservation); return TransactionResult.failure("Payment failed");
         }
         int delivered = provider.deliverReserved(level, reservation, serverOrder ? OrderManager.SERVER_ID : owner, amount);
+        if (delivered < 0 || delivered > amount) throw new IllegalStateException("Storage provider returned invalid delivery amount: " + delivered);
         if (delivered < amount) refund(sellerAccount, buyerAccount, sellerId, totalFor(amount - delivered), "Refund - partial provider delivery");
-        int remaining = reservation.amount() - delivered;
-        if (remaining > 0) provider.release(level, resizeReservation(reservation, remaining));
+        var remainingReservation = provider.remainingAfterDelivery(level, reservation, delivered);
+        if (remainingReservation.isPresent() && !provider.release(level, remainingReservation.get()))
+            Economy.LOGGER.error("Provider {} failed to release remainder for reservation {}", provider.id(), reservation.token());
         if (delivered <= 0) return TransactionResult.failure("Nothing could be delivered");
         reduceAfterFill(delivered);
         return completeTrade(level, owner, sellerId, delivered, totalFor(delivered));
@@ -362,15 +366,6 @@ public class Order implements IOrder {
         return Math.min(requested, account.getBalance().divide(pricePerUnit, 0, java.math.RoundingMode.DOWN).max(BigDecimal.ZERO).intValue());
     }
     private void reduceAfterFill(int delivered) { if (!infinite) quantity = Math.max(0, quantity - delivered); }
-
-    private void shrinkExternalReservation(int delivered) {
-        if (externalReservation == null || delivered <= 0) return;
-        int remaining = externalReservation.amount() - delivered;
-        externalReservation = remaining > 0 ? resizeReservation(externalReservation, remaining) : null;
-    }
-    private static StorageReservation resizeReservation(StorageReservation reservation, int amount) {
-        return new StorageReservation(reservation.providerId(), reservation.commodityId(), amount, reservation.token(), reservation.metadata());
-    }
 
     private int commitBuiltInDelivery(ServerLevel level, UUID receiver, NonNullList<ItemStack> items,
                                       List<EconomyFluidStack> fluids, int requested) {

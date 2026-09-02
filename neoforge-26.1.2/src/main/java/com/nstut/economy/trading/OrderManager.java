@@ -1,7 +1,12 @@
 package com.nstut.economy.trading;
 
+import com.nstut.economy.api.EconomyApi;
+import com.nstut.economy.api.EconomyEvents;
 import com.nstut.economy.api.ICommodity;
 import com.nstut.economy.api.IOrder;
+import com.nstut.economy.api.IOrderManager;
+import com.nstut.economy.api.MarketEvents;
+import com.nstut.economy.api.StorageReservation;
 import com.nstut.economy.blocks.VaultInventoryOps;
 import com.nstut.economy.data.EconomyOrderData;
 import com.nstut.Economy;
@@ -12,7 +17,7 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
-public class OrderManager {
+public class OrderManager implements IOrderManager {
 
     private final Map<UUID, Order> orders;
     private final Map<ICommodity, List<Order>> commodityIndex;
@@ -40,7 +45,7 @@ public class OrderManager {
                 if (order.isValid()) {
                     orders.put(order.getOrderId(), order);
                     commodityIndex.computeIfAbsent(order.getCommodity(), k -> new ArrayList<>()).add(order);
-                } else if (!snap.reservedItems.isEmpty() || !snap.reservedFluids.isEmpty()) {
+                } else if (snap.hasEscrow()) {
                     quarantineOrder(snap, "invalid persisted order (likely expired while offline)");
                 }
             } catch (Exception e) {
@@ -58,7 +63,7 @@ public class OrderManager {
      * can resolve them manually from the saved data.
      */
     private void quarantineOrder(EconomyOrderData.OrderSnapshot snap, String reason) {
-        if (snap == null || (snap.reservedItems.isEmpty() && snap.reservedFluids.isEmpty())) {
+        if (snap == null || !snap.hasEscrow()) {
             return;
         }
         if (quarantinedOrders.put(snap.orderId, snap) == null) {
@@ -105,7 +110,7 @@ public class OrderManager {
 
     public CreateOrderResult createSellOrder(UUID owner, ICommodity commodity, int quantity,
                                    java.math.BigDecimal pricePerUnit) {
-        return createSellOrder(owner, commodity, quantity, pricePerUnit, NonNullList.create(), null);
+        return createSellOrder(owner, commodity, quantity, pricePerUnit, NonNullList.create(), EconomyApi.serverLevel().orElse(null));
     }
 
     public CreateOrderResult createSellOrder(UUID owner, ICommodity commodity, int quantity,
@@ -124,11 +129,23 @@ public class OrderManager {
                                    List<com.nstut.economy.trading.EconomyFluidStack> reservedFluids,
                                    net.minecraft.server.level.ServerLevel level) {
         CreateOrderResult invalid = rejection(commodity, quantity, pricePerUnit);
-        if (invalid != null) {
-            return invalid;
+        if (invalid != null) return invalid;
+        MarketEvents.OrderCreatePre pre = EconomyEvents.post(new MarketEvents.OrderCreatePre(owner, commodity, IOrder.OrderType.SELL, quantity, pricePerUnit));
+        if (pre.isCancelled()) {
+            if (level != null) {
+                if (reservedItems != null && !reservedItems.isEmpty()) com.nstut.economy.blocks.VaultManager.insertItemStacksToVaults(level, owner, copyStacks(reservedItems));
+                if (reservedFluids != null) for (var fs : reservedFluids) if (fs != null && !fs.isEmpty()) com.nstut.economy.blocks.TankManager.restoreFluidToTanks(level, owner, fs.copy());
+            }
+            return CreateOrderResult.rejected(quantity, "ui.economy.error.order_cancelled", List.of());
+        }
+        StorageReservation external = null;
+        if (level != null && (reservedItems == null || reservedItems.isEmpty()) && (reservedFluids == null || reservedFluids.isEmpty())) {
+            external = EconomyApi.storage().reserve(level, owner, commodity, quantity).orElse(null);
+            if (external == null) return CreateOrderResult.rejected(quantity, "ui.economy.error.insufficient_storage", List.of());
         }
         Order order = new Order(owner, commodity, quantity, quantity, pricePerUnit, IOrder.OrderType.SELL, null,
                 copyStacks(reservedItems), copyFluidStacks(reservedFluids), false);
+        if (external != null) order.setExternalReservation(external);
 
         List<Order> matchingBuyOrders = getBuyOrders(commodity).stream()
                 .filter(b -> b.getPricePerUnit().compareTo(pricePerUnit) >= 0 && !b.getOwner().equals(owner))
@@ -153,8 +170,10 @@ public class OrderManager {
 
         if (order.getQuantity() > 0) {
             registerOrder(order);
+            EconomyEvents.post(new MarketEvents.OrderCreated(order, quantity, filled));
             return CreateOrderResult.posted(order, quantity, filled);
         } else if (filled > 0) {
+            EconomyEvents.post(new MarketEvents.OrderCreated(order, quantity, filled));
             return CreateOrderResult.filled(quantity, filled);
         } else if (backingData != null) {
             backingData.removeOrder(order.getOrderId());
@@ -177,7 +196,7 @@ public class OrderManager {
 
     public CreateOrderResult createBuyOrder(UUID owner, ICommodity commodity, int quantity,
                                  java.math.BigDecimal pricePerUnit) {
-        return createBuyOrder(owner, commodity, quantity, pricePerUnit, false, null);
+        return createBuyOrder(owner, commodity, quantity, pricePerUnit, false, EconomyApi.serverLevel().orElse(null));
     }
 
     public CreateOrderResult createBuyOrder(UUID owner, ICommodity commodity, int quantity,
@@ -188,9 +207,9 @@ public class OrderManager {
     public CreateOrderResult createBuyOrder(UUID owner, ICommodity commodity, int quantity,
                                  java.math.BigDecimal pricePerUnit, boolean isInfinite, net.minecraft.server.level.ServerLevel level) {
         CreateOrderResult invalid = rejection(commodity, quantity, pricePerUnit);
-        if (invalid != null) {
-            return invalid;
-        }
+        if (invalid != null) return invalid;
+        MarketEvents.OrderCreatePre pre = EconomyEvents.post(new MarketEvents.OrderCreatePre(owner, commodity, IOrder.OrderType.BUY, quantity, pricePerUnit));
+        if (pre.isCancelled()) return CreateOrderResult.rejected(quantity, "ui.economy.error.order_cancelled", List.of());
         Order order = new Order(owner, commodity, quantity, quantity, pricePerUnit, IOrder.OrderType.BUY, null, NonNullList.create(), isInfinite);
 
         List<Order> matchingSellOrders = getSellOrders(commodity).stream()
@@ -218,13 +237,20 @@ public class OrderManager {
 
         if (order.isValid()) {
             registerOrder(order);
+            EconomyEvents.post(new MarketEvents.OrderCreated(order, quantity, filled));
             return CreateOrderResult.posted(order, quantity, filled);
         } else if (filled > 0) {
+            EconomyEvents.post(new MarketEvents.OrderCreated(order, quantity, filled));
             return CreateOrderResult.filled(quantity, filled);
         } else if (backingData != null) {
             backingData.removeOrder(order.getOrderId());
         }
         return CreateOrderResult.rejected(quantity, "ui.economy.error.order_rejected", List.of());
+    }
+
+    @Override
+    public boolean editOrder(UUID orderId, UUID requester, int newQuantity, java.math.BigDecimal newPrice, boolean isInfinite) {
+        return editOrder(orderId, requester, newQuantity, newPrice, isInfinite, EconomyApi.serverLevel().orElse(null));
     }
 
     public boolean editOrder(UUID orderId, UUID requester, int newQuantity, java.math.BigDecimal newPrice, boolean isInfinite, net.minecraft.server.level.ServerLevel level) {
@@ -320,6 +346,7 @@ public class OrderManager {
         if (backingData != null) {
             backingData.putOrder(order.toSnapshot());
         }
+        EconomyEvents.post(new MarketEvents.OrderEdited(order));
 
         matchAllPendingOrders(level);
         return true;
@@ -408,10 +435,12 @@ public class OrderManager {
                                        java.math.BigDecimal pricePerUnit) {
         if (!com.nstut.economy.util.OrderInputValidator.isValidNewOrder(
                 quantity, pricePerUnit, commodity instanceof FluidCommodity)) return null;
+        if (EconomyEvents.post(new MarketEvents.OrderCreatePre(SERVER_ID, commodity, IOrder.OrderType.BUY, quantity, pricePerUnit)).isCancelled()) return null;
         Order order = new Order(SERVER_ID, commodity, quantity, pricePerUnit,
                                 IOrder.OrderType.BUY, null);
         order.setServerOrder(true);
         registerOrder(order);
+        EconomyEvents.post(new MarketEvents.OrderCreated(order, quantity, 0));
         return order;
     }
 
@@ -419,10 +448,12 @@ public class OrderManager {
                                         java.math.BigDecimal pricePerUnit) {
         if (!com.nstut.economy.util.OrderInputValidator.isValidNewOrder(
                 quantity, pricePerUnit, commodity instanceof FluidCommodity)) return null;
+        if (EconomyEvents.post(new MarketEvents.OrderCreatePre(SERVER_ID, commodity, IOrder.OrderType.SELL, quantity, pricePerUnit)).isCancelled()) return null;
         Order order = new Order(SERVER_ID, commodity, quantity, pricePerUnit,
                                 IOrder.OrderType.SELL, null);
         order.setServerOrder(true);
         registerOrder(order);
+        EconomyEvents.post(new MarketEvents.OrderCreated(order, quantity, 0));
         return order;
     }
 
@@ -461,6 +492,13 @@ public class OrderManager {
         // restoring goods for a failed cancel would duplicate them.
         if (!order.canCancel()) {
             return false;
+        }
+
+        if (order.getType() == IOrder.OrderType.SELL && !order.isServerOrder() && order.getExternalReservation() != null) {
+            if (level == null) return false;
+            var provider = EconomyApi.storage().provider(order.getExternalReservation().providerId()).orElse(null);
+            if (provider == null || !provider.release(level, order.getExternalReservation())) return false;
+            order.setExternalReservation(null);
         }
 
         if (order.getType() == IOrder.OrderType.SELL && !order.isServerOrder()
@@ -506,6 +544,7 @@ public class OrderManager {
 
         if (order.cancel()) {
             removeOrder(order);
+            EconomyEvents.post(new MarketEvents.OrderCancelled(orderId, requester));
             return true;
         }
         Economy.LOGGER.error("Order {} passed cancellability check but cancel() failed; keeping order intact", orderId);
@@ -586,7 +625,7 @@ public class OrderManager {
             .filter(order -> !order.isValid())
             .collect(Collectors.toList());
         for (Order order : toRemove) {
-            boolean holdsEscrow = !order.getReservedItems().isEmpty() || !order.getReservedFluids().isEmpty();
+            boolean holdsEscrow = !order.getReservedItems().isEmpty() || !order.getReservedFluids().isEmpty() || order.getExternalReservation() != null;
             removeOrder(order);
             if (holdsEscrow) {
                 quarantineOrder(order.toSnapshot(), "invalid order still held escrow");
