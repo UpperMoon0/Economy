@@ -1,6 +1,6 @@
 # Economy API reference
 
-This is a practical catalog of the supported addon-facing API. The canonical signatures remain the Java sources for the selected Economy version. Unless documented otherwise, only `com.nstut.economy.api` is covered by the compatibility policy.
+This is a practical catalog of the supported addon-facing API. The canonical signatures remain the Java sources for the selected Economy version. Unless documented otherwise, only the top-level `com.nstut.economy.api` package is covered by the compatibility policy. The `com.nstut.economy.api.internal` subpackage is implementation detail and is not part of the supported addon surface.
 
 Read [Getting Started](GETTING_STARTED.md) for integration setup and [Extending Economy](EXTENDING_ECONOMY.md) for extension contracts and persistence rules.
 
@@ -34,9 +34,10 @@ EconomyId parsed = EconomyId.parse("minecraft:iron_ingot");
 - `of(namespace, path)` — constructs a validated ID.
 - `parse(value)` — parses `namespace:path`; values without a namespace default to `minecraft`.
 - `namespace()` / `path()` — record accessors.
+- `compareTo(EconomyId)` — namespace-first, then path lexical ordering.
 - `toString()` — canonical `namespace:path` representation.
 
-Use your own addon namespace for extension IDs.
+Namespaces accept `[a-z0-9_.-]+`; paths accept `[a-z0-9/._-]+`. Use your own addon namespace for extension IDs.
 
 ### `CommodityKey`
 
@@ -116,7 +117,19 @@ Also provides `fromLegacy(TransactionType)` and `toLegacy(EconomyId)` for compat
 
 ### `ITransactionRecord`
 
-Immutable/read-only transaction-history contract. Use account history returned by `IBankAccount#getRecentTransactions` rather than depending on concrete transaction record implementations.
+Read-only view of a completed balance transaction.
+
+- `UUID getTransactionId()`
+- `Instant getTimestamp()`
+- `ITransactionContext.TransactionType getType()` — deprecated legacy classification.
+- `EconomyId getCauseId()` — preferred namespaced cause.
+- `Map<String, String> getMetadata()` — immutable transaction metadata.
+- `BigDecimal getAmount()`
+- `BigDecimal getResultingBalance()`
+- `UUID getCounterparty()` — counterparty when the transaction has one; implementations may use `null` when it does not.
+- `String getDescription()`
+
+Use records returned by `IBankAccount#getRecentTransactions`; do not depend on concrete transaction record implementations.
 
 ## Events
 
@@ -135,24 +148,29 @@ EconomyEvents.Subscription sub = EconomyEvents.listen(
 - `post(E)` — publishes synchronously; primarily used by Economy and public extension registries.
 - `Subscription.close()` — unregister listener.
 
-Addon code should not call `clearListeners()` during normal operation because it clears listeners globally.
+Listeners are matched by the event's exact runtime class; registering for a base event interface does not subscribe to every subtype. Addon code should not call `clearListeners()` during normal operation because it clears listeners globally.
 
 Account events:
 
-- `BalanceChangePre` — cancellable; owner, previous balance, delta, resulting balance, context.
-- `BalanceChanged` — committed balance change.
-- `TransferPre` — cancellable; source, target, amount, context.
-- `TransferCompleted` — committed transfer.
+- `BalanceChangePre` — cancellable; `owner()`, `previousBalance()`, `delta()`, `resultingBalance()`, `context()`.
+- `BalanceChanged` — committed `owner`, `previousBalance`, `balance`, `delta`, and `context`.
+- `TransferPre` — cancellable; `source()`, `target()`, `amount()`, `context()`.
+- `TransferCompleted` — committed `source`, `target`, `amount`, and `context`.
 
 ### `MarketEvents`
 
 Market event payloads published through `EconomyEvents`.
 
-- `OrderCreatePre` — cancellable order proposal, before Economy creates new provider escrow.
-- `OrderCreated` — resulting order plus requested/filled quantity.
-- `OrderEdited`
-- `OrderCancelled`
-- `TradeCompleted`
+- `OrderCreatePre` — cancellable proposal with `owner()`, `commodity()`, `type()`, `quantity()`, and `pricePerUnit()`; posted before Economy creates new provider escrow.
+- `OrderCreated` — `order`, `requestedQuantity`, `filledQuantity`.
+- `OrderEdited` — resulting `order`.
+- `OrderCancelled` — `orderId`, `owner`.
+- `TradeCompleted` — immutable `TradeView trade`.
+
+Storage-provider registry changes are also events:
+
+- `StorageProviderRegistry.StorageProviderRegistered` — `providerId`.
+- `StorageProviderRegistry.StorageProviderUnregistered` — `providerId`.
 
 Event delivery is synchronous; listeners should return quickly.
 
@@ -177,7 +195,7 @@ Built-in type IDs:
 
 `CommodityType` contains `ITEM`, `FLUID`, `ENERGY`, and `CUSTOM`.
 
-The direct `IStorage` extraction/insertion methods are legacy compatibility hooks. New storage integrations should use `IStorageProvider`.
+The direct nested `ICommodity.IStorage` marker and the `canExtractFrom`, `canInsertInto`, `extractFrom`, and `insertInto` methods are legacy compatibility hooks. New storage integrations should use `IStorageProvider`.
 
 ### `ICommodityTypeHandler`
 
@@ -216,7 +234,7 @@ Registry reached through `EconomyApi.commodityTypes()`.
 - `boolean fluidLike(ICommodity commodity)`
 - `List<ICommodityTypeHandler> handlers()`
 
-Registration is namespaced and duplicate IDs are rejected.
+Registration is namespaced and duplicate IDs owned by different handler instances are rejected. `handlers()` is returned in stable ID order.
 
 ## Orders
 
@@ -230,6 +248,8 @@ Creation:
 - `OrderCreateResult createSellOrder(UUID owner, ICommodity commodity, int quantity, BigDecimal pricePerUnit)`
 - `IOrder createServerBuyOrder(ICommodity commodity, int quantity, BigDecimal pricePerUnit)`
 - `IOrder createServerSellOrder(ICommodity commodity, int quantity, BigDecimal pricePerUnit)`
+
+Player order creation always returns an `OrderCreateResult`. Server-order creation uses the compatibility return shape and may return `null` when domain validation rejects creation, so addon callers must check the result before dereferencing it.
 
 Queries:
 
@@ -249,7 +269,7 @@ Use the manager for mutation rather than concrete order implementations.
 
 ### `OrderCreateResult`
 
-Stable result of submitting an order.
+Stable result of submitting a player order.
 
 Fields:
 
@@ -257,13 +277,15 @@ Fields:
 - `IOrder remainingOrder()` — nullable remaining book order.
 - `int requestedQuantity()`
 - `int filledQuantity()`
-- `String errorKey()`
-- `List<String> errorArgs()`
+- `String errorKey()` — may be `null` for accepted results.
+- `List<String> errorArgs()` — immutable; empty when no error arguments exist.
 
 Helpers:
 
 - `Optional<IOrder> order()`
 - `boolean accepted()`
+
+A fully filled accepted order has no `remainingOrder()` even though `accepted()` is true.
 
 ### `IOrder`
 
@@ -334,7 +356,7 @@ Reservation lifecycle:
 
 Diagnostics:
 
-- `String describe(ServerLevel level, UUID owner)`
+- `String describe(ServerLevel level, UUID owner)` — defaults to the provider ID string.
 
 See [Extending Economy](EXTENDING_ECONOMY.md) for the atomicity, exact-state, and losslessness requirements.
 
@@ -360,7 +382,7 @@ Atomic result of a provider delivery.
 - `static unchanged(StorageReservation)`
 - `static complete(int deliveredAmount)`
 - `static partial(int deliveredAmount, StorageReservation remainingReservation)`
-- `validateAgainst(StorageReservation before, int requestedAmount)` — validates amount and provider/commodity identity invariants.
+- `validateAgainst(StorageReservation before, int requestedAmount)` — returns the same result after validating request bounds, delivered amount, total accounting, provider identity, and commodity identity; invalid provider results throw instead of being silently accepted.
 
 Economy expects:
 
@@ -384,11 +406,18 @@ Registry/dispatcher reached through `EconomyApi.storage()`.
 - `StorageDeliveryResult deliver(...)`
 - `boolean release(...)`
 
+Dispatcher semantics are intentionally asymmetric:
+
+- `available(...)` returns the largest amount offered by any single supporting provider because one reservation is never split across providers.
+- `reserve(...)` walks providers in priority order and succeeds only when one provider can atomically reserve the full requested amount.
+- `receivable(...)` may aggregate receiving capacity across supporting providers, capped at the requested amount.
+- `deliver(...)` and `release(...)` route strictly to the provider ID stored in the reservation. A missing provider therefore leaves delivery unchanged and makes release fail rather than guessing another backend.
+
 Registration changes emit `StorageProviderRegistered` and `StorageProviderUnregistered` through `EconomyEvents`.
 
 ## Compatibility and lifecycle checklist
 
-- Depend only on `com.nstut.economy.api` for stable addon integration.
+- Depend only on the top-level `com.nstut.economy.api` package for stable addon integration; never depend on `com.nstut.economy.api.internal`.
 - Use `EconomyApi`, not singleton holders or concrete managers.
 - Do not cache runtime service instances across server restarts.
 - Register commodity handlers and storage providers once during mod initialization.
@@ -397,7 +426,7 @@ Registration changes emit `StorageProviderRegistered` and `StorageProviderUnregi
 - Prefer `getCauseId()` over deprecated transaction enums.
 - Keep event listeners fast and close short-lived subscriptions.
 - Make storage simulation side-effect free.
-- Make reservation creation atomic.
+- Make reservation creation atomic and assume a reservation will never span multiple providers.
 - Return exact provider-owned remainder state from every partial delivery.
 - Make failed release perform zero externally visible mutation.
 - Persist structured/large escrow in `providerState`, not one string.
