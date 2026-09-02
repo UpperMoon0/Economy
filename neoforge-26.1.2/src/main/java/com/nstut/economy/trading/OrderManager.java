@@ -1,5 +1,6 @@
 package com.nstut.economy.trading;
 
+import com.nstut.economy.api.CommodityKey;
 import com.nstut.economy.api.EconomyApi;
 import com.nstut.economy.api.EconomyEvents;
 import com.nstut.economy.api.ICommodity;
@@ -23,7 +24,7 @@ public class OrderManager implements IOrderManager {
     private static final String COMPENSATION_AMOUNT = "economy:compensation_amount";
 
     private final Map<UUID, Order> orders;
-    private final Map<ICommodity, List<Order>> commodityIndex;
+    private final Map<CommodityKey, List<Order>> commodityIndex;
     private final Map<UUID, EconomyOrderData.OrderSnapshot> quarantinedOrders;
     private EconomyOrderData backingData;
 
@@ -42,7 +43,7 @@ public class OrderManager implements IOrderManager {
                 Order order = Order.fromSnapshot(snap);
                 if (order.isValid()) {
                     orders.put(order.getOrderId(), order);
-                    commodityIndex.computeIfAbsent(order.getCommodity(), k -> new ArrayList<>()).add(order);
+                    commodityIndex.computeIfAbsent(CommodityKey.of(order.getCommodity()), k -> new ArrayList<>()).add(order);
                 } else if (hasRecoveryState(snap)) {
                     quarantineOrder(snap, "invalid or quarantined persisted order");
                 }
@@ -451,7 +452,7 @@ public class OrderManager implements IOrderManager {
 
     private void registerOrder(Order order) {
         orders.put(order.getOrderId(), order);
-        commodityIndex.computeIfAbsent(order.getCommodity(), k -> new ArrayList<>()).add(order);
+        commodityIndex.computeIfAbsent(CommodityKey.of(order.getCommodity()), k -> new ArrayList<>()).add(order);
         if (backingData != null) backingData.putOrder(order.toSnapshot());
     }
 
@@ -516,7 +517,7 @@ public class OrderManager implements IOrderManager {
 
     private void removeOrder(Order order) {
         orders.remove(order.getOrderId());
-        List<Order> commodityOrders = commodityIndex.get(order.getCommodity());
+        List<Order> commodityOrders = commodityIndex.get(CommodityKey.of(order.getCommodity()));
         if (commodityOrders != null) commodityOrders.remove(order);
         if (backingData != null) backingData.removeOrder(order.getOrderId());
     }
@@ -529,13 +530,13 @@ public class OrderManager implements IOrderManager {
     }
     @Override public List<Order> getOrders(ICommodity commodity) { return getAllOrders(commodity); }
     public List<Order> getAllOrders(ICommodity commodity) {
-        return commodityIndex.getOrDefault(commodity, Collections.emptyList()).stream().filter(Order::isValid).collect(Collectors.toList());
+        return commodityIndex.getOrDefault(CommodityKey.of(commodity), Collections.emptyList()).stream().filter(Order::isValid).collect(Collectors.toList());
     }
     public List<Order> getAllOrders() {
         return orders.values().stream().filter(Order::isValid).sorted(Comparator.comparing(Order::getCreatedAt).reversed()).collect(Collectors.toList());
     }
     private List<Order> getOrdersByType(ICommodity commodity, IOrder.OrderType type) {
-        return commodityIndex.getOrDefault(commodity, Collections.emptyList()).stream().filter(o -> o.isValid() && o.getType() == type).collect(Collectors.toList());
+        return commodityIndex.getOrDefault(CommodityKey.of(commodity), Collections.emptyList()).stream().filter(o -> o.isValid() && o.getType() == type).collect(Collectors.toList());
     }
     public List<Order> getPlayerOrders(UUID player) {
         return orders.values().stream().filter(o -> o.getOwner().equals(player) && o.isValid()).sorted(Comparator.comparing(Order::getCreatedAt).reversed()).collect(Collectors.toList());
@@ -594,5 +595,5 @@ public class OrderManager implements IOrderManager {
         cleanupOrders();
     }
 
-    public Map<ICommodity, List<Order>> getCommodityIndex() { return Collections.unmodifiableMap(commodityIndex); }
+    public Map<CommodityKey, List<Order>> getCommodityIndex() { return Collections.unmodifiableMap(commodityIndex); }
 }
