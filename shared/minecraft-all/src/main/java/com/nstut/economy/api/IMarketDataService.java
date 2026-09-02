@@ -7,8 +7,8 @@ import java.util.Optional;
 /** Read-only market analytics surface for addons, dashboards, quests, and pricing integrations. */
 public interface IMarketDataService {
     List<TradeView> recentTrades(int limit);
-    List<TradeView> recentTrades(EconomyId commodityId, int limit);
-    Optional<BigDecimal> lastTradePrice(EconomyId commodityId);
-    long tradedVolume(EconomyId commodityId);
-    int activeOrderCount(EconomyId commodityId);
+    List<TradeView> recentTrades(CommodityKey commodity, int limit);
+    Optional<BigDecimal> lastTradePrice(CommodityKey commodity);
+    long tradedVolume(CommodityKey commodity);
+    int activeOrderCount(CommodityKey commodity);
 }
