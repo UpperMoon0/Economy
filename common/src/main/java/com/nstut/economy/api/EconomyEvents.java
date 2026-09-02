@@ -10,6 +10,7 @@ import java.util.function.Consumer;
 /** Loader-neutral synchronous account/transaction event bus. */
 public final class EconomyEvents {
     private static final ConcurrentHashMap<Class<?>, CopyOnWriteArrayList<Consumer<?>>> LISTENERS = new ConcurrentHashMap<>();
+    private static final System.Logger LOGGER = System.getLogger(EconomyEvents.class.getName());
     private EconomyEvents() { }
     public interface Event { }
     public abstract static class CancellableEvent implements Event {
@@ -27,7 +28,14 @@ public final class EconomyEvents {
     @SuppressWarnings("unchecked")
     public static <E extends Event> E post(E event) {
         Objects.requireNonNull(event);
-        for (Consumer<?> raw : LISTENERS.getOrDefault(event.getClass(), new CopyOnWriteArrayList<>())) ((Consumer<E>) raw).accept(event);
+        for (Consumer<?> raw : LISTENERS.getOrDefault(event.getClass(), new CopyOnWriteArrayList<>())) {
+            try {
+                ((Consumer<E>) raw).accept(event);
+            } catch (RuntimeException failure) {
+                LOGGER.log(System.Logger.Level.ERROR,
+                        "Economy event listener failed for " + event.getClass().getName(), failure);
+            }
+        }
         return event;
     }
     public static void clearListeners() { LISTENERS.clear(); }
