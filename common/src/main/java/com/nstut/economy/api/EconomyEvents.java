@@ -34,6 +34,8 @@ public final class EconomyEvents {
             } catch (RuntimeException failure) {
                 LOGGER.log(System.Logger.Level.ERROR,
                         "Economy event listener failed for " + event.getClass().getName(), failure);
+                // Pre-events are fail-closed: a broken veto listener must never allow the mutation to commit.
+                if (event instanceof CancellableEvent cancellable) cancellable.cancel();
             }
         }
         return event;
