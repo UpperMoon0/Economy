@@ -574,6 +574,11 @@ public class OrderManager implements IOrderManager {
             .collect(Collectors.toList());
     }
 
+    @Override
+    public List<Order> getOrders(ICommodity commodity) {
+        return getAllOrders(commodity);
+    }
+
     public List<Order> getAllOrders(ICommodity commodity) {
         return commodityIndex.getOrDefault(commodity, Collections.emptyList()).stream()
             .filter(Order::isValid)
