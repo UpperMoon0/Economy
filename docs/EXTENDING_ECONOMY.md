@@ -2,11 +2,11 @@
 
 This guide covers the parts of Economy intended for addon authors who need more than balance and order access: custom transaction causes, commodity types, persistence codecs, storage backends, market events, and compatibility rules.
 
-Read [Getting Started](GETTING_STARTED.md) first. The supported compatibility boundary is `com.nstut.economy.api`.
+Read [Getting Started](GETTING_STARTED.md) first. The supported compatibility boundary is the top-level `com.nstut.economy.api` package. The `com.nstut.economy.api.internal` subpackage is implementation detail and is not supported for addon use.
 
 ## Compatibility contract
 
-Economy's public addon surface is the `com.nstut.economy.api` package. Treat implementation packages such as `core`, `trading`, `data`, block/menu code, networking code, and loader adapters as internal even when Java visibility allows access.
+Economy's public addon surface is the top-level `com.nstut.economy.api` package. Treat `com.nstut.economy.api.internal` and implementation packages such as `core`, `trading`, `data`, block/menu code, networking code, and loader adapters as internal even when Java visibility allows access.
 
 The API intentionally uses `EconomyId` instead of exposing Minecraft's `ResourceLocation` / `Identifier` naming differences. Prefer namespaced IDs owned by your addon:
 
@@ -83,6 +83,8 @@ EconomyEvents.Subscription sub = EconomyEvents.listen(
     event -> audit(event.source(), event.target(), event.amount(), event.context())
 );
 ```
+
+Listeners are registered for an exact event class. Registering a listener for the base `EconomyEvents.Event` interface does not subscribe it to every event subtype.
 
 Cancellable pre-events currently include:
 
@@ -204,6 +206,8 @@ EconomyApi.storage().register(new WarehouseStorageProvider());
 
 Providers are considered by descending `priority()`, then provider ID. A provider should only report support for commodities it can fully handle.
 
+A reservation is always owned by exactly one provider. `StorageProviderRegistry.available(...)` therefore returns the largest amount that any one supporting provider can reserve atomically, not the sum of stock across providers. `reserve(...)` walks providers in priority order and never combines a request across backends. By contrast, `receivable(...)` may aggregate receiving capacity across supporting providers up to the requested amount. Delivery and release are always routed back to the provider ID stored in the reservation; Economy never substitutes another provider for missing escrow ownership.
+
 ### Simulation methods must be pure
 
 ```java
@@ -226,7 +230,7 @@ Optional<StorageReservation> reserve(
 );
 ```
 
-A successful reservation means the requested goods have crossed into durable escrow. `reserve` must either complete atomically or return `Optional.empty()` without mutation.
+A successful reservation means the requested goods have crossed into durable escrow. `reserve` must either complete atomically or return `Optional.empty()` without mutation. Do not assume Economy will combine partial reservations from several providers to satisfy one order.
 
 A reservation contains:
 
@@ -262,6 +266,8 @@ Economy validates the accounting invariant:
 ```text
 delivered + remaining.amount = reservation.amount
 ```
+
+It also validates that delivery never exceeds the requested amount and that a remaining reservation keeps the same provider and commodity identity. Invalid provider results fail explicitly instead of being silently normalized.
 
 The provider must calculate the remainder from the actual mutation. Never return only a count and then guess which exact stacks/components remain. For heterogeneous item payloads, if one variant is rejected while another is accepted, the returned reservation must contain the exact rejected variant plus any untouched escrow.
 
@@ -312,6 +318,8 @@ Test at minimum:
 
 - insufficient stock: reservation fails with no mutation;
 - exact stock: reservation succeeds once;
+- stock split across multiple providers cannot incorrectly satisfy one atomic reservation;
+- priority ordering chooses the first provider capable of the full reservation;
 - save/reload between reserve and delivery;
 - structured provider state substantially larger than one NBT UTF string limit;
 - heterogeneous exact-stack partial delivery where an earlier variant is rejected and a later one succeeds;
@@ -343,7 +351,7 @@ For dashboards or quest checks, construct a `CommodityKey` and prefer `marketDat
 
 Create, edit, and cancel through `IOrderManager`. The manager owns authorization, persistence, escrow, events, and invariant checks.
 
-Server orders are created with `createServerBuyOrder` / `createServerSellOrder`. Do not imitate server ownership by inventing UUIDs or instantiating Economy's internal `Order` implementation.
+Server orders are created with `createServerBuyOrder` / `createServerSellOrder`. These compatibility-shaped methods may return `null` when domain validation rejects the request, so callers must check the result. Do not imitate server ownership by inventing UUIDs or instantiating Economy's internal `Order` implementation.
 
 For player-facing/admin recovery, Economy also exposes `/economy serverorder list` and `/economy serverorder remove <order-id>`.
 
@@ -371,6 +379,7 @@ You do not need loader-specific adapters for Economy's own event bus, commodity 
 
 Avoid dependencies on:
 
+- `com.nstut.economy.api.internal.*`
 - `com.nstut.economy.core.*`
 - `com.nstut.economy.trading.*`
 - `com.nstut.economy.data.*`
