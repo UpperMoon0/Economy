@@ -1,0 +1,42 @@
+name: Lily PR22 order API adapter fix
+on:
+  push:
+    branches: [feat/addon-api-platform]
+    paths: [.github/workflows/lily-pr22-adapter-fix.yml]
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/addon-api-platform
+          fetch-depth: 0
+      - name: Add stable getOrders adapter
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          paths = [
+              Path('shared/minecraft-1.20plus/src/main/java/com/nstut/economy/trading/OrderManager.java'),
+              Path('neoforge-26.1.2/src/main/java/com/nstut/economy/trading/OrderManager.java'),
+          ]
+          needle = '''    public List<Order> getAllOrders(ICommodity commodity) {\n        return commodityIndex.getOrDefault(commodity, Collections.emptyList()).stream()\n            .filter(Order::isValid)\n            .collect(Collectors.toList());\n    }\n'''
+          replacement = '''    @Override\n    public List<Order> getOrders(ICommodity commodity) {\n        return getAllOrders(commodity);\n    }\n\n''' + needle
+          for path in paths:
+              text = path.read_text()
+              if text.count(needle) != 1:
+                  raise SystemExit(f'{path}: expected exactly one getAllOrders(ICommodity) implementation')
+              path.write_text(text.replace(needle, replacement, 1))
+          Path('.github/workflows/lily-pr22-adapter-fix.yml').unlink()
+          PY
+          git diff --check
+      - name: Commit and push
+        shell: bash
+        run: |
+          git config user.name Lily
+          git config user.email lily@local.invalid
+          git add -A
+          git commit -m "fix: complete stable order manager facade"
+          git push origin HEAD:feat/addon-api-platform
