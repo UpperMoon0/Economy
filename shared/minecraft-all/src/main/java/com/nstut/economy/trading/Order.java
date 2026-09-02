@@ -606,7 +606,8 @@ public class Order implements IOrder {
     boolean cancelInternal() {
         if (!canCancel()) return false;
         cancelled = true;
-        if (!infinite) quantity = 0;
+        quantity = 0;
+        infinite = false;
         return true;
     }
 
