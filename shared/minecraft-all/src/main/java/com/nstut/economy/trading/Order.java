@@ -34,6 +34,9 @@ import java.util.UUID;
 /** Internal default implementation of the stable {@link IOrder} contract. */
 public class Order implements IOrder {
     private static final String QUARANTINE_REASON = "economy:quarantine_reason";
+    private static final String COMPENSATION_DEBTOR = "economy:compensation_debtor";
+    private static final String COMPENSATION_CREDITOR = "economy:compensation_creditor";
+    private static final String COMPENSATION_AMOUNT = "economy:compensation_amount";
     private final UUID orderId;
     private final UUID owner;
     private final ICommodity commodity;
@@ -146,12 +149,28 @@ public class Order implements IOrder {
     }
     public boolean isQuarantined() { return addonMetadata.containsKey(QUARANTINE_REASON); }
 
-    private void markCompensationDue(UUID debtor, UUID creditor, BigDecimal amount) {
+    void markCompensationDue(UUID debtor, UUID creditor, BigDecimal amount) {
         HashMap<String, String> metadata = new HashMap<>(addonMetadata);
-        metadata.put("economy:compensation_debtor", debtor == null ? "unknown" : debtor.toString());
-        metadata.put("economy:compensation_creditor", creditor == null ? "unknown" : creditor.toString());
-        metadata.put("economy:compensation_amount", amount == null ? "0" : amount.toPlainString());
+        metadata.put(COMPENSATION_DEBTOR, debtor == null ? "unknown" : debtor.toString());
+        metadata.put(COMPENSATION_CREDITOR, creditor == null ? "unknown" : creditor.toString());
+        metadata.put(COMPENSATION_AMOUNT, amount == null ? "0" : amount.toPlainString());
         addonMetadata = Map.copyOf(metadata);
+    }
+
+    boolean hasCompensationDue() {
+        return addonMetadata.containsKey(COMPENSATION_AMOUNT);
+    }
+
+    void quarantineCompensation(UUID debtor, UUID creditor, BigDecimal amount, String reason) {
+        markQuarantined(reason);
+        markCompensationDue(debtor, creditor, amount);
+        try {
+            if (EconomyApi.isReady() && EconomyApi.orders() instanceof OrderManager manager) {
+                manager.preserveRecoveryOrder(this, reason);
+            }
+        } catch (RuntimeException unavailable) {
+            Economy.LOGGER.error("Could not immediately persist compensation recovery for order {}", orderId, unavailable);
+        }
     }
 
     @Override public UUID getOrderId() { return orderId; }
@@ -250,11 +269,15 @@ public class Order implements IOrder {
         int delivered = amount;
         if (!serverBuyer && level != null) delivered = commitBuiltInDelivery(level, buyerId, items, fluids, amount);
         if (delivered < amount) {
-            refund(sellerAccount, buyerAccount, buyerId, pricePerUnit.multiply(BigDecimal.valueOf(amount - delivered)), "Refund - partial delivery");
+            BigDecimal refundAmount = totalFor(amount - delivered);
+            if (!refund(sellerAccount, buyerAccount, buyerId, refundAmount, "Refund - partial delivery")) {
+                quarantineCompensation(owner, buyerId, refundAmount, "partial built-in SELL delivery refund failed");
+            }
         }
         if (!serverOrder) consumeEscrow(delivered);
         reduceAfterFill(delivered);
-        return completeTrade(level, buyerId, owner, delivered, totalFor(delivered));
+        return delivered <= 0 ? TransactionResult.failure("Nothing could be delivered")
+                : completeTrade(level, buyerId, owner, delivered, totalFor(delivered));
     }
 
     private TransactionResult executeReservedProviderSell(UUID buyerId, IBankAccount sellerAccount, IBankAccount buyerAccount,
@@ -290,8 +313,7 @@ public class Order implements IOrder {
         if (delivered < amount) {
             BigDecimal refundAmount = totalFor(amount - delivered);
             if (!refund(sellerAccount, buyerAccount, buyerId, refundAmount, "Refund - partial provider delivery")) {
-                markQuarantined("partial provider delivery refund failed: " + provider.id());
-                markCompensationDue(owner, buyerId, refundAmount);
+                quarantineCompensation(owner, buyerId, refundAmount, "partial provider SELL delivery refund failed: " + provider.id());
             }
         }
         externalReservation = delivery.remainingReservation().orElse(null);
@@ -349,7 +371,12 @@ public class Order implements IOrder {
             }
         }
 
-        if (delivered < amount) refund(sellerAccount, buyerAccount, sellerId, totalFor(amount - delivered), "Refund - partial delivery");
+        if (delivered < amount) {
+            BigDecimal refundAmount = totalFor(amount - delivered);
+            if (!refund(sellerAccount, buyerAccount, sellerId, refundAmount, "Refund - partial delivery")) {
+                quarantineCompensation(sellerId, owner, refundAmount, "partial built-in BUY delivery refund failed");
+            }
+        }
         if (delivered <= 0) return TransactionResult.failure("Nothing could be delivered");
         reduceAfterFill(delivered);
         return completeTrade(level, owner, sellerId, delivered, totalFor(delivered));
@@ -383,9 +410,12 @@ public class Order implements IOrder {
                     serverOrder ? OrderManager.SERVER_ID : owner, amount).validateAgainst(reservation, amount);
         } catch (RuntimeException providerFailure) {
             boolean compensated = refund(sellerAccount, buyerAccount, sellerId, total, "Refund - provider delivery failed");
+            if (!compensated) {
+                quarantineCompensation(sellerId, owner, total, "provider BUY delivery failed and refund failed: " + provider.id());
+            }
             preserveProviderReservation(sellerId, reservation,
                     compensated ? "provider delivery failed after payment"
-                            : "provider delivery failed; compensation due " + total.toPlainString());
+                            : "provider delivery failed; compensation debt preserved on BUY order");
             Economy.LOGGER.error("Provider {} failed after payment on BUY order {}; payment compensated={}, reservation {} quarantined",
                     provider.id(), orderId, compensated, reservation.token(), providerFailure);
             return TransactionResult.failure(compensated
@@ -397,11 +427,18 @@ public class Order implements IOrder {
         BigDecimal refundAmount = totalFor(amount - delivered);
         boolean compensated = delivered >= amount || refund(sellerAccount, buyerAccount, sellerId, refundAmount,
                 "Refund - partial provider delivery");
+        if (!compensated) {
+            quarantineCompensation(sellerId, owner, refundAmount, "partial provider BUY delivery refund failed: " + provider.id());
+        }
         var remainingReservation = delivery.remainingReservation();
         if (remainingReservation.isPresent()) {
-            releaseOrPreserve(provider, level, sellerId, remainingReservation.get(),
-                    compensated ? "provider BUY remainder release failed after partial delivery"
-                            : "provider BUY remainder release failed; compensation due " + refundAmount.toPlainString());
+            if (compensated) {
+                releaseOrPreserve(provider, level, sellerId, remainingReservation.get(),
+                        "provider BUY remainder release failed after partial delivery");
+            } else {
+                preserveProviderReservation(sellerId, remainingReservation.get(),
+                        "provider BUY remainder retained because compensation failed");
+            }
         }
         if (delivered <= 0) return TransactionResult.failure("Nothing could be delivered");
         reduceAfterFill(delivered);
