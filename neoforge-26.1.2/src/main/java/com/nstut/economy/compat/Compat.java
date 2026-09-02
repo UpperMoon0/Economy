@@ -1,17 +1,12 @@
 package com.nstut.economy.compat;
 
-import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.TagParser;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 
-/**
- * Version-specific helpers for code compiled into multiple Minecraft
- * versions. This is the 1.21.1 implementation.
- */
+/** Version-specific helpers for Minecraft 26.1.2. */
 public final class Compat {
 
     private Compat() {
@@ -33,11 +28,15 @@ public final class Compat {
         return item.getDefaultMaxStackSize();
     }
 
-    public static String serializeItemStack(ServerLevel level, ItemStack stack) {
-        return com.nstut.economy.util.ItemStackNbtCompat.save(level.registryAccess(), stack).toString();
+    public static CompoundTag serializeItemStackTag(ServerLevel level, ItemStack stack) {
+        return stack == null || stack.isEmpty()
+                ? new CompoundTag()
+                : com.nstut.economy.util.ItemStackNbtCompat.save(level.registryAccess(), stack);
     }
-    public static ItemStack deserializeItemStack(ServerLevel level, String serialized) {
-        try { return com.nstut.economy.util.ItemStackNbtCompat.parseOptional(level.registryAccess(), TagParser.parseCompoundFully(serialized)); }
-        catch (CommandSyntaxException e) { throw new IllegalArgumentException("Invalid persisted ItemStack SNBT", e); }
+
+    public static ItemStack deserializeItemStackTag(ServerLevel level, CompoundTag tag) {
+        return tag == null || tag.isEmpty()
+                ? ItemStack.EMPTY
+                : com.nstut.economy.util.ItemStackNbtCompat.parseOptional(level.registryAccess(), tag.copy());
     }
 }
