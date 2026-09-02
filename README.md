@@ -78,11 +78,15 @@ The client UI requires [OpenUI MC](https://github.com/UpperMoon0/OpenUI-MC), whi
 | `/economy balance` | Player | View your balance and open the Market Terminal |
 | `/economy balance <player>` | OP Level 2 | View another player's balance |
 | `/economy pay <player> <amount>` | Player | Transfer coins to another player |
-| `/economy serverorder buy <commodity> <qty> <price>` | OP Level 2 | Create an infinite server buy order for an item or fluid |
-| `/economy serverorder sell <commodity> <qty> <price>` | OP Level 2 | Create an infinite server sell order for an item or fluid |
+| `/economy serverorder buy <commodity> <qty> <price>` | OP Level 2 | Create a server buy order for an item or fluid |
+| `/economy serverorder sell <commodity> <qty> <price>` | OP Level 2 | Create a server sell order for an item or fluid |
+| `/economy serverorder list` | OP Level 2 | List active server orders and their IDs |
+| `/economy serverorder remove <order-id>` | OP Level 2 | Remove a server order by ID; active IDs are tab-completed |
 | `/economy give <player> <amount>` | OP Level 2 | Add funds to a player's account |
 | `/economy take <player> <amount>` | OP Level 2 | Remove funds from a player's account |
 | `/economy set <player> <amount>` | OP Level 2 | Set a player's balance |
+
+New server-order creation responses include the order ID. If an order was created by mistake, run `/economy serverorder list`, then `/economy serverorder remove <order-id>`.
 
 For fluid commodities, quantity is entered in `mB`. For example:
 
@@ -90,7 +94,7 @@ For fluid commodities, quantity is entered in `mB`. For example:
 /economy serverorder sell minecraft:water 16000 2
 ```
 
-This creates an infinite server sell order for `16k mB` of water at 2 coins per mB.
+This creates a server sell order for `16k mB` of water at 2 coins per mB.
 
 ---
 
