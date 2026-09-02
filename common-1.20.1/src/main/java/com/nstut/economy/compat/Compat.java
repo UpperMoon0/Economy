@@ -1,6 +1,8 @@
 package com.nstut.economy.compat;
 
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.Tag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.Item;
@@ -40,5 +42,15 @@ public final class Compat {
 
     public static ItemStack deserializeItemStackTag(ServerLevel level, CompoundTag tag) {
         return tag == null || tag.isEmpty() ? ItemStack.EMPTY : ItemStack.of(tag.copy());
+    }
+
+    public static ListTag getCompoundList(CompoundTag parent, String key) {
+        return parent != null && parent.contains(key, Tag.TAG_LIST)
+                ? parent.getList(key, Tag.TAG_COMPOUND)
+                : new ListTag();
+    }
+
+    public static CompoundTag getCompoundAt(ListTag list, int index) {
+        return list.getCompound(index);
     }
 }
