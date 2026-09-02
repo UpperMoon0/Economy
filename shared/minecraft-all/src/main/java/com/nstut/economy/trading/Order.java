@@ -9,6 +9,7 @@ import com.nstut.economy.api.IBankAccount;
 import com.nstut.economy.api.ICommodity;
 import com.nstut.economy.api.IOrder;
 import com.nstut.economy.api.IStorageProvider;
+import com.nstut.economy.api.StorageDeliveryResult;
 import com.nstut.economy.api.StorageReservation;
 import com.nstut.economy.blocks.TankManager;
 import com.nstut.economy.blocks.VaultInventoryOps;
@@ -196,9 +197,6 @@ public class Order implements IOrder {
         if (commodity instanceof ItemCommodity item) {
             if (!serverOrder) {
                 items = buildItemDelivery(item.getItem(), amount);
-                // A no-world call cannot inspect storage. Preserve the legacy/API
-                // settlement path when the counterparty is the server itself;
-                // real in-world player SELL creation still requires escrow.
                 boolean virtualServerSettlement = serverBuyer && level == null && reservedItems.isEmpty();
                 if (!virtualServerSettlement) {
                     amount = Math.min(amount, VaultInventoryOps.total(items));
@@ -249,18 +247,18 @@ public class Order implements IOrder {
         IStorageProvider provider = EconomyApi.storage().provider(externalReservation.providerId()).orElse(null);
         if (provider == null) return TransactionResult.failure("Storage provider unavailable: " + externalReservation.providerId());
         int amount = Math.min(requested, externalReservation.amount());
-        if (!serverBuyer) amount = Math.min(amount, provider.receivable(level, buyerId, commodity, amount));
-        if (amount <= 0) return TransactionResult.failure("Buyer cannot receive this commodity");
+        if (amount <= 0) return TransactionResult.failure("Nothing to deliver");
         BigDecimal total = totalFor(amount);
         if (!accounts().transfer(buyerAccount, sellerAccount, total,
                 TransactionContext.transfer("Purchase of " + commodity.getDisplayName().getString(), buyerId))) {
             return TransactionResult.failure("Payment failed");
         }
         StorageReservation beforeDelivery = externalReservation;
-        int delivered = provider.deliverReserved(level, beforeDelivery, serverBuyer ? OrderManager.SERVER_ID : buyerId, amount);
-        if (delivered < 0 || delivered > amount) throw new IllegalStateException("Storage provider returned invalid delivery amount: " + delivered);
+        StorageDeliveryResult delivery = provider.deliverReserved(level, beforeDelivery,
+                serverBuyer ? OrderManager.SERVER_ID : buyerId, amount).validateAgainst(beforeDelivery, amount);
+        int delivered = delivery.deliveredAmount();
         if (delivered < amount) refund(sellerAccount, buyerAccount, buyerId, totalFor(amount - delivered), "Refund - partial provider delivery");
-        externalReservation = provider.remainingAfterDelivery(level, beforeDelivery, delivered).orElse(null);
+        externalReservation = delivery.remainingReservation().orElse(null);
         reduceAfterFill(delivered);
         return delivered <= 0 ? TransactionResult.failure("Nothing could be delivered")
                 : completeTrade(level, buyerId, owner, delivered, totalFor(delivered));
@@ -329,19 +327,25 @@ public class Order implements IOrder {
         IStorageProvider provider = EconomyApi.storage().provider(reservation.providerId()).orElse(null);
         if (provider == null) return TransactionResult.failure("Storage provider unavailable");
         int amount = Math.min(requested, reservation.amount());
-        if (!serverOrder) amount = Math.min(amount, provider.receivable(level, owner, commodity, amount));
-        if (amount <= 0) { provider.release(level, reservation); return TransactionResult.failure("Buyer cannot receive this commodity"); }
+        if (amount <= 0) {
+            provider.release(level, reservation);
+            return TransactionResult.failure("Nothing to deliver");
+        }
         BigDecimal total = totalFor(amount);
         if (!accounts().transfer(buyerAccount, sellerAccount, total,
                 TransactionContext.transfer("Sale of " + commodity.getDisplayName().getString(), owner))) {
-            provider.release(level, reservation); return TransactionResult.failure("Payment failed");
+            provider.release(level, reservation);
+            return TransactionResult.failure("Payment failed");
         }
-        int delivered = provider.deliverReserved(level, reservation, serverOrder ? OrderManager.SERVER_ID : owner, amount);
-        if (delivered < 0 || delivered > amount) throw new IllegalStateException("Storage provider returned invalid delivery amount: " + delivered);
+        StorageDeliveryResult delivery = provider.deliverReserved(level, reservation,
+                serverOrder ? OrderManager.SERVER_ID : owner, amount).validateAgainst(reservation, amount);
+        int delivered = delivery.deliveredAmount();
         if (delivered < amount) refund(sellerAccount, buyerAccount, sellerId, totalFor(amount - delivered), "Refund - partial provider delivery");
-        var remainingReservation = provider.remainingAfterDelivery(level, reservation, delivered);
-        if (remainingReservation.isPresent() && !provider.release(level, remainingReservation.get()))
-            Economy.LOGGER.error("Provider {} failed to release remainder for reservation {}", provider.id(), reservation.token());
+        var remainingReservation = delivery.remainingReservation();
+        if (remainingReservation.isPresent() && !provider.release(level, remainingReservation.get())) {
+            Economy.LOGGER.error("Provider {} could not release exact remainder for reservation {}; provider retains durable ownership",
+                    provider.id(), reservation.token());
+        }
         if (delivered <= 0) return TransactionResult.failure("Nothing could be delivered");
         reduceAfterFill(delivered);
         return completeTrade(level, owner, sellerId, delivered, totalFor(delivered));
