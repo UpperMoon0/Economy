@@ -1,6 +1,6 @@
 # Economy System Design
 
-> **Status:** current architecture reference for Economy 0.0.11. Earlier versions of this file described aspirational `IOffer`, `IEconomyAPI`, Bank/Trading blocks, direct-storage commodity hooks, and standalone price-model systems that are not the implemented public architecture. For addon contracts, the authoritative references are [`docs/API_REFERENCE.md`](../docs/API_REFERENCE.md), [`docs/GETTING_STARTED.md`](../docs/GETTING_STARTED.md), and [`docs/EXTENDING_ECONOMY.md`](../docs/EXTENDING_ECONOMY.md).
+> **Status:** current architecture reference for Economy 0.0.12. Earlier versions of this file described aspirational `IOffer`, `IEconomyAPI`, Bank/Trading blocks, direct-storage commodity hooks, and standalone price-model systems that are not the implemented public architecture. For addon contracts, the authoritative references are [`docs/API_REFERENCE.md`](../docs/API_REFERENCE.md), [`docs/GETTING_STARTED.md`](../docs/GETTING_STARTED.md), and [`docs/EXTENDING_ECONOMY.md`](../docs/EXTENDING_ECONOMY.md).
 
 ## Goals
 
@@ -148,7 +148,7 @@ A commodity is identified by both its type and product ID:
 CommodityKey = (commodityTypeId, commodityId)
 ```
 
-This full identity is required for analytics and persistence because two addon commodity types may intentionally expose the same product ID.
+This full identity is required for order indexing, analytics, and persistence because two addon commodity types may intentionally expose the same product ID and equivalent decoded commodity objects must still address the same book entry.
 
 `EconomyId` is used by the public API instead of exposing Minecraft's changing identifier class names.
 
@@ -173,7 +173,7 @@ Player creation returns `OrderCreateResult` with one of:
 
 An accepted fully filled order has no remaining book order. Server-order compatibility methods return `IOrder` on success and may return `null` when domain validation rejects creation.
 
-Order edits/cancellation must go through the manager so authorization, persistence, money, escrow, and events remain centralized.
+Order edits/cancellation must go through the manager so authorization, persistence, money, escrow, and events remain centralized. The deprecated `IOrder.cancel()` method is retained only for source compatibility and delegates to the active manager rather than mutating the order directly.
 
 ### Order-book authority
 
@@ -219,6 +219,8 @@ initial goods = delivered + still escrowed + successfully released
 success => exact requested amount is durably escrowed
 failure => no mutation
 ```
+
+For every non-empty reservation, Economy validates the provider ID, commodity ID, exact requested amount, and non-blank durable token before accepting it. A malformed reservation is rejected and Economy asks the originating provider to release it best-effort before surfacing the provider contract failure.
 
 ### Delivery
 
