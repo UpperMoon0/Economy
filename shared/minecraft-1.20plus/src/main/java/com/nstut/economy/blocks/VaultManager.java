@@ -164,18 +164,23 @@ public class VaultManager {
     }
 
     /**
-     * Inserts the payload vault-by-vault, carrying remainders forward. Returns
-     * exactly what did not fit anywhere; an empty result means full success.
+     * Inserts the payload using the same prefix-preserving distribution rule as simulation.
+     * Once an exact stack is only partially accepted, later variants are left untouched so
+     * numeric delivered counts remain safe for legacy escrow consumption.
      */
     public static NonNullList<ItemStack> insertItemStacksToVaults(Level level, UUID owner, List<ItemStack> stacks) {
-        NonNullList<ItemStack> remaining = NonNullList.create();
-        for (ItemStack s : stacks) {
-            if (s != null && !s.isEmpty()) remaining.add(s.copy());
-        }
+        List<VaultBlockEntity> receivers = new ArrayList<>();
+        List<List<ItemStack>> inventories = new ArrayList<>();
         for (VaultBlockEntity v : getVaults(level, owner)) {
-            if (remaining.isEmpty()) break;
             if (!v.getMode().canReceiveMarket()) continue;
-            remaining = v.insertItemStacks(remaining);
+            receivers.add(v);
+            inventories.add(v.getItems());
+        }
+
+        int before = VaultInventoryOps.total(stacks);
+        NonNullList<ItemStack> remaining = VaultInventoryOps.distribute(inventories, stacks);
+        if (VaultInventoryOps.total(remaining) != before) {
+            for (VaultBlockEntity receiver : receivers) receiver.setChanged();
         }
         return remaining;
     }
