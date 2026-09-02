@@ -144,4 +144,4 @@ For fluid server orders, quantity is entered in millibuckets. For example, `1600
 
 ## Addon developers
 
-Economy exposes a supported addon API for accounts, atomic transfers, orders, market analytics, events, custom commodity codecs, and pluggable storage providers. Developer documentation is maintained in the GitHub repository under `docs/GETTING_STARTED.md`, `docs/EXTENDING_ECONOMY.md`, and `docs/API_REFERENCE.md`.
+Economy exposes a supported addon API for accounts, atomic transfers, orders, market analytics, events, custom commodity codecs, and pluggable storage providers. The compatibility boundary is the top-level `com.nstut.economy.api` package; `com.nstut.economy.api.internal` and other implementation packages are not supported addon dependencies. Developer documentation is maintained in the GitHub repository under `docs/GETTING_STARTED.md`, `docs/EXTENDING_ECONOMY.md`, and `docs/API_REFERENCE.md`.
