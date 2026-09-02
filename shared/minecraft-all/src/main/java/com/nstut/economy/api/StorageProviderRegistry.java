@@ -69,10 +69,11 @@ public final class StorageProviderRegistry {
         return Optional.empty();
     }
 
-    public int deliver(ServerLevel level, StorageReservation reservation, UUID receiver, int amount) {
+    public StorageDeliveryResult deliver(ServerLevel level, StorageReservation reservation, UUID receiver, int amount) {
         IStorageProvider provider = providers.get(reservation.providerId());
-        if (provider == null || amount <= 0) return 0;
-        return Math.max(0, Math.min(amount, provider.deliverReserved(level, reservation, receiver, amount)));
+        if (provider == null || amount <= 0) return StorageDeliveryResult.unchanged(reservation);
+        return provider.deliverReserved(level, reservation, receiver, amount)
+                .validateAgainst(reservation, Math.min(amount, reservation.amount()));
     }
 
     public boolean release(ServerLevel level, StorageReservation reservation) {
