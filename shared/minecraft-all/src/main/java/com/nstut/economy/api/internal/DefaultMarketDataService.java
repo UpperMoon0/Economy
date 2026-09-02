@@ -1,5 +1,6 @@
 package com.nstut.economy.api.internal;
 
+import com.nstut.economy.api.CommodityKey;
 import com.nstut.economy.api.EconomyId;
 import com.nstut.economy.api.ICommodity;
 import com.nstut.economy.api.IMarketDataService;
@@ -34,35 +35,39 @@ public final class DefaultMarketDataService implements IMarketDataService {
     }
 
     @Override
-    public List<TradeView> recentTrades(EconomyId commodityId, int limit) {
-        if (limit <= 0) return List.of();
+    public List<TradeView> recentTrades(CommodityKey commodity, int limit) {
+        if (commodity == null || limit <= 0) return List.of();
+        List<EconomyTradeData.TradeSnapshot> source = TradeLedger.getAllTrades();
         ArrayList<TradeView> result = new ArrayList<>();
-        for (EconomyTradeData.TradeSnapshot trade : TradeLedger.getRecentTrades(commodityId.toString(), limit)) {
-            result.add(toView(trade));
+        for (int i = source.size() - 1; i >= 0 && result.size() < limit; i--) {
+            EconomyTradeData.TradeSnapshot trade = source.get(i);
+            if (matches(trade, commodity)) result.add(toView(trade));
         }
         return List.copyOf(result);
     }
 
     @Override
-    public Optional<BigDecimal> lastTradePrice(EconomyId commodityId) {
-        List<TradeView> trades = recentTrades(commodityId, 1);
+    public Optional<BigDecimal> lastTradePrice(CommodityKey commodity) {
+        List<TradeView> trades = recentTrades(commodity, 1);
         return trades.isEmpty() ? Optional.empty() : Optional.of(trades.get(0).pricePerUnit());
     }
 
     @Override
-    public long tradedVolume(EconomyId commodityId) {
+    public long tradedVolume(CommodityKey commodity) {
+        if (commodity == null) return 0;
         long total = 0;
         for (EconomyTradeData.TradeSnapshot trade : TradeLedger.getAllTrades()) {
-            if (commodityId.toString().equals(trade.itemId)) total += Math.max(0, trade.quantity);
+            if (matches(trade, commodity)) total += Math.max(0, trade.quantity);
         }
         return total;
     }
 
     @Override
-    public int activeOrderCount(EconomyId commodityId) {
+    public int activeOrderCount(CommodityKey commodity) {
+        if (commodity == null) return 0;
         int count = 0;
         for (var order : orders.getAllOrders()) {
-            if (commodityId.equals(order.getCommodity().getId())) count++;
+            if (commodity.matches(order.getCommodity())) count++;
         }
         return count;
     }
@@ -71,6 +76,11 @@ public final class DefaultMarketDataService implements IMarketDataService {
         EconomyId type = typeId(trade.commodityType);
         return new TradeView(EconomyId.parse(trade.itemId), type, new BigDecimal(trade.price),
                 trade.quantity, trade.buyer, trade.seller, Instant.ofEpochMilli(trade.timestamp));
+    }
+
+    private static boolean matches(EconomyTradeData.TradeSnapshot trade, CommodityKey commodity) {
+        return commodity.commodityId().toString().equals(trade.itemId)
+                && commodity.commodityTypeId().equals(typeId(trade.commodityType));
     }
 
     private static EconomyId typeId(String stored) {
