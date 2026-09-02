@@ -202,8 +202,10 @@ public class EconomyOrderData extends SavedData {
     private static StorageReservation readReservation(CompoundTag parent) {
         if (!parent.contains("ExternalReservation", Tag.TAG_COMPOUND)) return null;
         CompoundTag t = parent.getCompound("ExternalReservation");
+        CompoundTag providerState = t.contains("ProviderState", Tag.TAG_COMPOUND)
+                ? t.getCompound("ProviderState").copy() : new CompoundTag();
         return new StorageReservation(EconomyId.parse(t.getString("ProviderId")), EconomyId.parse(t.getString("CommodityId")),
-                t.getInt("Amount"), t.getString("Token"), readStringMap(t, "Metadata"));
+                t.getInt("Amount"), t.getString("Token"), readStringMap(t, "Metadata"), providerState);
     }
 
     private static Map<String, String> readStringMap(CompoundTag parent, String key) {
@@ -238,8 +240,12 @@ public class EconomyOrderData extends SavedData {
             CompoundTag reservation = new CompoundTag();
             reservation.putString("ProviderId", s.externalReservation.providerId().toString());
             reservation.putString("CommodityId", s.externalReservation.commodityId().toString());
-            reservation.putInt("Amount", s.externalReservation.amount()); reservation.putString("Token", s.externalReservation.token());
-            writeStringMap(reservation, "Metadata", s.externalReservation.metadata()); tag.put("ExternalReservation", reservation);
+            reservation.putInt("Amount", s.externalReservation.amount());
+            reservation.putString("Token", s.externalReservation.token());
+            writeStringMap(reservation, "Metadata", s.externalReservation.metadata());
+            CompoundTag providerState = s.externalReservation.providerState();
+            if (!providerState.isEmpty()) reservation.put("ProviderState", providerState);
+            tag.put("ExternalReservation", reservation);
         }
         return tag;
     }
