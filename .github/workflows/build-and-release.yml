@@ -230,9 +230,6 @@ jobs:
           fi
           ./gradlew "${tasks[@]}" --build-cache --no-daemon --console=plain
 
-      - name: Install virtual display
-        run: sudo apt-get update -o Acquire::Retries=3 || true; sudo apt-get install -y --no-install-recommends xvfb || true
-
       - name: Run real client/server join ${{ matrix.target }}
         run: python3 tools/live_join_test.py --target "${{ matrix.target }}"
 
