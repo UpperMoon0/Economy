@@ -51,18 +51,24 @@ public final class BuiltinContainerStorageProvider implements IStorageProvider {
         CompoundTag state = new CompoundTag();
 
         if (commodity instanceof ItemCommodity item) {
+            var vaults = VaultManager.getVaults(level, owner);
+            List<NonNullList<ItemStack>> snapshots = snapshotVaults(vaults);
             NonNullList<ItemStack> extracted = NonNullList.create();
             if (!VaultManager.extractItemFromVaults(level, owner, item.getItem(), amount, extracted)
                     || VaultInventoryOps.total(extracted) != amount) {
-                if (!extracted.isEmpty()) restoreExtractedItems(level, owner, extracted);
+                restoreVaultSnapshots(vaults, snapshots);
                 return Optional.empty();
             }
             state = encodeStacks(level, extracted);
         } else if (commodity instanceof FluidCommodity fluid) {
+            var tanks = TankManager.getTanks(level, owner);
+            List<EconomyFluidStack> snapshots = new ArrayList<>(tanks.size());
+            for (var tank : tanks) snapshots.add(tank.getFluid().copy());
+
             List<EconomyFluidStack> drained = new ArrayList<>();
             int actual = TankManager.extractFluidFromTanks(level, owner, fluid.getFluid(), amount, drained);
             if (actual != amount) {
-                for (EconomyFluidStack stack : drained) TankManager.restoreFluidToTanks(level, owner, stack);
+                restoreTankSnapshots(tanks, snapshots);
                 return Optional.empty();
             }
         } else {
@@ -132,16 +138,7 @@ public final class BuiltinContainerStorageProvider implements IStorageProvider {
             if (!VaultManager.simulateInsertItemStacksToVaults(level, owner, stacks).isEmpty()) return false;
 
             var vaults = VaultManager.getVaults(level, owner);
-            List<NonNullList<ItemStack>> snapshots = new ArrayList<>(vaults.size());
-            for (var vault : vaults) {
-                NonNullList<ItemStack> snapshot = NonNullList.withSize(vault.getContainerSize(), ItemStack.EMPTY);
-                for (int slot = 0; slot < vault.getContainerSize(); slot++) {
-                    ItemStack current = vault.getItem(slot);
-                    snapshot.set(slot, current == null ? ItemStack.EMPTY : current.copy());
-                }
-                snapshots.add(snapshot);
-            }
-
+            List<NonNullList<ItemStack>> snapshots = snapshotVaults(vaults);
             NonNullList<ItemStack> leftover = VaultManager.insertItemStacksToVaults(level, owner, stacks);
             if (leftover.isEmpty()) return true;
 
@@ -170,21 +167,34 @@ public final class BuiltinContainerStorageProvider implements IStorageProvider {
         return false;
     }
 
+    private static List<NonNullList<ItemStack>> snapshotVaults(List<? extends net.minecraft.world.Container> vaults) {
+        List<NonNullList<ItemStack>> snapshots = new ArrayList<>(vaults.size());
+        for (var vault : vaults) {
+            NonNullList<ItemStack> snapshot = NonNullList.withSize(vault.getContainerSize(), ItemStack.EMPTY);
+            for (int slot = 0; slot < vault.getContainerSize(); slot++) {
+                ItemStack current = vault.getItem(slot);
+                snapshot.set(slot, current == null ? ItemStack.EMPTY : current.copy());
+            }
+            snapshots.add(snapshot);
+        }
+        return snapshots;
+    }
+
     private static void restoreVaultSnapshots(List<? extends net.minecraft.world.Container> vaults,
                                               List<NonNullList<ItemStack>> snapshots) {
         if (vaults.size() != snapshots.size()) {
-            throw new IllegalStateException("Vault topology changed during atomic reservation release");
+            throw new IllegalStateException("Vault topology changed during atomic storage rollback");
         }
         for (int i = 0; i < vaults.size(); i++) {
             var vault = vaults.get(i);
             NonNullList<ItemStack> snapshot = snapshots.get(i);
             if (vault.getContainerSize() != snapshot.size()) {
-                throw new IllegalStateException("Vault size changed during atomic reservation release");
+                throw new IllegalStateException("Vault size changed during atomic storage rollback");
             }
             for (int slot = 0; slot < snapshot.size(); slot++) vault.setItem(slot, snapshot.get(slot).copy());
             for (int slot = 0; slot < snapshot.size(); slot++) {
                 if (!com.nstut.economy.compat.Compat.stacksEqual(vault.getItem(slot), snapshot.get(slot))) {
-                    throw new IllegalStateException("Could not roll back vault mutation during reservation release");
+                    throw new IllegalStateException("Could not roll back vault mutation atomically");
                 }
             }
         }
@@ -192,7 +202,7 @@ public final class BuiltinContainerStorageProvider implements IStorageProvider {
 
     private static <T> void restoreTankSnapshots(List<T> tanks, List<EconomyFluidStack> snapshots) {
         if (tanks.size() != snapshots.size()) {
-            throw new IllegalStateException("Tank topology changed during atomic reservation release");
+            throw new IllegalStateException("Tank topology changed during atomic storage rollback");
         }
         for (int i = 0; i < tanks.size(); i++) {
             Object value = tanks.get(i);
@@ -203,10 +213,10 @@ public final class BuiltinContainerStorageProvider implements IStorageProvider {
                 setFluid.invoke(value, snapshot.copy());
                 EconomyFluidStack restored = (EconomyFluidStack) getFluid.invoke(value);
                 if (!sameFluid(restored, snapshot)) {
-                    throw new IllegalStateException("Could not roll back tank mutation during reservation release");
+                    throw new IllegalStateException("Could not roll back tank mutation atomically");
                 }
             } catch (ReflectiveOperationException failure) {
-                throw new IllegalStateException("Could not roll back tank mutation during reservation release", failure);
+                throw new IllegalStateException("Could not roll back tank mutation atomically", failure);
             }
         }
     }
@@ -290,17 +300,6 @@ public final class BuiltinContainerStorageProvider implements IStorageProvider {
             if (!copy.isEmpty()) result.add(copy);
         }
         return result;
-    }
-
-    private static void restoreExtractedItems(ServerLevel level, UUID owner, Collection<ItemStack> extracted) {
-        if (!VaultManager.simulateInsertItemStacksToVaults(level, owner, new ArrayList<>(extracted)).isEmpty()) {
-            Economy.LOGGER.error("Could not transactionally roll back a failed built-in item reservation for {}", owner);
-            return;
-        }
-        NonNullList<ItemStack> leftover = VaultManager.insertItemStacksToVaults(level, owner, new ArrayList<>(extracted));
-        if (!leftover.isEmpty()) {
-            Economy.LOGGER.error("Rollback diverged from simulation while restoring failed built-in item reservation for {}", owner);
-        }
     }
 
     private static NonNullList<ItemStack> generateItemStacks(Item item, int amount) {
