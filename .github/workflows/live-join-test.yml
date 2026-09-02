@@ -1,17 +1,13 @@
 name: Live client join test
 
-# Executed automatically by build-and-release.yml on PRs; the pull_request
-# trigger is omitted so PRs do not run the same suite twice.
+# Manual full-matrix diagnostic. Normal PR/push validation runs the same real
+# client/server join coverage inside build-and-release.yml so it can reuse each
+# target's build outputs and avoid a second matrix startup.
 on:
-  workflow_call:
   workflow_dispatch:
 
 jobs:
-  # The parent build workflow already prepares OpenUI before calling this
-  # reusable workflow. Keep the bootstrap only for direct manual dispatches so
-  # normal PR validation does not pay for the same OpenUI setup twice.
   prepare-openui:
-    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -60,7 +56,6 @@ jobs:
 
   live-join:
     needs: prepare-openui
-    if: always() && (needs.prepare-openui.result == 'success' || needs.prepare-openui.result == 'skipped')
     timeout-minutes: 25
     runs-on: ubuntu-24.04
     strategy:
@@ -98,8 +93,6 @@ jobs:
           distribution: temurin
           java-version: ${{ matrix.java }}
           cache: gradle
-      - name: Install virtual display
-        run: sudo apt-get update -o Acquire::Retries=3 || true; sudo apt-get install -y --no-install-recommends xvfb || true
       - name: Make Gradle executable
         run: chmod +x gradlew
 
