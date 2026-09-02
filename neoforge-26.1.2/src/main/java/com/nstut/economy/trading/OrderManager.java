@@ -419,7 +419,9 @@ public class OrderManager implements IOrderManager {
     }
 
     public Optional<Order> getOrder(UUID orderId) { return Optional.ofNullable(orders.get(orderId)); }
-    public boolean cancelOrder(UUID orderId, UUID requester) { return cancelOrder(orderId, requester, null); }
+    public boolean cancelOrder(UUID orderId, UUID requester) {
+        return cancelOrder(orderId, requester, EconomyApi.serverLevel().orElse(null));
+    }
 
     public boolean cancelOrder(UUID orderId, UUID requester, net.minecraft.server.level.ServerLevel level) {
         Order order = orders.get(orderId);
