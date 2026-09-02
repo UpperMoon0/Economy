@@ -11,6 +11,13 @@ loom {
     forge {
     }
     runs {
+        gameTestServer {
+            server()
+            environment("gametestserver")
+            forgeTemplate("gametestserver")
+            runDir("run/gametest")
+            property "forge.enabledGameTestNamespaces", rootProject.mod_id
+        }
         liveJoinTestClient {
             client()
             runDir("run/live-join/client")
@@ -143,6 +150,13 @@ processResources {
                 mod_license: rootProject.findProperty('mod_license') ?: 'All Rights Reserved',
                 issue_tracker_url: rootProject.findProperty('issue_tracker_url') ?: 'https://github.com/UpperMoon0/Economy/issues'
     }
+}
+
+// GameTest classes/templates are development-only. They stay on the dev run
+// classpath but are not shipped in production artifacts.
+tasks.withType(Jar).configureEach {
+    exclude 'com/nstut/forge/gametest/**'
+    exclude 'data/economy/structures/economy_gametest_empty.nbt'
 }
 
 shadowJar {
