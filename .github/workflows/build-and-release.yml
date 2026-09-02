@@ -217,20 +217,21 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x gradlew
 
-      # Gradle's build lifecycle already includes check -> test. One invocation
-      # preserves the same JVM coverage without a second configuration/startup.
-      - name: Verify and build ${{ matrix.target }}
-        run: ./gradlew :${{ matrix.target }}:build --build-cache
+      # Gradle's build lifecycle already includes check -> test. Forge 1.20.1
+      # also runs the canonical real-world GameTest in this same invocation so
+      # GameTest does not require another Gradle configuration/startup.
+      - name: Verify, build and GameTest ${{ matrix.target }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tasks=(":${{ matrix.target }}:build")
+          if [[ "${{ matrix.target }}" == "forge-1.20.1" ]]; then
+            tasks+=(":forge-1.20.1:runGameTestServer")
+          fi
+          ./gradlew "${tasks[@]}" --build-cache --no-daemon --console=plain
 
       - name: Install virtual display
         run: sudo apt-get update -o Acquire::Retries=3 || true; sudo apt-get install -y --no-install-recommends xvfb || true
-
-      # Shared real-world block/BE behavior needs one canonical server runtime,
-      # not five duplicate server boots. Loader/version-specific behavior stays
-      # covered by JVM tests plus the real join below on every target.
-      - name: Run real-world Economy GameTests
-        if: matrix.target == 'forge-1.20.1'
-        run: ./gradlew :forge-1.20.1:runGameTestServer --no-daemon --console=plain --build-cache
 
       - name: Run real client/server join ${{ matrix.target }}
         run: python3 tools/live_join_test.py --target "${{ matrix.target }}"
