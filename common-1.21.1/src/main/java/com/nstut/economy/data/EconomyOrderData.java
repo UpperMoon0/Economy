@@ -141,8 +141,9 @@ public class EconomyOrderData extends SavedData {
     private static StorageReservation readReservation(CompoundTag parent) {
         if (!parent.contains("ExternalReservation", Tag.TAG_COMPOUND)) return null;
         CompoundTag t = parent.getCompound("ExternalReservation");
+        CompoundTag providerState = t.contains("ProviderState", Tag.TAG_COMPOUND) ? t.getCompound("ProviderState").copy() : new CompoundTag();
         return new StorageReservation(EconomyId.parse(t.getString("ProviderId")), EconomyId.parse(t.getString("CommodityId")),
-                t.getInt("Amount"), t.getString("Token"), readStringMap(t, "Metadata"));
+                t.getInt("Amount"), t.getString("Token"), readStringMap(t, "Metadata"), providerState);
     }
     private static Map<String, String> readStringMap(CompoundTag parent, String key) {
         if (!parent.contains(key, Tag.TAG_COMPOUND)) return Map.of(); CompoundTag map = parent.getCompound(key);
@@ -157,7 +158,17 @@ public class EconomyOrderData extends SavedData {
         tag.putInt("CommodityPayloadVersion", s.commodityPayloadVersion); writeStringMap(tag, "CommodityPayload", s.commodityPayload); writeStringMap(tag, "AddonMetadata", s.addonMetadata);
         if (!s.reservedItems.isEmpty()) { ListTag items = new ListTag(); for (ItemStack stack : s.reservedItems) if (!stack.isEmpty()) { CompoundTag item = new CompoundTag(); stack.save(registries, item); items.add(item); } tag.put("Reserved", items); }
         if (!s.reservedFluids.isEmpty()) { ListTag fluids = new ListTag(); for (EconomyFluidStack stack : s.reservedFluids) if (!stack.isEmpty()) { CompoundTag fluid = new CompoundTag(); stack.writeTo(fluid); fluids.add(fluid); } tag.put("ReservedFluids", fluids); }
-        if (s.externalReservation != null) { CompoundTag r = new CompoundTag(); r.putString("ProviderId", s.externalReservation.providerId().toString()); r.putString("CommodityId", s.externalReservation.commodityId().toString()); r.putInt("Amount", s.externalReservation.amount()); r.putString("Token", s.externalReservation.token()); writeStringMap(r, "Metadata", s.externalReservation.metadata()); tag.put("ExternalReservation", r); }
+        if (s.externalReservation != null) {
+            CompoundTag r = new CompoundTag();
+            r.putString("ProviderId", s.externalReservation.providerId().toString());
+            r.putString("CommodityId", s.externalReservation.commodityId().toString());
+            r.putInt("Amount", s.externalReservation.amount());
+            r.putString("Token", s.externalReservation.token());
+            writeStringMap(r, "Metadata", s.externalReservation.metadata());
+            CompoundTag providerState = s.externalReservation.providerState();
+            if (!providerState.isEmpty()) r.put("ProviderState", providerState);
+            tag.put("ExternalReservation", r);
+        }
         return tag;
     }
     private static void writeStringMap(CompoundTag parent, String key, Map<String, String> values) {
