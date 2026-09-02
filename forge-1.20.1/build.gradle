@@ -70,6 +70,46 @@ dependencies {
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
+// Compile a consumer-shaped fixture independently from the normal test source
+// set. It deliberately lives outside com.nstut and its imports are checked so
+// the fixture cannot silently rely on Economy implementation packages.
+sourceSets {
+    addonFixture {
+        java.srcDir 'src/addonFixture/java'
+        compileClasspath = sourceSets.main.compileClasspath + sourceSets.main.output
+    }
+}
+
+tasks.register('verifyAddonFixtureApiBoundary') {
+    group = 'verification'
+    description = 'Ensures the external addon fixture imports Economy only through com.nstut.economy.api.'
+    inputs.files(sourceSets.addonFixture.java)
+    doLast {
+        def violations = []
+        sourceSets.addonFixture.java.files.each { source ->
+            source.eachLine { line, number ->
+                def trimmed = line.trim()
+                if (trimmed.startsWith('import com.nstut.economy.')
+                        && !trimmed.startsWith('import com.nstut.economy.api.')) {
+                    violations << "${source}:$number: $trimmed"
+                }
+            }
+        }
+        if (!violations.isEmpty()) {
+            throw new GradleException('External addon fixture crossed the public API boundary:\n' + violations.join('\n'))
+        }
+    }
+}
+
+tasks.named('compileAddonFixtureJava', JavaCompile).configure {
+    dependsOn tasks.named('verifyAddonFixtureApiBoundary')
+    options.release = 17
+}
+
+tasks.named('check').configure {
+    dependsOn tasks.named('compileAddonFixtureJava')
+}
+
 tasks.named('test', Test).configure {
     useJUnitPlatform()
     systemProperty 'economy.repoRoot', rootProject.projectDir.absolutePath
