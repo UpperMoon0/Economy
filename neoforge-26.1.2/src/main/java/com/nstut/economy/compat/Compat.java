@@ -1,6 +1,7 @@
 package com.nstut.economy.compat;
 
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.Item;
@@ -38,5 +39,13 @@ public final class Compat {
         return tag == null || tag.isEmpty()
                 ? ItemStack.EMPTY
                 : com.nstut.economy.util.ItemStackNbtCompat.parseOptional(level.registryAccess(), tag.copy());
+    }
+
+    public static ListTag getCompoundList(CompoundTag parent, String key) {
+        return parent != null && parent.contains(key) ? parent.getListOrEmpty(key) : new ListTag();
+    }
+
+    public static CompoundTag getCompoundAt(ListTag list, int index) {
+        return list.getCompoundOrEmpty(index);
     }
 }
