@@ -206,10 +206,22 @@ public class Order implements IOrder {
         return accounts.getOrCreatePlayerAccount(owner).hasSufficientFunds(pricePerUnit.multiply(BigDecimal.valueOf(Math.max(1, quantity))));
     }
 
-    @Override public TransactionResult execute(UUID trader) { return execute(trader, null); }
-    @Override public TransactionResult execute(UUID trader, ServerLevel level) { return executeAmount(trader, quantity, level); }
+    @Override
+    public TransactionResult execute(UUID trader) {
+        ServerLevel level = EconomyApi.serverLevel().orElse(null);
+        if (level == null) return TransactionResult.failure("Order execution requires a running server level");
+        return executeAmount(trader, quantity, level);
+    }
 
-    public TransactionResult executePartial(UUID trader, int amountToTrade, ServerLevel level) {
+    @Override
+    public TransactionResult execute(UUID trader, ServerLevel level) {
+        ServerLevel resolvedLevel = level != null ? level : EconomyApi.serverLevel().orElse(null);
+        if (resolvedLevel == null) return TransactionResult.failure("Order execution requires a running server level");
+        return executeAmount(trader, quantity, resolvedLevel);
+    }
+
+    /** Internal order-book matching hook. Stable addon code must execute through {@link IOrder}. */
+    TransactionResult executePartial(UUID trader, int amountToTrade, ServerLevel level) {
         return executeAmount(trader, amountToTrade, level);
     }
 
