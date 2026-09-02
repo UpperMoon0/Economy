@@ -1,8 +1,6 @@
 package com.nstut.economy.compat;
 
-import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.TagParser;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.Item;
@@ -34,17 +32,13 @@ public final class Compat {
         return item.getMaxStackSize();
     }
 
-    public static String serializeItemStack(ServerLevel level, ItemStack stack) {
+    public static CompoundTag serializeItemStackTag(ServerLevel level, ItemStack stack) {
         CompoundTag tag = new CompoundTag();
-        stack.save(tag);
-        return tag.toString();
+        if (stack != null && !stack.isEmpty()) stack.save(tag);
+        return tag;
     }
 
-    public static ItemStack deserializeItemStack(ServerLevel level, String serialized) {
-        try {
-            return ItemStack.of(TagParser.parseTag(serialized));
-        } catch (CommandSyntaxException e) {
-            throw new IllegalArgumentException("Invalid persisted ItemStack SNBT", e);
-        }
+    public static ItemStack deserializeItemStackTag(ServerLevel level, CompoundTag tag) {
+        return tag == null || tag.isEmpty() ? ItemStack.EMPTY : ItemStack.of(tag.copy());
     }
 }
