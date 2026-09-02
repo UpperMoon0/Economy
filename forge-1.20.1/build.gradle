@@ -6,6 +6,7 @@ def commonProject = project(':common-1.20.1')
 ext.minecraft_version = commonProject.minecraft_version
 ext.architectury_api_version = commonProject.architectury_api_version
 ext.forge_version = commonProject.forge_version
+def economyModId = rootProject.mod_id
 
 loom {
     forge {
@@ -16,7 +17,7 @@ loom {
             environment("gametestserver")
             forgeTemplate("gametestserver")
             runDir("run/gametest")
-            property "forge.enabledGameTestNamespaces", rootProject.mod_id
+            property "forge.enabledGameTestNamespaces", economyModId
         }
         liveJoinTestClient {
             client()
