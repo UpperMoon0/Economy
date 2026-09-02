@@ -12,15 +12,17 @@ import java.util.UUID;
 public interface IOrderManager {
     OrderCreateResult createBuyOrder(UUID owner, ICommodity commodity, int quantity, BigDecimal pricePerUnit);
     OrderCreateResult createSellOrder(UUID owner, ICommodity commodity, int quantity, BigDecimal pricePerUnit);
-    OrderCreateResult createServerBuyOrder(ICommodity commodity, int quantity, BigDecimal pricePerUnit);
-    OrderCreateResult createServerSellOrder(ICommodity commodity, int quantity, BigDecimal pricePerUnit);
 
-    Optional<IOrder> getOrder(UUID orderId);
-    List<IOrder> getAllOrders();
-    List<IOrder> getOrders(ICommodity commodity);
-    List<IOrder> getPlayerOrders(UUID player);
-    List<IOrder> getBuyOrders(ICommodity commodity);
-    List<IOrder> getSellOrders(ICommodity commodity);
+    /** Server orders use the same concrete order object and return null only when domain validation rejects creation. */
+    IOrder createServerBuyOrder(ICommodity commodity, int quantity, BigDecimal pricePerUnit);
+    IOrder createServerSellOrder(ICommodity commodity, int quantity, BigDecimal pricePerUnit);
+
+    Optional<? extends IOrder> getOrder(UUID orderId);
+    List<? extends IOrder> getAllOrders();
+    List<? extends IOrder> getOrders(ICommodity commodity);
+    List<? extends IOrder> getPlayerOrders(UUID player);
+    List<? extends IOrder> getBuyOrders(ICommodity commodity);
+    List<? extends IOrder> getSellOrders(ICommodity commodity);
 
     boolean cancelOrder(UUID orderId, UUID requester);
     boolean editOrder(UUID orderId, UUID requester, int newQuantity, BigDecimal newPrice, boolean infinite);
