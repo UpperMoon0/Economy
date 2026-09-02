@@ -173,7 +173,8 @@ class OrderMoneyFlowTest extends MinecraftTestBase {
         assertFalse(explicitNull.success);
         assertTrue(implicit.message.contains("server level"));
         assertEquals(0, new BigDecimal("50").compareTo(accounts.getPlayerAccount(buyer).get().getBalance()));
-        assertEquals(0, BigDecimal.ZERO.compareTo(accounts.getPlayerAccount(seller).get().getBalance()));
+        assertTrue(accounts.getPlayerAccount(seller).isEmpty(),
+                "failed public execution must not create or mutate the seller account");
         assertEquals(10, order.getQuantity());
         assertEquals(10, order.getEscrowedItemCount());
     }
