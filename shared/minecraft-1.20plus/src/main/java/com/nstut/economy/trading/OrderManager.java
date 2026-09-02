@@ -508,10 +508,10 @@ public class OrderManager implements IOrderManager {
             }
         }
 
-        if (order.cancel()) {
+        if (order.cancelInternal()) {
             removeOrder(order); EconomyEvents.post(new MarketEvents.OrderCancelled(orderId, requester)); return true;
         }
-        Economy.LOGGER.error("Order {} passed cancellability check but cancel() failed; keeping order intact", orderId);
+        Economy.LOGGER.error("Order {} passed cancellability check but internal cancel failed; keeping order intact", orderId);
         return false;
     }
 
