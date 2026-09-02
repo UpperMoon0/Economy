@@ -22,7 +22,13 @@ public final class AccountManagerHolder {
         return value;
     }
 
-    static void setInstance(IAccountManager value) {
+    /**
+     * Replaces the compatibility account-manager instance.
+     *
+     * <p>This remains public for loader bootstrap and controlled test fixtures.
+     * Addons should obtain the service through {@code EconomyApi} instead.</p>
+     */
+    public static void setInstance(IAccountManager value) {
         instance = value;
     }
 
