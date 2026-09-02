@@ -1,8 +1,8 @@
 # Getting started with Economy addons
 
-Economy exposes a loader-neutral addon API for accounts, orders, market data, events, commodity types, and storage providers. New integrations should use only types under `com.nstut.economy.api` unless this documentation explicitly says otherwise.
+Economy exposes a loader-neutral addon API for accounts, orders, market data, events, commodity types, and storage providers. New integrations should use only the top-level `com.nstut.economy.api` package unless this documentation explicitly says otherwise. The `com.nstut.economy.api.internal` subpackage is implementation detail and is not part of the supported compatibility surface.
 
-The runtime implementation lives behind `EconomyApi`; addon code should not reach into `com.nstut.economy.core`, `trading`, `data`, blocks, menus, networking, or loader internals.
+The runtime implementation lives behind `EconomyApi`; addon code should not reach into `com.nstut.economy.core`, `trading`, `data`, `api.internal`, blocks, menus, networking, or loader internals.
 
 ## Supported targets
 
@@ -96,7 +96,7 @@ List<? extends IOrder> mine = orders.getPlayerOrders(playerId);
 Optional<? extends IOrder> order = orders.getOrder(orderId);
 ```
 
-Submit orders through `IOrderManager`, not through Economy's internal `Order` class:
+Submit player orders through `IOrderManager`, not through Economy's internal `Order` class:
 
 ```java
 OrderCreateResult result = EconomyApi.orders().createBuyOrder(
@@ -111,7 +111,9 @@ if (!result.accepted()) {
 }
 ```
 
-`OrderCreateResult.Status` is one of `POSTED`, `PARTIALLY_FILLED`, `FILLED`, or `REJECTED`. `remainingOrder()` is null when no order remains on the book.
+`OrderCreateResult.Status` is one of `POSTED`, `PARTIALLY_FILLED`, `FILLED`, or `REJECTED`. `remainingOrder()` is null when no order remains on the book, including a fully filled accepted order. `errorKey()` may be null when the result is accepted.
+
+The compatibility-shaped `createServerBuyOrder` and `createServerSellOrder` methods return an `IOrder` on success and may return `null` when domain validation rejects creation. Check that result before dereferencing it.
 
 Use `cancelOrder` and `editOrder` on the manager so ownership, escrow, persistence, and market invariants are enforced centrally.
 
@@ -150,7 +152,7 @@ EconomyEvents.Subscription subscription = EconomyEvents.listen(
 );
 ```
 
-Keep the returned subscription when the listener has a shorter lifetime than the mod itself and call `close()` when it should stop receiving events.
+Listeners match the exact event class passed to `listen`; subscribing to the base event interface does not subscribe to every subtype. Keep the returned subscription when the listener has a shorter lifetime than the mod itself and call `close()` when it should stop receiving events.
 
 Available event families include:
 
@@ -179,7 +181,13 @@ The transfer contract is atomic: a rejected or failing target credit must not le
 
 See [Extending Economy](EXTENDING_ECONOMY.md) for custom transaction causes, commodity codecs, storage providers, persistence rules, and lifecycle requirements.
 
-## 7. Verify an addon
+## 7. Understand multi-provider storage dispatch
+
+One sell-order reservation is never split across storage providers. `EconomyApi.storage().available(...)` reports the largest amount that a single supporting provider can reserve atomically, and `reserve(...)` walks providers by priority until one provider can own the full reservation. Receiving capacity is different: `receivable(...)` may aggregate capacity across providers up to the requested amount.
+
+Once a reservation exists, delivery and release always route to the `providerId` stored in that reservation. Economy does not move escrow ownership to another provider when the original provider is unavailable.
+
+## 8. Verify an addon
 
 Before publishing an addon:
 
@@ -189,10 +197,29 @@ Before publishing an addon:
 - verify custom commodity codecs round-trip saved state;
 - verify analytics use `CommodityKey`, especially when two types can share a commodity ID;
 - verify storage simulation is side-effect free;
+- verify one reservation is not accidentally satisfied by stock split across several providers;
 - verify reservations survive save/reload without flattening provider state into one large string;
 - verify partial delivery returns the exact provider-owned remainder;
 - verify failed release leaves both storage and reservation ownership unchanged;
 - verify successful release restores every remaining unit exactly once;
 - test order rejection, pre-event cancellation, successful fills, partial fills, and cancellation.
+
+Economy's repository provides several validation layers:
+
+```shell
+# JVM/unit/regression suites across supported version families
+./gradlew testAllVersions
+
+# External-consumer compile fixture; rejects imports outside the public API boundary
+./gradlew :forge-1.20.1:compileAddonFixtureJava
+
+# Canonical real-server GameTest for registry/block-entity/world behavior
+./gradlew :forge-1.20.1:runGameTestServer
+
+# Real client/server join smoke for one supported target
+python3 tools/live_join_test.py --target forge-1.20.1
+```
+
+`testAllVersions` does not replace the GameTest or live client/server smoke. CI runs the Forge 1.20.1 GameTest and a real client/server join for every supported loader target. On a headless Linux machine, the live-join script uses `xvfb-run` when `DISPLAY` is unset, so install Xvfb locally if your environment does not already provide it.
 
 For the complete public surface, see [API Reference](API_REFERENCE.md). For custom commodity/storage implementations and escrow invariants, continue with [Extending Economy](EXTENDING_ECONOMY.md).
