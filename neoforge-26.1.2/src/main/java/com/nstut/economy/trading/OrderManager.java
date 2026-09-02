@@ -41,7 +41,7 @@ public class OrderManager implements IOrderManager {
                     orders.put(order.getOrderId(), order);
                     commodityIndex.computeIfAbsent(order.getCommodity(), k -> new ArrayList<>()).add(order);
                 } else if (snap.hasEscrow()) {
-                    quarantineOrder(snap, "invalid persisted order (likely expired while offline)");
+                    quarantineOrder(snap, "invalid or quarantined persisted order");
                 }
             } catch (Exception e) {
                 Economy.LOGGER.error("Failed to load persisted order {} for item {}; escrow snapshot preserved in world data",
@@ -59,6 +59,19 @@ public class OrderManager implements IOrderManager {
                     snap.reservedFluids.stream().mapToInt(EconomyFluidStack::getAmount).sum());
         }
         if (backingData != null) backingData.putOrder(snap);
+    }
+
+    /** Preserve provider-owned escrow that could not be safely released or completed. */
+    public void preserveProviderReservation(UUID escrowOwner, ICommodity commodity, StorageReservation reservation,
+                                            java.math.BigDecimal pricePerUnit, String reason) {
+        if (escrowOwner == null || commodity == null || reservation == null || reservation.amount() <= 0) return;
+        java.math.BigDecimal safePrice = pricePerUnit != null && pricePerUnit.signum() > 0
+                ? pricePerUnit : java.math.BigDecimal.ONE;
+        Order preserved = new Order(escrowOwner, commodity, reservation.amount(), reservation.amount(), safePrice,
+                IOrder.OrderType.SELL, null, NonNullList.create(), new ArrayList<>(), false);
+        preserved.setExternalReservation(reservation);
+        preserved.markQuarantined(reason);
+        quarantineOrder(preserved.toSnapshot(), reason);
     }
 
     public void saveAll() {
@@ -138,13 +151,16 @@ public class OrderManager implements IOrderManager {
         }
         cleanupOrders();
 
-        if (order.getQuantity() > 0) {
+        if (order.getQuantity() > 0 && order.isValid()) {
             registerOrder(order);
             EconomyEvents.post(new MarketEvents.OrderCreated(order, quantity, filled));
             return CreateOrderResult.posted(order, quantity, filled);
         } else if (filled > 0) {
+            if (order.getExternalReservation() != null) quarantineOrder(order.toSnapshot(), "filled order retained provider escrow");
             EconomyEvents.post(new MarketEvents.OrderCreated(order, quantity, filled));
             return CreateOrderResult.filled(quantity, filled);
+        } else if (order.getExternalReservation() != null) {
+            quarantineOrder(order.toSnapshot(), "SELL creation failed with provider escrow still attached");
         } else if (backingData != null) {
             backingData.removeOrder(order.getOrderId());
         }
@@ -186,7 +202,7 @@ public class OrderManager implements IOrderManager {
         if (retained > 0) {
             Order preserved = new Order(owner, commodity, retained, retained, pricePerUnit,
                     IOrder.OrderType.SELL, null, itemRemainder, fluidRemainder, false);
-            preserved.setAddonMetadata(Map.of("economy:quarantine_reason", "order_create_pre_cancelled"));
+            preserved.markQuarantined("order_create_pre_cancelled");
             quarantineOrder(preserved.toSnapshot(), "OrderCreatePre cancellation could not fully restore pre-extracted escrow");
             Economy.LOGGER.error("Preserved {} unreturned escrow unit(s) for cancelled SELL creation by {}",
                     retained, owner);
@@ -291,7 +307,11 @@ public class OrderManager implements IOrderManager {
         } else if (newQuantity < 0 || newQuantity > com.nstut.economy.config.EconomyConfig.getInstance().getMaxOrderQuantity()) return false;
 
         if (order.getType() == IOrder.OrderType.SELL) {
-            if (order.getCommodity() instanceof ItemCommodity ic && level != null) {
+            // Provider reservations are opaque/provider-owned. Without an atomic provider resize contract,
+            // changing quantity would desynchronize the live order from its exact escrow.
+            if (order.getExternalReservation() != null && newQuantity != order.getQuantity()) return false;
+
+            if (order.getExternalReservation() == null && order.getCommodity() instanceof ItemCommodity ic && level != null) {
                 net.minecraft.world.item.Item item = ic.getItem();
                 int currentQty = order.getQuantity();
                 if (newQuantity > currentQty) {
@@ -309,7 +329,7 @@ public class OrderManager implements IOrderManager {
                     int excess = currentQty - newQuantity;
                     if (order.getEscrowedItemCount() < excess || !returnItemsToVaults(level, requester, order, excess)) return false;
                 }
-            } else if (order.getCommodity() instanceof FluidCommodity fc && level != null) {
+            } else if (order.getExternalReservation() == null && order.getCommodity() instanceof FluidCommodity fc && level != null) {
                 net.minecraft.world.level.material.Fluid fluid = fc.getFluid();
                 int currentQty = order.getQuantity();
                 if (newQuantity > currentQty) {
@@ -430,7 +450,14 @@ public class OrderManager implements IOrderManager {
         if (order.getType() == IOrder.OrderType.SELL && !order.isServerOrder() && order.getExternalReservation() != null) {
             if (level == null) return false;
             var provider = EconomyApi.storage().provider(order.getExternalReservation().providerId()).orElse(null);
-            if (provider == null || !provider.release(level, order.getExternalReservation())) return false;
+            if (provider == null) return false;
+            try {
+                if (!provider.release(level, order.getExternalReservation())) return false;
+            } catch (RuntimeException failure) {
+                Economy.LOGGER.error("Storage provider {} threw while cancelling order {}; order and escrow kept intact",
+                        provider.id(), orderId, failure);
+                return false;
+            }
             order.setExternalReservation(null);
         }
 
