@@ -61,6 +61,13 @@ java {
     withSourcesJar()
 }
 
+tasks.named('sourcesJar') {
+    // The 26.x module deliberately overlays version-specific resources on top
+    // of common resources. Match processResources semantics so a source JAR
+    // contains one deterministic copy instead of failing on the overlap.
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
 neoForge {
     version = project.neo_version
     runs {
