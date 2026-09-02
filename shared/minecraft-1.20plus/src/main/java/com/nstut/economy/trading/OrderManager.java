@@ -48,9 +48,9 @@ public class OrderManager implements IOrderManager {
                     quarantineOrder(snap, "invalid or quarantined persisted order");
                 }
             } catch (Exception e) {
-                Economy.LOGGER.error("Failed to load persisted order {} for item {}; recovery snapshot preserved in world data",
+                Economy.LOGGER.error("Failed to load persisted order {} for item {}; preserving unreadable snapshot for addon recovery",
                         snap.orderId, snap.itemId, e);
-                quarantineOrder(snap, "order failed to deserialize");
+                quarantineOrder(snap, "order failed to deserialize", true);
             }
         }
     }
@@ -63,7 +63,11 @@ public class OrderManager implements IOrderManager {
     }
 
     private void quarantineOrder(EconomyOrderData.OrderSnapshot snap, String reason) {
-        if (!hasRecoveryState(snap)) return;
+        quarantineOrder(snap, reason, false);
+    }
+
+    private void quarantineOrder(EconomyOrderData.OrderSnapshot snap, String reason, boolean preserveWithoutRecoveryState) {
+        if (snap == null || (!preserveWithoutRecoveryState && !hasRecoveryState(snap))) return;
         if (quarantinedOrders.put(snap.orderId, snap) == null) {
             Economy.LOGGER.error("Quarantined {} ({}): {}. Recovery preserved - {} item stack(s), {} mB, providerEscrow={}, compensation={}",
                     reason, snap.orderId, snap.itemId, snap.reservedItems.size(),
