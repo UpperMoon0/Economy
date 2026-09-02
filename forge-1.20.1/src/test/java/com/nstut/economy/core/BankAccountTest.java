@@ -1,11 +1,14 @@
 package com.nstut.economy.core;
 
+import com.nstut.economy.api.EconomyEvents;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -15,8 +18,14 @@ class BankAccountTest {
 
     @BeforeEach
     void setUp() {
+        EconomyEvents.clearListeners();
         alice = new BankAccount(UUID.randomUUID(), new BigDecimal("500.00"));
         bob = new BankAccount(UUID.randomUUID(), new BigDecimal("100.00"));
+    }
+
+    @AfterEach
+    void tearDown() {
+        EconomyEvents.clearListeners();
     }
 
     @Test
@@ -46,6 +55,59 @@ class BankAccountTest {
     }
 
     @Test
+    @DisplayName("Throwing committed-event listeners cannot turn a committed balance change into an exception")
+    void throwingCommittedListenerIsContained() {
+        EconomyEvents.listen(EconomyEvents.BalanceChanged.class, event -> {
+            throw new IllegalStateException("broken addon listener");
+        });
+
+        assertDoesNotThrow(() -> assertTrue(alice.credit(BigDecimal.ONE, TransactionContext.adminGive("test"))));
+        assertEquals(new BigDecimal("501.00"), alice.getBalance());
+    }
+
+    @Test
+    @DisplayName("Throwing pre-event listeners fail closed without mutating balances")
+    void throwingPreListenerCancelsMutation() {
+        EconomyEvents.listen(EconomyEvents.TransferPre.class, event -> {
+            throw new IllegalStateException("broken veto listener");
+        });
+
+        assertFalse(alice.transferTo(bob, new BigDecimal("25.00"),
+                TransactionContext.transfer("test", alice.getOwner())));
+        assertEquals(new BigDecimal("500.00"), alice.getBalance());
+        assertEquals(new BigDecimal("100.00"), bob.getBalance());
+    }
+
+    @Test
+    @DisplayName("Pre-event listeners cannot re-enter the same account mutation")
+    void reentrantPreMutationIsRejected() {
+        AtomicBoolean nestedResult = new AtomicBoolean(true);
+        EconomyEvents.listen(EconomyEvents.BalanceChangePre.class, event -> {
+            if (event.owner().equals(alice.getOwner()) && event.delta().signum() < 0) {
+                nestedResult.set(alice.debit(new BigDecimal("450.00"), TransactionContext.adminTake("nested")));
+            }
+        });
+
+        assertTrue(alice.debit(new BigDecimal("200.00"), TransactionContext.adminTake("outer")));
+        assertFalse(nestedResult.get(), "nested mutation must be rejected while the pre-event is in flight");
+        assertEquals(new BigDecimal("300.00"), alice.getBalance());
+        assertTrue(alice.getBalance().signum() >= 0);
+    }
+
+    @Test
+    @DisplayName("Throwing transfer-complete listeners cannot unwind a committed transfer")
+    void throwingTransferCompletedListenerIsContained() {
+        EconomyEvents.listen(EconomyEvents.TransferCompleted.class, event -> {
+            throw new IllegalStateException("broken observer");
+        });
+
+        assertDoesNotThrow(() -> assertTrue(alice.transferTo(bob, new BigDecimal("50.00"),
+                TransactionContext.transfer("test", alice.getOwner()))));
+        assertEquals(new BigDecimal("450.00"), alice.getBalance());
+        assertEquals(new BigDecimal("150.00"), bob.getBalance());
+    }
+
+    @Test
     @DisplayName("AccountManager writes through to BalanceStore on mutations and account creation")
     void accountManagerWritesThroughToBalanceStore() {
         java.util.Map<UUID, BigDecimal> storeBalances = new java.util.HashMap<>();
@@ -71,26 +133,21 @@ class BankAccountTest {
 
         UUID user1 = UUID.randomUUID();
         var acct1 = manager.getOrCreatePlayerAccount(user1);
-        // BalanceStore must contain the new account immediately
         assertTrue(storeBalances.containsKey(user1));
         assertEquals(BigDecimal.ZERO, storeBalances.get(user1));
 
-        // Credit writes through immediately
         acct1.credit(new BigDecimal("100.00"), TransactionContext.adminGive("test"));
         assertEquals(new BigDecimal("100.00"), storeBalances.get(user1));
 
-        // Debit writes through immediately
         acct1.debit(new BigDecimal("30.00"), TransactionContext.adminTake("test"));
         assertEquals(new BigDecimal("70.00"), storeBalances.get(user1));
 
-        // Transfer writes through for both accounts immediately
         UUID user2 = UUID.randomUUID();
         var acct2 = manager.getOrCreatePlayerAccount(user2);
         acct1.transferTo(acct2, new BigDecimal("20.00"), TransactionContext.transfer("test", user1));
         assertEquals(new BigDecimal("50.00"), storeBalances.get(user1));
         assertEquals(new BigDecimal("20.00"), storeBalances.get(user2));
 
-        // Delete account removes from BalanceStore
         manager.deleteAccount(user1);
         assertFalse(storeBalances.containsKey(user1));
     }
