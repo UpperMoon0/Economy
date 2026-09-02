@@ -130,13 +130,14 @@ class AddonApiReviewRegressionTest extends MinecraftTestBase {
         assertNotEquals(original.token(), remainder.token());
         assertTrue(provider.supports(commodity));
 
-        IStorageProvider noSplitProvider = new FixtureProvider() {
-            @Override
-            public Optional<StorageReservation> remainingAfterDelivery(ServerLevel level,
-                                                                      StorageReservation reservation,
-                                                                      int deliveredAmount) {
-                return IStorageProvider.super.remainingAfterDelivery(level, reservation, deliveredAmount);
-            }
+        IStorageProvider noSplitProvider = new IStorageProvider() {
+            @Override public EconomyId id() { return EconomyId.of("reviewfixture", "no_split"); }
+            @Override public boolean supports(ICommodity value) { return true; }
+            @Override public int available(ServerLevel level, UUID owner, ICommodity value) { return 10; }
+            @Override public int receivable(ServerLevel level, UUID owner, ICommodity value, int requested) { return requested; }
+            @Override public Optional<StorageReservation> reserve(ServerLevel level, UUID owner, ICommodity value, int amount) { return Optional.empty(); }
+            @Override public int deliverReserved(ServerLevel level, StorageReservation value, UUID receiver, int amount) { return amount; }
+            @Override public boolean release(ServerLevel level, StorageReservation value) { return true; }
         };
         assertThrows(IllegalStateException.class,
                 () -> noSplitProvider.remainingAfterDelivery(null, original, 4));
