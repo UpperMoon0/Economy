@@ -1,6 +1,7 @@
 package com.nstut.economy.api;
 
-import com.nstut.Economy;
+import com.nstut.economy.core.AccountManager;
+import com.nstut.economy.core.AccountManagerHolder;
 import com.nstut.economy.data.EconomyOrderData;
 import com.nstut.economy.data.EconomyTradeData;
 import com.nstut.economy.data.TradeLedger;
@@ -22,16 +23,20 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import static org.junit.jupiter.api.Assertions.*;
 
 class TradeCancellationPersistenceRegressionTest extends MinecraftTestBase {
+    private AccountManager accounts;
+
     @BeforeEach
     void setUp() {
         EconomyEvents.clearListeners();
         TradeLedger.setTradeData(new EconomyTradeData());
+        accounts = new AccountManager();
     }
 
     @AfterEach
     void tearDown() {
         EconomyEvents.clearListeners();
         TradeLedger.clearTradeData();
+        AccountManagerHolder.setInstance(null);
     }
 
     @Test
@@ -41,7 +46,7 @@ class TradeCancellationPersistenceRegressionTest extends MinecraftTestBase {
                 new ResourceLocation("minecraft", "iron_ingot"), Items.IRON_INGOT, BigDecimal.ZERO);
         UUID buyer = UUID.randomUUID();
 
-        assertTrue(Economy.getAccountManager().getOrCreatePlayerAccount(buyer)
+        assertTrue(accounts.getOrCreatePlayerAccount(buyer)
                 .credit(new BigDecimal("100"), null));
 
         EconomyOrderData data = new EconomyOrderData();
