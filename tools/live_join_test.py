@@ -85,7 +85,7 @@ class OutputPump:
 def gradle(root: Path, task: str) -> list[str]:
     wrapper = root / ("gradlew.bat" if os.name == "nt" else "gradlew")
     return [
-        str(wrapper), task, "--no-daemon", "--console=plain", "--max-workers=4",
+        str(wrapper), task, "--no-daemon", "--console=plain", "--max-workers=4", "--build-cache",
         "-Dorg.gradle.jvmargs=-Xmx2048m",
     ]
 
@@ -152,7 +152,9 @@ def prepare(module: Path) -> tuple[Path, Path]:
 
 def run_target(root: Path, target: str, timeout: int, setup_timeout: int) -> None:
     server_dir, client_dir = prepare(root / target)
-    subprocess.run(gradle(root, f":{target}:classes"), cwd=root, check=True)
+    # runLiveJoinTestServer already depends on the target's compiled classes.
+    # A separate :classes invocation was a full extra Gradle configuration pass
+    # on every matrix leg and did not add coverage.
     server = start(gradle(root, f":{target}:runLiveJoinTestServer"), root)
     server_output = OutputPump(server, f"{target}/server", server_dir / "logs" / "process.log")
     client: subprocess.Popen[str] | None = None
