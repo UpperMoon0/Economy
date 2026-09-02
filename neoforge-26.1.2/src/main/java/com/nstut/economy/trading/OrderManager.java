@@ -19,6 +19,9 @@ import java.util.stream.Collectors;
 
 public class OrderManager implements IOrderManager {
 
+    private static final String QUARANTINE_REASON = "economy:quarantine_reason";
+    private static final String COMPENSATION_AMOUNT = "economy:compensation_amount";
+
     private final Map<UUID, Order> orders;
     private final Map<ICommodity, List<Order>> commodityIndex;
     private final Map<UUID, EconomyOrderData.OrderSnapshot> quarantinedOrders;
@@ -40,25 +43,40 @@ public class OrderManager implements IOrderManager {
                 if (order.isValid()) {
                     orders.put(order.getOrderId(), order);
                     commodityIndex.computeIfAbsent(order.getCommodity(), k -> new ArrayList<>()).add(order);
-                } else if (snap.hasEscrow()) {
+                } else if (hasRecoveryState(snap)) {
                     quarantineOrder(snap, "invalid or quarantined persisted order");
                 }
             } catch (Exception e) {
-                Economy.LOGGER.error("Failed to load persisted order {} for item {}; escrow snapshot preserved in world data",
+                Economy.LOGGER.error("Failed to load persisted order {} for item {}; recovery snapshot preserved in world data",
                         snap.orderId, snap.itemId, e);
                 quarantineOrder(snap, "order failed to deserialize");
             }
         }
     }
 
+    private static boolean hasRecoveryState(EconomyOrderData.OrderSnapshot snap) {
+        if (snap == null) return false;
+        return snap.hasEscrow()
+                || snap.addonMetadata.containsKey(QUARANTINE_REASON)
+                || snap.addonMetadata.containsKey(COMPENSATION_AMOUNT);
+    }
+
     private void quarantineOrder(EconomyOrderData.OrderSnapshot snap, String reason) {
-        if (snap == null || !snap.hasEscrow()) return;
+        if (!hasRecoveryState(snap)) return;
         if (quarantinedOrders.put(snap.orderId, snap) == null) {
-            Economy.LOGGER.error("Quarantined {} ({}): {}. Escrow preserved - {} item stack(s), {} mB",
+            Economy.LOGGER.error("Quarantined {} ({}): {}. Recovery preserved - {} item stack(s), {} mB, providerEscrow={}, compensation={}",
                     reason, snap.orderId, snap.itemId, snap.reservedItems.size(),
-                    snap.reservedFluids.stream().mapToInt(EconomyFluidStack::getAmount).sum());
+                    snap.reservedFluids.stream().mapToInt(EconomyFluidStack::getAmount).sum(),
+                    snap.externalReservation != null,
+                    snap.addonMetadata.getOrDefault(COMPENSATION_AMOUNT, "none"));
         }
         if (backingData != null) backingData.putOrder(snap);
+    }
+
+    /** Persist an invalid order whose metadata records manual financial recovery work. */
+    void preserveRecoveryOrder(Order order, String reason) {
+        if (order == null) return;
+        quarantineOrder(order.toSnapshot(), reason);
     }
 
     /** Preserve provider-owned escrow that could not be safely released or completed. */
@@ -357,7 +375,6 @@ public class OrderManager implements IOrderManager {
                 order.setInitialQuantity(Math.max(newQuantity, order.getInitialQuantity()));
             } else order.setQuantity(newQuantity > 0 ? newQuantity : 1);
         }
-
         if (backingData != null) backingData.putOrder(order.toSnapshot());
         EconomyEvents.post(new MarketEvents.OrderEdited(order));
         matchAllPendingOrders(level);
@@ -537,9 +554,11 @@ public class OrderManager implements IOrderManager {
     public void cleanupOrders() {
         List<Order> toRemove = orders.values().stream().filter(o -> !o.isValid()).collect(Collectors.toList());
         for (Order order : toRemove) {
-            boolean holdsEscrow = !order.getReservedItems().isEmpty() || !order.getReservedFluids().isEmpty() || order.getExternalReservation() != null;
+            boolean holdsRecovery = !order.getReservedItems().isEmpty() || !order.getReservedFluids().isEmpty()
+                    || order.getExternalReservation() != null || order.hasCompensationDue();
+            EconomyOrderData.OrderSnapshot recovery = holdsRecovery ? order.toSnapshot() : null;
             removeOrder(order);
-            if (holdsEscrow) quarantineOrder(order.toSnapshot(), "invalid order still held escrow");
+            if (recovery != null) quarantineOrder(recovery, "invalid order retained recovery state");
         }
     }
 
