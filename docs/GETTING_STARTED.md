@@ -2,7 +2,7 @@
 
 Economy exposes a loader-neutral addon API for accounts, orders, market data, events, commodity types, and storage providers. New integrations should use only types under `com.nstut.economy.api` unless this documentation explicitly says otherwise.
 
-The runtime implementation lives behind `EconomyApi`; addon code should not reach into `com.nstut.economy.core`, `trading`, `data`, blocks, menus, or loader internals.
+The runtime implementation lives behind `EconomyApi`; addon code should not reach into `com.nstut.economy.core`, `trading`, `data`, blocks, menus, networking, or loader internals.
 
 ## Supported targets
 
@@ -92,8 +92,8 @@ Register addon types/providers once during your mod's common initialization, not
 ```java
 IOrderManager orders = EconomyApi.orders();
 
-List<IOrder> mine = orders.getPlayerOrders(playerId);
-Optional<IOrder> order = orders.getOrder(orderId);
+List<? extends IOrder> mine = orders.getPlayerOrders(playerId);
+Optional<? extends IOrder> order = orders.getOrder(orderId);
 ```
 
 Submit orders through `IOrderManager`, not through Economy's internal `Order` class:
@@ -107,21 +107,23 @@ OrderCreateResult result = EconomyApi.orders().createBuyOrder(
 );
 
 if (!result.accepted()) {
-    // errorKey/errorArgs are stable machine-readable rejection information.
     handleRejected(result.errorKey(), result.errorArgs());
 }
 ```
 
-`OrderCreateResult.Status` is one of `POSTED`, `PARTIALLY_FILLED`, `FILLED`, or `REJECTED`. `remainingOrder` is null when no order remains on the book.
+`OrderCreateResult.Status` is one of `POSTED`, `PARTIALLY_FILLED`, `FILLED`, or `REJECTED`. `remainingOrder()` is null when no order remains on the book.
 
-Use `cancelOrder` and `editOrder` on the manager so ownership and market invariants are enforced centrally.
+Use `cancelOrder` and `editOrder` on the manager so ownership, escrow, persistence, and market invariants are enforced centrally.
 
 ## 4. Read market analytics
 
-The market-data service is read-only and intended for addons, quests, dashboards, pricing logic, and integrations:
+Commodity identity is **type + commodity ID**. Never key addon analytics by commodity ID alone: two registered types are allowed to use the same product ID.
 
 ```java
-EconomyId iron = EconomyId.of("minecraft", "iron_ingot");
+CommodityKey iron = new CommodityKey(
+    ICommodity.ITEM_TYPE,
+    EconomyId.of("minecraft", "iron_ingot")
+);
 
 Optional<BigDecimal> lastPrice = EconomyApi.marketData().lastTradePrice(iron);
 long volume = EconomyApi.marketData().tradedVolume(iron);
@@ -129,11 +131,17 @@ int activeOrders = EconomyApi.marketData().activeOrderCount(iron);
 List<TradeView> recent = EconomyApi.marketData().recentTrades(iron, 20);
 ```
 
-Prefer `EconomyId` over Minecraft's version-specific identifier classes in persistent addon state and cross-version source.
+For an `ICommodity` you already have, use:
+
+```java
+CommodityKey key = CommodityKey.of(commodity);
+```
+
+Prefer `EconomyId`/`CommodityKey` over Minecraft's version-specific identifier classes in persistent addon state and cross-version source.
 
 ## 5. Listen for Economy events
 
-Economy has a loader-neutral synchronous event bus. You do not need separate Fabric/Forge/NeoForge event adapters for these API events.
+Economy has a loader-neutral synchronous event bus. You do not need separate Fabric/Forge/NeoForge adapters for these API events.
 
 ```java
 EconomyEvents.Subscription subscription = EconomyEvents.listen(
@@ -146,13 +154,13 @@ Keep the returned subscription when the listener has a shorter lifetime than the
 
 Available event families include:
 
-- account balance changes
-- transfers
-- order creation, editing, and cancellation
-- completed trades
-- storage-provider registration changes
+- account balance changes;
+- transfers;
+- order creation, editing, and cancellation;
+- completed trades;
+- storage-provider registration changes.
 
-Pre-events such as `BalanceChangePre`, `TransferPre`, and `OrderCreatePre` are cancellable. Event delivery is synchronous; listeners should return quickly and should not perform blocking work on the server thread.
+Pre-events such as `BalanceChangePre`, `TransferPre`, and `OrderCreatePre` are cancellable. `OrderCreatePre` is posted before Economy creates a new provider reservation; a cancelled order must not enter the order book or create new escrow. Event delivery is synchronous, so listeners should return quickly and must not perform blocking work on the server thread.
 
 ## 6. Use transaction context for money movement
 
@@ -179,8 +187,12 @@ Before publishing an addon:
 - exercise server stop/start without retaining stale runtime services;
 - verify event listeners do not leak across reloads;
 - verify custom commodity codecs round-trip saved state;
+- verify analytics use `CommodityKey`, especially when two types can share a commodity ID;
 - verify storage simulation is side-effect free;
-- verify reservations survive save/reload and release without item/fluid loss;
-- test order rejection as well as successful and partially filled orders.
+- verify reservations survive save/reload without flattening provider state into one large string;
+- verify partial delivery returns the exact provider-owned remainder;
+- verify failed release leaves both storage and reservation ownership unchanged;
+- verify successful release restores every remaining unit exactly once;
+- test order rejection, pre-event cancellation, successful fills, partial fills, and cancellation.
 
-For the complete public surface, see [API Reference](API_REFERENCE.md).
+For the complete public surface, see [API Reference](API_REFERENCE.md). For custom commodity/storage implementations and escrow invariants, continue with [Extending Economy](EXTENDING_ECONOMY.md).
