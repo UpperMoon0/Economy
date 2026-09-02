@@ -11,7 +11,6 @@ import com.nstut.economy.trading.ItemCommodity;
 import net.minecraft.core.NonNullList;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
-import net.minecraft.nbt.Tag;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -186,11 +185,12 @@ public final class BuiltinContainerStorageProvider implements IStorageProvider {
 
     private static NonNullList<ItemStack> decodeStacks(ServerLevel level, StorageReservation reservation) {
         CompoundTag state = reservation.providerState();
-        if (!state.contains(STACKS, Tag.TAG_LIST)) return null;
-        ListTag list = state.getList(STACKS, Tag.TAG_COMPOUND);
+        ListTag list = com.nstut.economy.compat.Compat.getCompoundList(state, STACKS);
+        if (list.size() == 0) return null;
         NonNullList<ItemStack> result = NonNullList.create();
         for (int i = 0; i < list.size(); i++) {
-            ItemStack stack = com.nstut.economy.compat.Compat.deserializeItemStackTag(level, list.getCompound(i));
+            ItemStack stack = com.nstut.economy.compat.Compat.deserializeItemStackTag(
+                    level, com.nstut.economy.compat.Compat.getCompoundAt(list, i));
             if (!stack.isEmpty()) result.add(stack);
         }
         return result;
