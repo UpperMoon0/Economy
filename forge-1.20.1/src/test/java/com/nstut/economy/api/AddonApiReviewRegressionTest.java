@@ -1,16 +1,20 @@
 package com.nstut.economy.api;
 
 import com.nstut.Economy;
+import com.nstut.economy.api.internal.DefaultMarketDataService;
 import com.nstut.economy.compat.Compat;
 import com.nstut.economy.data.EconomyOrderData;
+import com.nstut.economy.data.EconomyTradeData;
+import com.nstut.economy.data.TradeLedger;
 import com.nstut.economy.test.MinecraftTestBase;
-import com.nstut.economy.trading.EconomyFluidStack;
 import com.nstut.economy.trading.FluidCommodity;
 import com.nstut.economy.trading.ItemCommodity;
 import com.nstut.economy.trading.Order;
 import com.nstut.economy.trading.OrderManager;
 import net.minecraft.core.NonNullList;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.Tag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
@@ -34,12 +38,14 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class AddonApiReviewRegressionTest extends MinecraftTestBase {
     private static final EconomyId ADDON_TYPE = EconomyId.of("reviewfixture", "commodity");
+    private static final EconomyId ADDON_TYPE_B = EconomyId.of("reviewfixture", "commodity_b");
     private static final EconomyId ADDON_COMMODITY = EconomyId.of("reviewfixture", "token");
     private static final EconomyId ADDON_PROVIDER = EconomyId.of("reviewfixture", "storage");
 
     @BeforeEach
     void setUp() {
         EconomyEvents.clearListeners();
+        TradeLedger.clearTradeData();
         EconomyApi.commodityTypes().unregister(ADDON_TYPE);
         EconomyApi.storage().unregister(ADDON_PROVIDER);
         Economy.ensureApiRegistrations();
@@ -48,6 +54,7 @@ class AddonApiReviewRegressionTest extends MinecraftTestBase {
     @AfterEach
     void tearDown() {
         EconomyEvents.clearListeners();
+        TradeLedger.clearTradeData();
         EconomyApi.commodityTypes().unregister(ADDON_TYPE);
         EconomyApi.storage().unregister(ADDON_PROVIDER);
     }
@@ -115,7 +122,7 @@ class AddonApiReviewRegressionTest extends MinecraftTestBase {
     }
 
     @Test
-    @DisplayName("Partial delivery remainder is supplied by the provider, not fabricated by core")
+    @DisplayName("Partial delivery returns the provider-owned exact remainder atomically")
     void partialReservationRemainderIsProviderOwned() {
         FixtureCommodity commodity = new FixtureCommodity(ADDON_COMMODITY);
         FixtureProvider provider = new FixtureProvider();
@@ -123,24 +130,18 @@ class AddonApiReviewRegressionTest extends MinecraftTestBase {
         StorageReservation original = new StorageReservation(ADDON_PROVIDER, ADDON_COMMODITY, 10,
                 "provider-token-v1", Map.of("cursor", "0"));
 
-        StorageReservation remainder = provider.remainingAfterDelivery(null, original, 4).orElseThrow();
+        StorageDeliveryResult result = provider.deliverReserved(null, original, UUID.randomUUID(), 4)
+                .validateAgainst(original, 4);
+        assertEquals(4, result.deliveredAmount());
+        StorageReservation remainder = result.remainingReservation().orElseThrow();
         assertEquals(6, remainder.amount());
         assertEquals("provider-token-v2", remainder.token());
         assertEquals("4", remainder.metadata().get("cursor"));
         assertNotEquals(original.token(), remainder.token());
         assertTrue(provider.supports(commodity));
 
-        IStorageProvider noSplitProvider = new IStorageProvider() {
-            @Override public EconomyId id() { return EconomyId.of("reviewfixture", "no_split"); }
-            @Override public boolean supports(ICommodity value) { return true; }
-            @Override public int available(ServerLevel level, UUID owner, ICommodity value) { return 10; }
-            @Override public int receivable(ServerLevel level, UUID owner, ICommodity value, int requested) { return requested; }
-            @Override public Optional<StorageReservation> reserve(ServerLevel level, UUID owner, ICommodity value, int amount) { return Optional.empty(); }
-            @Override public int deliverReserved(ServerLevel level, StorageReservation value, UUID receiver, int amount) { return amount; }
-            @Override public boolean release(ServerLevel level, StorageReservation value) { return true; }
-        };
-        assertThrows(IllegalStateException.class,
-                () -> noSplitProvider.remainingAfterDelivery(null, original, 4));
+        StorageDeliveryResult inconsistent = new StorageDeliveryResult(4, Optional.of(original));
+        assertThrows(IllegalStateException.class, () -> inconsistent.validateAgainst(original, 4));
     }
 
     @Test
@@ -184,8 +185,8 @@ class AddonApiReviewRegressionTest extends MinecraftTestBase {
         original.setHoverName(Component.literal("Escrow Sword"));
         original.getOrCreateTag().putString("review-marker", "preserve-me");
 
-        String serialized = Compat.serializeItemStack(null, original);
-        ItemStack restored = Compat.deserializeItemStack(null, serialized);
+        CompoundTag serialized = Compat.serializeItemStackTag(null, original);
+        ItemStack restored = Compat.deserializeItemStackTag(null, serialized);
 
         assertEquals(original.getItem(), restored.getItem());
         assertEquals(original.getCount(), restored.getCount());
@@ -193,6 +194,59 @@ class AddonApiReviewRegressionTest extends MinecraftTestBase {
         assertEquals("Escrow Sword", restored.getHoverName().getString());
         assertEquals(original.getTag(), restored.getTag());
         assertTrue(Compat.stacksEqual(original, restored));
+    }
+
+    @Test
+    @DisplayName("Large exact escrow persists as structured NBT without one oversized UTF string")
+    void structuredReservationStatePersistsLargePayload() {
+        UUID orderId = UUID.randomUUID();
+        UUID owner = UUID.randomUUID();
+        CompoundTag state = new CompoundTag();
+        ListTag stacks = new ListTag();
+        for (int i = 0; i < 1_024; i++) {
+            ItemStack stack = new ItemStack(Items.PAPER);
+            stack.getOrCreateTag().putString("payload", "x".repeat(256) + i);
+            stacks.add(Compat.serializeItemStackTag(null, stack));
+        }
+        state.put("ItemStacks", stacks);
+        StorageReservation reservation = new StorageReservation(
+                ADDON_PROVIDER, ADDON_COMMODITY, 1_024, "large-state", Map.of(), state);
+        EconomyOrderData.OrderSnapshot snapshot = new EconomyOrderData.OrderSnapshot(
+                orderId, owner, ADDON_COMMODITY.toString(), 1_024, 1_024, "1", "SELL",
+                System.currentTimeMillis(), 0L, false, NonNullList.create(), new ArrayList<>(),
+                false, false, "CUSTOM", ADDON_TYPE.toString(), 1, Map.of(), reservation, Map.of());
+        EconomyOrderData data = new EconomyOrderData();
+        data.putOrder(snapshot);
+
+        EconomyOrderData restored = EconomyOrderData.load(data.save(new CompoundTag()));
+        StorageReservation restoredReservation = restored.getOrders().get(orderId).externalReservation;
+        assertNotNull(restoredReservation);
+        assertTrue(restoredReservation.metadata().isEmpty(), "large exact payload must not be flattened into metadata strings");
+        assertEquals(1_024, restoredReservation.providerState()
+                .getList("ItemStacks", Tag.TAG_COMPOUND).size());
+    }
+
+    @Test
+    @DisplayName("Market analytics separate identical commodity IDs belonging to different types")
+    void marketAnalyticsUseFullCommodityIdentity() {
+        EconomyTradeData data = new EconomyTradeData();
+        TradeLedger.setTradeData(data);
+        UUID buyer = UUID.randomUUID();
+        UUID seller = UUID.randomUUID();
+        EconomyId sameId = EconomyId.of("reviewfixture", "same_id");
+        data.recordTrade(sameId.toString(), ADDON_TYPE.toString(), new BigDecimal("10"), 3, buyer, seller);
+        data.recordTrade(sameId.toString(), ADDON_TYPE_B.toString(), new BigDecimal("2"), 5, buyer, seller);
+
+        DefaultMarketDataService service = new DefaultMarketDataService(new OrderManager());
+        CommodityKey first = new CommodityKey(ADDON_TYPE, sameId);
+        CommodityKey second = new CommodityKey(ADDON_TYPE_B, sameId);
+
+        assertEquals(3L, service.tradedVolume(first));
+        assertEquals(5L, service.tradedVolume(second));
+        assertEquals(new BigDecimal("10"), service.lastTradePrice(first).orElseThrow());
+        assertEquals(new BigDecimal("2"), service.lastTradePrice(second).orElseThrow());
+        assertEquals(1, service.recentTrades(first, 10).size());
+        assertEquals(1, service.recentTrades(second, 10).size());
     }
 
     private static final class FixtureCommodity implements ICommodity {
@@ -233,16 +287,14 @@ class AddonApiReviewRegressionTest extends MinecraftTestBase {
             return Optional.of(new StorageReservation(ADDON_PROVIDER, commodity.getId(), amount,
                     "provider-token-v1", Map.of("cursor", "0")));
         }
-        @Override public int deliverReserved(ServerLevel level, StorageReservation reservation, UUID receiver, int amount) {
-            return Math.min(amount, reservation.amount());
-        }
-        @Override public Optional<StorageReservation> remainingAfterDelivery(ServerLevel level,
-                                                                             StorageReservation reservation,
-                                                                             int deliveredAmount) {
-            int remaining = reservation.amount() - deliveredAmount;
-            if (remaining == 0) return Optional.empty();
-            return Optional.of(new StorageReservation(ADDON_PROVIDER, reservation.commodityId(), remaining,
-                    "provider-token-v2", Map.of("cursor", Integer.toString(deliveredAmount))));
+        @Override public StorageDeliveryResult deliverReserved(ServerLevel level, StorageReservation reservation,
+                                                               UUID receiver, int amount) {
+            int delivered = Math.min(amount, reservation.amount());
+            int remaining = reservation.amount() - delivered;
+            if (remaining == 0) return StorageDeliveryResult.complete(delivered);
+            StorageReservation rest = new StorageReservation(ADDON_PROVIDER, reservation.commodityId(), remaining,
+                    "provider-token-v2", Map.of("cursor", Integer.toString(delivered)), reservation.providerState());
+            return StorageDeliveryResult.partial(delivered, rest);
         }
         @Override public boolean release(ServerLevel level, StorageReservation reservation) { return true; }
     }
