@@ -17,6 +17,11 @@ from pathlib import Path
 
 PASS_MARKER = "ECONOMY_LIVE_JOIN_TEST_PASS"
 SERVER_READY_MARKERS = ("Done (", 'For help, type "help"')
+SERVER_BOOT_MARKERS = (
+    "Starting minecraft server version",
+    "Starting Minecraft server",
+    "Starting minecraft server",
+)
 TARGETS = (
     "fabric-1.20.1",
     "forge-1.20.1",
@@ -27,17 +32,22 @@ TARGETS = (
 
 
 class OutputPump:
-    def __init__(self, process: subprocess.Popen[str], prefix: str) -> None:
+    def __init__(self, process: subprocess.Popen[str], prefix: str, log_path: Path) -> None:
         self.process = process
         self.prefix = prefix
+        self.log_path = log_path
         self.lines: queue.Queue[str] = queue.Queue()
+        self.log_path.parent.mkdir(parents=True, exist_ok=True)
         threading.Thread(target=self._read, daemon=True).start()
 
     def _read(self) -> None:
         assert self.process.stdout is not None
-        for line in self.process.stdout:
-            print(f"[{self.prefix}] {line}", end="", flush=True)
-            self.lines.put(line)
+        with self.log_path.open("a", encoding="utf-8") as log_file:
+            for line in self.process.stdout:
+                print(f"[{self.prefix}] {line}", end="", flush=True)
+                log_file.write(line)
+                log_file.flush()
+                self.lines.put(line)
 
     def wait_for(self, markers: tuple[str, ...], timeout: int) -> str | None:
         deadline = time.monotonic() + timeout
@@ -45,12 +55,31 @@ class OutputPump:
             if self.process.poll() is not None and self.lines.empty():
                 return None
             try:
-                line = self.lines.get(timeout=min(1.0, deadline - time.monotonic()))
+                line = self.lines.get(timeout=min(1.0, max(0.0, deadline - time.monotonic())))
             except queue.Empty:
                 continue
             if any(marker in line for marker in markers):
                 return line
         return None
+
+    def wait_for_server_ready(self, setup_timeout: int, ready_timeout: int) -> str | None:
+        setup_deadline = time.monotonic() + setup_timeout
+        ready_deadline: float | None = None
+        while True:
+            deadline = ready_deadline if ready_deadline is not None else setup_deadline
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return None
+            if self.process.poll() is not None and self.lines.empty():
+                return None
+            try:
+                line = self.lines.get(timeout=min(1.0, remaining))
+            except queue.Empty:
+                continue
+            if any(marker in line for marker in SERVER_READY_MARKERS):
+                return line
+            if ready_deadline is None and any(marker in line for marker in SERVER_BOOT_MARKERS):
+                ready_deadline = time.monotonic() + ready_timeout
 
 
 def gradle(root: Path, task: str) -> list[str]:
@@ -102,7 +131,7 @@ def stop_tree(process: subprocess.Popen[str], graceful_server: bool = False) -> 
                 pass
 
 
-def prepare(module: Path) -> None:
+def prepare(module: Path) -> tuple[Path, Path]:
     server = module / "run" / "live-join" / "server"
     client = module / "run" / "live-join" / "client"
     server.mkdir(parents=True, exist_ok=True)
@@ -118,16 +147,17 @@ def prepare(module: Path) -> None:
         "skipMultiplayerWarning:true\n",
         encoding="utf-8",
     )
+    return server, client
 
 
-def run_target(root: Path, target: str, timeout: int) -> None:
-    prepare(root / target)
+def run_target(root: Path, target: str, timeout: int, setup_timeout: int) -> None:
+    server_dir, client_dir = prepare(root / target)
     subprocess.run(gradle(root, f":{target}:classes"), cwd=root, check=True)
     server = start(gradle(root, f":{target}:runLiveJoinTestServer"), root)
-    server_output = OutputPump(server, f"{target}/server")
+    server_output = OutputPump(server, f"{target}/server", server_dir / "logs" / "process.log")
     client: subprocess.Popen[str] | None = None
     try:
-        if server_output.wait_for(SERVER_READY_MARKERS, timeout) is None:
+        if server_output.wait_for_server_ready(setup_timeout, timeout) is None:
             raise RuntimeError(f"{target}: server did not become ready")
         client_command = gradle(root, f":{target}:runLiveJoinTestClient")
         if os.name != "nt" and not os.environ.get("DISPLAY"):
@@ -136,7 +166,7 @@ def run_target(root: Path, target: str, timeout: int) -> None:
                 raise RuntimeError("DISPLAY is unset and xvfb-run is not installed")
             client_command = [xvfb, "-a", *client_command]
         client = start(client_command, root)
-        client_output = OutputPump(client, f"{target}/client")
+        client_output = OutputPump(client, f"{target}/client", client_dir / "logs" / "process.log")
         if client_output.wait_for((PASS_MARKER,), timeout) is None:
             raise RuntimeError(f"{target}: client did not report a successful live join")
         if client.wait(timeout=60) != 0:
@@ -151,9 +181,12 @@ def run_target(root: Path, target: str, timeout: int) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--target", choices=TARGETS, required=True)
-    parser.add_argument("--timeout", type=int, default=360)
+    parser.add_argument("--timeout", type=int, default=360,
+                        help="seconds allowed for Minecraft readiness/client join after game startup")
+    parser.add_argument("--setup-timeout", type=int, default=900,
+                        help="seconds allowed for Gradle/Loom setup before the server begins booting")
     args = parser.parse_args()
-    run_target(Path(__file__).resolve().parents[1], args.target, args.timeout)
+    run_target(Path(__file__).resolve().parents[1], args.target, args.timeout, args.setup_timeout)
     return 0
 
 
