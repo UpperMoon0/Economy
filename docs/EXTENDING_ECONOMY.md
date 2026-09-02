@@ -94,6 +94,8 @@ Post-events describe committed state and should not be treated as rollback hooks
 
 Listeners execute inline with the operation that posts them. Do not block, sleep, perform network I/O, or run expensive scans from these callbacks. If work can be deferred safely, capture immutable information and schedule the heavy part through your own mechanism.
 
+`OrderCreatePre` is authoritative: Economy posts it before creating a new storage-provider reservation. A cancelled order does not enter the order book or create new provider escrow. Compatibility call paths that supply already-extracted legacy escrow are unwound transactionally, with any unrecoverable remainder quarantined instead of discarded.
+
 ## Custom commodity types
 
 A custom commodity has two pieces:
@@ -169,8 +171,6 @@ public final class TokenCommodityHandler implements ICommodityTypeHandler {
 }
 ```
 
-The example is intentionally simple. Real handlers should validate required keys and migrate older schema versions instead of assuming only the newest payload exists.
-
 Rules for a durable codec:
 
 - `encode` must preserve everything required to reconstruct the commodity after restart;
@@ -180,6 +180,17 @@ Rules for a durable codec:
 - do not depend on transient object identity or runtime registry iteration order.
 
 Economy persistence stores the commodity type ID, payload schema version, and payload map. Malformed persisted orders are quarantined as raw snapshots instead of being silently discarded, so addon extension state is not intentionally destroyed when decoding fails.
+
+## Commodity identity and analytics
+
+The stable identity of a commodity is the pair `(commodityTypeId, commodityId)`, represented by `CommodityKey`.
+
+```java
+CommodityKey key = CommodityKey.of(commodity);
+long volume = EconomyApi.marketData().tradedVolume(key);
+```
+
+Do not use `commodityId` alone as an analytics/database key. Two different registered commodity types may intentionally expose the same commodity ID; Economy keeps their trades and active-order counts separate.
 
 ## Custom storage providers
 
@@ -202,7 +213,7 @@ int receivable(ServerLevel level, UUID owner, ICommodity commodity, int requeste
 
 These are probes. They must not insert, extract, reserve, consume energy, mutate inventories, or create persistent side effects.
 
-Return non-negative values. `receivable` should never claim more than the requested amount.
+Return non-negative values. `receivable` should never claim more than the requested amount. It is only a capacity hint: the final exact delivery result is authoritative.
 
 ### Reservation is the escrow boundary
 
@@ -223,23 +234,77 @@ A reservation contains:
 - commodity ID;
 - positive reserved amount;
 - an opaque provider-owned token;
-- optional immutable string metadata.
+- optional small immutable string metadata;
+- a structured `CompoundTag providerState` for provider-owned durable state.
 
-The token is persisted by Economy. Your provider must be able to resolve the same reservation after a server save/reload. Do not store only an in-memory object reference or map index.
+`metadata` is for small diagnostic/index values. Do **not** Base64/SNBT-pack arbitrary inventories or large binary state into one metadata string. Put structured or potentially large provider state in `providerState`, using normal nested NBT compounds/lists.
 
-### Deliver and release must be lossless
+Economy persists the reservation, including `providerState`, across server save/reload. A provider must be able to understand its own persisted token/state after restart.
 
-`deliverReserved` commits reserved units to the receiver. Returning `N` means exactly `N` units left escrow and reached the receiver/consumer. Never report units that were not actually delivered, and never return more than the requested amount.
+### Delivery is one atomic state transition
 
-`release` returns every remaining reserved unit to the original owner. It is used when an order is cancelled or otherwise unwound.
-
-A correct provider maintains this invariant:
-
-```text
-reserved = delivered + still_escrowed + released
+```java
+StorageDeliveryResult deliverReserved(
+    ServerLevel level,
+    StorageReservation reservation,
+    UUID receiver,
+    int amount
+);
 ```
 
-No path may duplicate or destroy goods.
+The return value contains both:
+
+- `deliveredAmount()` — exactly how many units left escrow and reached the receiver/consumer;
+- `remainingReservation()` — the provider-owned **exact** escrow state after the operation, or empty when nothing remains.
+
+Economy validates the accounting invariant:
+
+```text
+delivered + remaining.amount = reservation.amount
+```
+
+The provider must calculate the remainder from the actual mutation. Never return only a count and then guess which exact stacks/components remain. For heterogeneous item payloads, if one variant is rejected while another is accepted, the returned reservation must contain the exact rejected variant plus any untouched escrow.
+
+Example shape:
+
+```java
+@Override
+public StorageDeliveryResult deliverReserved(ServerLevel level,
+                                             StorageReservation before,
+                                             UUID receiver,
+                                             int requested) {
+    // Perform one provider-owned transaction and derive `remaining`
+    // from what actually failed to move, not from a numeric prefix.
+    int delivered = ...;
+    StorageReservation remaining = ...;
+
+    return remaining == null
+        ? StorageDeliveryResult.complete(delivered)
+        : StorageDeliveryResult.partial(delivered, remaining);
+}
+```
+
+Use `StorageDeliveryResult.unchanged(before)` when nothing moved.
+
+### Release is all-or-nothing
+
+```java
+boolean release(ServerLevel level, StorageReservation reservation);
+```
+
+`true` means every remaining unit was restored to the original owner and the reservation may be discarded. `false` means Economy must continue treating the **entire input reservation as owned escrow**.
+
+Therefore a provider must not partially mutate storage and then return `false`. Simulate or otherwise prove the full restore can succeed before committing, or use a provider-internal transaction/rollback mechanism. A failed release must leave both storage and reservation ownership unchanged.
+
+### Escrow invariant
+
+Across reserve, delivery, cancellation, restart, and provider outages:
+
+```text
+initial goods = delivered + still_escrowed + successfully_released
+```
+
+No code path may duplicate, destroy, or silently forget goods. If a codec/provider is unavailable while loading a persisted order, Economy quarantines escrow-bearing snapshots so they remain persisted instead of dropping them.
 
 ### Storage-provider checklist
 
@@ -248,8 +313,12 @@ Test at minimum:
 - insufficient stock: reservation fails with no mutation;
 - exact stock: reservation succeeds once;
 - save/reload between reserve and delivery;
+- structured provider state substantially larger than one NBT UTF string limit;
+- heterogeneous exact-stack partial delivery where an earlier variant is rejected and a later one succeeds;
 - partial delivery followed by later delivery;
 - partial delivery followed by release;
+- failed release causes zero storage mutation and leaves the whole reservation valid;
+- successful release restores every remaining unit exactly once;
 - cancellation after restart;
 - receiver capacity changing between simulation and delivery;
 - provider temporarily unavailable when persisted orders load;
@@ -268,11 +337,11 @@ Use `MarketEvents` for order/trade observation and `IMarketDataService` for immu
 - `OrderCancelled`
 - `TradeCompleted`
 
-For dashboards or quest checks, prefer `marketData()` queries over maintaining a second copy of Economy's entire market state.
+For dashboards or quest checks, construct a `CommodityKey` and prefer `marketData()` queries over maintaining a second copy of Economy's entire market state.
 
 ## Order ownership and server orders
 
-Create, edit, and cancel through `IOrderManager`. The manager owns authorization and invariant checks.
+Create, edit, and cancel through `IOrderManager`. The manager owns authorization, persistence, escrow, events, and invariant checks.
 
 Server orders are created with `createServerBuyOrder` / `createServerSellOrder`. Do not imitate server ownership by inventing UUIDs or instantiating Economy's internal `Order` implementation.
 
@@ -282,7 +351,7 @@ For player-facing/admin recovery, Economy also exposes `/economy serverorder lis
 
 Keep business logic expressed in Economy API types wherever possible. `EconomyId` exists specifically so your persistent IDs do not need conditional source for Minecraft identifier renames.
 
-Minecraft-facing types still appear where unavoidable, such as `Component` and `ServerLevel`, so a compiled addon jar must target the exact Minecraft generation and loader it declares.
+Minecraft-facing types still appear where unavoidable, such as `Component`, `ServerLevel`, and structured NBT provider state, so a compiled addon jar must target the exact Minecraft generation and loader it declares.
 
 Recommended addon structure:
 
