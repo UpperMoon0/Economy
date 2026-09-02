@@ -25,7 +25,6 @@ public interface IOrder {
     boolean canExecute(UUID trader);
     TransactionResult execute(UUID trader, ServerLevel level);
     TransactionResult execute(UUID trader);
-    boolean cancel();
 
     enum OrderType { BUY, SELL }
 
