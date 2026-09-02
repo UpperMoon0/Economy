@@ -107,6 +107,60 @@ class VaultInventoryOpsTest extends MinecraftTestBase {
     }
 
     @Test
+    @DisplayName("Later compatible variants can deliver while earlier variants remain exactly in remainder")
+    void heterogeneousPayloadReturnsExactRejectedVariant() {
+        ItemStack compatibleInVault = new ItemStack(Items.DIAMOND, 63);
+        compatibleInVault.getOrCreateTag().putString("variant", "accepted");
+        List<ItemStack> vault = new ArrayList<>();
+        vault.add(compatibleInVault);
+
+        ItemStack rejectedFirst = new ItemStack(Items.DIAMOND, 1);
+        rejectedFirst.getOrCreateTag().putString("variant", "rejected");
+        ItemStack acceptedLater = new ItemStack(Items.DIAMOND, 1);
+        acceptedLater.getOrCreateTag().putString("variant", "accepted");
+
+        NonNullList<ItemStack> payload = NonNullList.create();
+        payload.add(rejectedFirst);
+        payload.add(acceptedLater);
+
+        NonNullList<ItemStack> leftover = VaultInventoryOps.insert(vault, payload);
+
+        assertEquals(64, vault.get(0).getCount(), "later compatible exact variant should be accepted");
+        assertEquals(1, VaultInventoryOps.total(leftover));
+        assertEquals("rejected", leftover.get(0).getTag().getString("variant"),
+                "remainder must identify the exact rejected variant, not a numeric prefix reconstruction");
+    }
+
+    @Test
+    @DisplayName("Market distribution stops at the first rejected exact variant")
+    void distributedPayloadKeepsDeliveredCountPrefixSafe() {
+        ItemStack fullRejectedVariant = new ItemStack(Items.DIAMOND, 64);
+        fullRejectedVariant.getOrCreateTag().putString("variant", "rejected");
+        ItemStack compatibleLaterSlot = new ItemStack(Items.DIAMOND, 63);
+        compatibleLaterSlot.getOrCreateTag().putString("variant", "accepted");
+        List<ItemStack> vault = new ArrayList<>();
+        vault.add(fullRejectedVariant);
+        vault.add(compatibleLaterSlot);
+
+        ItemStack rejectedFirst = new ItemStack(Items.DIAMOND, 1);
+        rejectedFirst.getOrCreateTag().putString("variant", "rejected");
+        ItemStack acceptedLater = new ItemStack(Items.DIAMOND, 1);
+        acceptedLater.getOrCreateTag().putString("variant", "accepted");
+        NonNullList<ItemStack> payload = NonNullList.create();
+        payload.add(rejectedFirst);
+        payload.add(acceptedLater);
+
+        NonNullList<ItemStack> simulated = VaultInventoryOps.simulateDistribute(List.of(vault), payload);
+        NonNullList<ItemStack> leftover = VaultInventoryOps.distribute(List.of(vault), payload);
+
+        assertEquals(2, VaultInventoryOps.total(simulated));
+        assertEquals(2, VaultInventoryOps.total(leftover), "later variant must stay untouched after the prefix is blocked");
+        assertEquals(63, vault.get(1).getCount(), "compatible later variant must not be committed out of prefix order");
+        assertEquals("rejected", leftover.get(0).getTag().getString("variant"));
+        assertEquals("accepted", leftover.get(1).getTag().getString("variant"));
+    }
+
+    @Test
     @DisplayName("Simulation leaves source inventories untouched")
     void simulationIsNonMutating() {
         List<List<ItemStack>> inventories = new ArrayList<>();

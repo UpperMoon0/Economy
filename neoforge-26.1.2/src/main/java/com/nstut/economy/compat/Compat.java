@@ -1,13 +1,13 @@
 package com.nstut.economy.compat;
 
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
 import net.minecraft.resources.Identifier;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 
-/**
- * Version-specific helpers for code compiled into multiple Minecraft
- * versions. This is the 1.21.1 implementation.
- */
+/** Version-specific helpers for Minecraft 26.1.2. */
 public final class Compat {
 
     private Compat() {
@@ -27,5 +27,25 @@ public final class Compat {
 
     public static int maxStackSize(Item item) {
         return item.getDefaultMaxStackSize();
+    }
+
+    public static CompoundTag serializeItemStackTag(ServerLevel level, ItemStack stack) {
+        return stack == null || stack.isEmpty()
+                ? new CompoundTag()
+                : com.nstut.economy.util.ItemStackNbtCompat.save(level.registryAccess(), stack);
+    }
+
+    public static ItemStack deserializeItemStackTag(ServerLevel level, CompoundTag tag) {
+        return tag == null || tag.isEmpty()
+                ? ItemStack.EMPTY
+                : com.nstut.economy.util.ItemStackNbtCompat.parseOptional(level.registryAccess(), tag.copy());
+    }
+
+    public static ListTag getCompoundList(CompoundTag parent, String key) {
+        return parent != null && parent.contains(key) ? parent.getListOrEmpty(key) : new ListTag();
+    }
+
+    public static CompoundTag getCompoundAt(ListTag list, int index) {
+        return list.getCompoundOrEmpty(index);
     }
 }

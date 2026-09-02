@@ -1,58 +1,45 @@
 package com.nstut.economy.api;
 
+import java.math.BigDecimal;
 import java.util.Optional;
 import java.util.UUID;
 
-/**
- * Central manager for all bank accounts in the economy system.
- */
+/** Central service for virtual Economy bank accounts. */
 public interface IAccountManager {
-
-    /**
-     * Gets an existing player account.
-     * @param player The player's UUID
-     * @return Optional containing the account if it exists
-     */
     Optional<IBankAccount> getPlayerAccount(UUID player);
-
-    /**
-     * Gets an existing account or creates a new one with starting balance.
-     * @param player The player's UUID
-     * @return The player's bank account
-     */
     IBankAccount getOrCreatePlayerAccount(UUID player);
-
-    /**
-     * Checks if a player has an account.
-     * @param player The player's UUID
-     * @return true if account exists
-     */
     boolean hasAccount(UUID player);
-
-    /**
-     * Gets the server system account for admin operations.
-     * @return The server account
-     */
     IBankAccount getServerAccount();
-
-    /**
-     * Gets the tax collection account.
-     * @return The tax account
-     */
     IBankAccount getTaxAccount();
-
-    /**
-     * Deletes a player account (use with caution).
-     * @param player The player's UUID
-     * @return true if deleted, false if not found
-     */
     boolean deleteAccount(UUID player);
 
     /**
-     * Gets the singleton instance of the account manager.
-     * @return The account manager instance
+     * Performs a transfer through the account contract. Implementations must
+     * guarantee that a rejected/throwing target credit does not debit source.
      */
+    default boolean transfer(IBankAccount source, IBankAccount target, BigDecimal amount,
+                             ITransactionContext context) {
+        if (source == null || target == null) {
+            return false;
+        }
+        return source.transferTo(target, amount, context);
+    }
+
+    default boolean transfer(UUID sourcePlayer, UUID targetPlayer, BigDecimal amount,
+                             ITransactionContext context) {
+        if (sourcePlayer == null || targetPlayer == null) {
+            return false;
+        }
+        return transfer(getOrCreatePlayerAccount(sourcePlayer), getOrCreatePlayerAccount(targetPlayer),
+                amount, context);
+    }
+
+    /**
+     * Compatibility accessor for older addons. New code should use
+     * {@code EconomyApi.accounts()} from the Minecraft-facing API facade.
+     */
+    @Deprecated
     static IAccountManager getInstance() {
-        return com.nstut.economy.core.AccountManagerHolder.INSTANCE;
+        return com.nstut.economy.core.AccountManagerHolder.require();
     }
 }

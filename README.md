@@ -2,13 +2,25 @@
 
 ![Minecraft](https://img.shields.io/badge/Minecraft-multi--version-brightgreen)
 ![Loaders](https://img.shields.io/badge/loaders-Fabric%20%7C%20Forge%20%7C%20NeoForge-orange)
-![License](https://img.shields.io/badge/License-MIT-green)
+![License](https://img.shields.io/badge/License-All%20Rights%20Reserved-lightgrey)
 
 A modern multi-loader order-book economy for Minecraft, with physical item and fluid storage, automated order matching, portfolio tracking, and a full in-game market terminal.
 
 ## Dependency
 
 The client UI requires [OpenUI MC](https://github.com/UpperMoon0/OpenUI-MC), which must be installed alongside Economy. Economy owns the market-specific screens and logic; reusable layout, widget, rendering, scrolling, and animation primitives live in OpenUI MC. Use the dependency version declared by the Economy jar or its release page.
+
+## Supported targets
+
+| Minecraft | Loader | Runtime Java | Module / artifact |
+| :--- | :--- | ---: | :--- |
+| 1.20.1 | Fabric | 17 | `fabric-1.20.1` / `economy-fabric-1.20.1` |
+| 1.20.1 | Forge | 17 | `forge-1.20.1` / `economy-forge-1.20.1` |
+| 1.21.1 | Fabric | 21 | `fabric-1.21.1` / `economy-fabric-1.21.1` |
+| 1.21.1 | NeoForge | 21 | `neoforge-1.21.1` / `economy-neoforge-1.21.1` |
+| 26.1.2 | NeoForge | 25 | `neoforge-26.1.2` / `economy-neoforge-26.1.2` |
+
+Install the file matching both your Minecraft version and loader. A jar built for one target is not a cross-loader/cross-version artifact.
 
 ---
 
@@ -78,11 +90,15 @@ The client UI requires [OpenUI MC](https://github.com/UpperMoon0/OpenUI-MC), whi
 | `/economy balance` | Player | View your balance and open the Market Terminal |
 | `/economy balance <player>` | OP Level 2 | View another player's balance |
 | `/economy pay <player> <amount>` | Player | Transfer coins to another player |
-| `/economy serverorder buy <commodity> <qty> <price>` | OP Level 2 | Create an infinite server buy order for an item or fluid |
-| `/economy serverorder sell <commodity> <qty> <price>` | OP Level 2 | Create an infinite server sell order for an item or fluid |
+| `/economy serverorder buy <commodity> <qty> <price>` | OP Level 2 | Create a server buy order for an item or fluid |
+| `/economy serverorder sell <commodity> <qty> <price>` | OP Level 2 | Create a server sell order for an item or fluid |
+| `/economy serverorder list` | OP Level 2 | List active server orders and their IDs |
+| `/economy serverorder remove <order-id>` | OP Level 2 | Remove a server order by ID; active IDs are tab-completed |
 | `/economy give <player> <amount>` | OP Level 2 | Add funds to a player's account |
 | `/economy take <player> <amount>` | OP Level 2 | Remove funds from a player's account |
 | `/economy set <player> <amount>` | OP Level 2 | Set a player's balance |
+
+New server-order creation responses include the order ID. If an order was created by mistake, run `/economy serverorder list`, then `/economy serverorder remove <order-id>`.
 
 For fluid commodities, quantity is entered in `mB`. For example:
 
@@ -90,24 +106,56 @@ For fluid commodities, quantity is entered in `mB`. For example:
 /economy serverorder sell minecraft:water 16000 2
 ```
 
-This creates an infinite server sell order for `16k mB` of water at 2 coins per mB.
+This creates a server sell order for `16k mB` of water at 2 coins per mB.
+
+---
+
+## Addon / Developer API
+
+Economy exposes a supported addon API in the top-level `com.nstut.economy.api` package. Addons should enter through `EconomyApi` instead of depending on concrete managers, saved-data classes, blocks, menus, packets, or other implementation packages. `com.nstut.economy.api.internal` is explicitly not part of the supported addon surface.
+
+The public API supports:
+
+- player, server, and tax accounts with atomic transfers;
+- namespaced transaction causes, metadata, and loader-neutral account events;
+- order creation/query/edit/cancel operations;
+- immutable market/trade analytics;
+- custom namespaced commodity types with versioned persistence codecs;
+- pluggable durable storage providers and reservations;
+- loader-neutral market events for order and trade integrations.
+
+Developer documentation:
+
+- [Getting Started](docs/GETTING_STARTED.md) — dependency setup, runtime lifecycle, orders, market reads, events, and addon verification.
+- [Extending Economy](docs/EXTENDING_ECONOMY.md) — custom transaction causes, commodities/codecs, storage providers, persistence rules, and compatibility guidance.
+- [API Reference](docs/API_REFERENCE.md) — practical catalog of the supported public classes and methods.
+
+Economy currently defines loader-specific Maven publications but does not configure a public Maven repository. The Getting Started guide documents composite-build and Maven Local development until a public repository is officially available.
 
 ---
 
 ## Building and Testing
 
 ```bash
-# Run every shared and version-specific test suite
+# JVM/unit/regression suites across supported version families
 ./gradlew testAllVersions
 
 # Build every supported loader target
 ./gradlew buildAll
+
+# Canonical real-server world/GameTest coverage
+./gradlew :forge-1.20.1:runGameTestServer
+
+# Real client/server join smoke for one target
+python3 tools/live_join_test.py --target forge-1.20.1
 ```
 
-Each loader module writes its compiled JAR to its own `build/libs/` directory.
+`testAllVersions` is the fast JVM layer; it does not replace real-game validation. CI additionally runs the Forge 1.20.1 GameTest and a real client/server join for each supported loader target. On headless Linux, `tools/live_join_test.py` uses `xvfb-run` when `DISPLAY` is unset.
+
+Each loader module writes its compiled JAR to its own `build/libs/` directory. The NeoForge 26.1.2 target runs on Java 25; CI drives Gradle with Java 21 and lets ModDevGradle provision the Java 25 toolchain for that target.
 
 ---
 
 ## License
 
-Distributed under the MIT License. Created by **NsTut**.
+All Rights Reserved, matching the mod metadata. Created by **NsTut**.

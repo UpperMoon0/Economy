@@ -13,15 +13,9 @@ if (sharedPropertiesFile.exists()) {
 
 def sharedProperty = { String name ->
     def localValue = findProperty(name)
-    if (localValue != null) {
-        return localValue.toString()
-    }
-
+    if (localValue != null) return localValue.toString()
     def sharedValue = sharedProperties.getProperty(name)
-    if (sharedValue != null) {
-        return sharedValue
-    }
-
+    if (sharedValue != null) return sharedValue
     throw new GradleException("Missing required property '${name}'")
 }
 
@@ -42,19 +36,21 @@ version = mod_version
 group = mod_group_id
 
 sourceSets.main.resources {
-    // Include version-neutral resources authored for 1.21+ formats.
     srcDir('../common/src/main/resources')
-
     exclude("**/*.bbmodel")
 }
 
-// Minecraft 26.1 introduced source-breaking identifier, rendering, registry,
-// menu and persistence APIs. Keep its adapter sources local while preserving
-// the same package-level architecture and behavior as the shared targets.
-sourceSets.test.java.srcDir('../common/src/test/java')
+// Minecraft 26.1 adapters stay local, while version-neutral Minecraft-facing
+// API/source lives in minecraft-all. The pure-Java API classes from :common
+// must also be source-owned by this mod so they are present in the runtime jar;
+// a project dependency alone only puts them on Gradle's compile/test classpath.
+def commonApiSources = objects.sourceDirectorySet('commonApiSources', 'Economy common API sources')
+commonApiSources.srcDir('../common/src/main/java')
+commonApiSources.include('com/nstut/economy/api/**')
 sourceSets.main.java.srcDir('../shared/minecraft-all/src/main/java')
+sourceSets.main.java.source(commonApiSources)
+sourceSets.test.java.srcDir('../common/src/test/java')
 sourceSets.test.java.srcDir('../shared/minecraft-all/src/test/java')
-
 sourceSets.test.compileClasspath += sourceSets.main.compileClasspath
 sourceSets.test.runtimeClasspath += sourceSets.main.runtimeClasspath
 
@@ -66,50 +62,52 @@ base {
     archivesName = "${archives_name}-neoforge-${minecraft_version}"
 }
 
-// Minecraft 26.1.2 ships Java 25 to end users, so mods should target Java 25.
-java.toolchain.languageVersion = JavaLanguageVersion.of(25)
+java {
+    toolchain.languageVersion = JavaLanguageVersion.of(25)
+    withSourcesJar()
+}
+
+tasks.named('sourcesJar') {
+    // The 26.x module deliberately overlays version-specific resources on top
+    // of common resources. Match processResources semantics so a source JAR
+    // contains one deterministic copy instead of failing on the overlap.
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
 
 neoForge {
     version = project.neo_version
-
     runs {
         client {
             client()
             systemProperty 'economy.enabledGameTestNamespaces', project.mod_id
         }
-
         liveJoinTestClient {
             client()
             gameDirectory = project.file("run/live-join/client")
             systemProperty 'economy.liveJoinTest', 'true'
             programArguments.addAll '--quickPlayMultiplayer', '127.0.0.1:25575'
         }
-
         server {
             server()
             programArgument '--nogui'
             systemProperty 'economy.enabledGameTestNamespaces', project.mod_id
         }
-
         liveJoinTestServer {
             server()
             gameDirectory = project.file("run/live-join/server")
             programArgument '--nogui'
         }
-
         data {
             clientData()
             programArguments.addAll '--mod', project.mod_id, '--all',
                     '--output', file('src/generated/resources/').getAbsolutePath(),
                     '--existing', file('src/main/resources/').getAbsolutePath()
         }
-
         configureEach {
             systemProperty 'forge.logging.markers', 'REGISTRIES'
             logLevel = org.slf4j.event.Level.DEBUG
         }
     }
-
     mods {
         "${mod_id}" {
             sourceSet(sourceSets.main)
@@ -122,12 +120,10 @@ configurations {
 }
 
 dependencies {
+    implementation project(':common')
     implementation("dev.architectury:architectury-neoforge:${architectury_version_26_1_2}") {
-        // ModDevGradle already supplies NeoForge; avoid Architectury selecting its runtime variant too.
         exclude group: 'net.neoforged', module: 'neoforge'
     }
-    // OpenUI is a required compile/runtime mod and provides the 26.1 render
-    // extraction adapter used by Economy's screens.
     implementation "com.nstut:openui-mc-neoforge-26.1.2:${openui_version}"
     localRuntime "com.nstut:openui-mc-neoforge-26.1.2:${openui_version}"
 
@@ -137,9 +133,7 @@ dependencies {
     testImplementation "org.slf4j:slf4j-simple:2.0.16"
 }
 
-test {
-    useJUnitPlatform()
-}
+test { useJUnitPlatform() }
 
 var generateModMetadata = tasks.register("generateModMetadata", ProcessResources) {
     var replaceProperties = [
@@ -163,11 +157,18 @@ var generateModMetadata = tasks.register("generateModMetadata", ProcessResources
 sourceSets.main.resources.srcDir generateModMetadata
 neoForge.ideSyncTask generateModMetadata
 
-processResources {
-    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-}
+processResources { duplicatesStrategy = DuplicatesStrategy.EXCLUDE }
 
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
     options.compilerArgs.addAll(['-Xmaxerrs', '1000'])
+}
+
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            artifactId = base.archivesName.get()
+            from components.java
+        }
+    }
 }

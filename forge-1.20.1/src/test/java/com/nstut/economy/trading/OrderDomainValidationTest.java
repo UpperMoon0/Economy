@@ -65,4 +65,19 @@ class OrderDomainValidationTest extends MinecraftTestBase {
                 IOrder.OrderType.BUY, null, net.minecraft.core.NonNullList.create(), false);
         assertFalse(zeroPrice.isValid());
     }
+
+    @Test
+    @DisplayName("Server orders can only be removed through the server owner identity")
+    void serverOrderRemovalUsesServerIdentity() {
+        Order order = manager.createServerBuyOrder(iron, 8, new BigDecimal("2.5"));
+        assertNotNull(order);
+        assertTrue(order.isServerOrder());
+        assertTrue(manager.getOrder(order.getOrderId()).isPresent());
+
+        assertFalse(manager.cancelOrder(order.getOrderId(), owner));
+        assertTrue(manager.getOrder(order.getOrderId()).isPresent());
+
+        assertTrue(manager.cancelOrder(order.getOrderId(), OrderManager.SERVER_ID));
+        assertTrue(manager.getOrder(order.getOrderId()).isEmpty());
+    }
 }

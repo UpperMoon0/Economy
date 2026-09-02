@@ -3,13 +3,13 @@ package com.nstut.economy.command;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.DoubleArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
+import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
 import com.nstut.Economy;
 import com.nstut.economy.api.IAccountManager;
 import com.nstut.economy.api.IBankAccount;
 import com.nstut.economy.api.ICommodity;
-import com.nstut.economy.blocks.VaultManager;
 import com.nstut.economy.config.EconomyConfig;
 import com.nstut.economy.core.TransactionContext;
 import com.nstut.economy.trading.FluidCommodity;
@@ -35,7 +35,9 @@ import net.minecraft.world.level.material.Fluids;
 
 import java.math.BigDecimal;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 
 public class EconomyCommands {
 
@@ -76,7 +78,6 @@ public class EconomyCommands {
                             IBankAccount senderAccount = accounts.getOrCreatePlayerAccount(sender.getUUID());
                             IBankAccount receiverAccount = accounts.getOrCreatePlayerAccount(receiver.getUUID());
 
-                            EconomyConfig config = EconomyConfig.getInstance();
                             boolean isSelf = sender.getUUID().equals(receiver.getUUID());
                             if (senderAccount.transferTo(receiverAccount, amount,
                                 TransactionContext.transfer("Payment from " + sender.getName().getString(), receiver.getUUID()))) {
@@ -109,6 +110,15 @@ public class EconomyCommands {
             )
             .then(Commands.literal("serverorder")
                 .requires(source -> source.permissions().hasPermission(net.minecraft.server.permissions.Permissions.COMMANDS_MODERATOR))
+                .then(Commands.literal("list")
+                    .executes(EconomyCommands::listServerOrders)
+                )
+                .then(Commands.literal("remove")
+                    .then(Commands.argument("orderId", StringArgumentType.word())
+                        .suggests((context, builder) -> suggestServerOrderIds(builder))
+                        .executes(EconomyCommands::removeServerOrder)
+                    )
+                )
                 .then(Commands.literal("buy")
                     .then(Commands.literal("perbucket")
                         .then(Commands.argument("commodity", IdentifierArgument.id())
@@ -238,6 +248,56 @@ public class EconomyCommands {
         return 1;
     }
 
+    private static int listServerOrders(CommandContext<CommandSourceStack> context) {
+        List<Order> serverOrders = Economy.getOrderManager().getAllOrders().stream()
+                .filter(Order::isServerOrder)
+                .toList();
+        if (serverOrders.isEmpty()) {
+            context.getSource().sendSuccess(() -> Component.literal("No active server orders."), false);
+            return 1;
+        }
+
+        context.getSource().sendSuccess(() -> Component.literal("Active server orders (" + serverOrders.size() + "):"), false);
+        for (Order order : serverOrders) {
+            String side = order.getType().name().toLowerCase(java.util.Locale.ROOT);
+            String quantity = order.isInfinite() ? "∞" : Integer.toString(order.getQuantity());
+            String price = order.getPricePerUnit().stripTrailingZeros().toPlainString();
+            context.getSource().sendSuccess(() -> Component.literal(
+                    order.getOrderId() + " | " + side + " | " + quantity + " x "
+                            + order.getCommodity().getId() + " @ " + price), false);
+        }
+        return serverOrders.size();
+    }
+
+    private static int removeServerOrder(CommandContext<CommandSourceStack> context) {
+        String rawId = StringArgumentType.getString(context, "orderId");
+        final UUID orderId;
+        try {
+            orderId = UUID.fromString(rawId);
+        } catch (IllegalArgumentException invalid) {
+            context.getSource().sendFailure(Component.literal("Invalid order ID: " + rawId));
+            return 0;
+        }
+
+        OrderManager orderManager = Economy.getOrderManager();
+        java.util.Optional<Order> candidate = orderManager.getOrder(orderId);
+        if (candidate.isEmpty()) {
+            context.getSource().sendFailure(Component.literal("No active order with ID " + orderId));
+            return 0;
+        }
+        if (!candidate.get().isServerOrder()) {
+            context.getSource().sendFailure(Component.literal("Order " + orderId + " is not a server order."));
+            return 0;
+        }
+        if (!orderManager.cancelOrder(orderId, OrderManager.SERVER_ID)) {
+            context.getSource().sendFailure(Component.literal("Server order " + orderId + " could not be removed."));
+            return 0;
+        }
+
+        context.getSource().sendSuccess(() -> Component.literal("Removed server order " + orderId), true);
+        return 1;
+    }
+
     private static int createServerOrder(CommandContext<CommandSourceStack> context, boolean isBuy,
                                          boolean bucketQuote) {
         Identifier id = IdentifierArgument.getId(context, "commodity");
@@ -295,7 +355,7 @@ public class EconomyCommands {
                 .append(CoinText.amount(displayedPrice))
                 .append(Component.literal(" " + priceUnit + " (total: "))
                 .append(CoinText.amount(priceStr))
-                .append(Component.literal(")")),
+                .append(Component.literal(", ID: " + order.getOrderId() + ")")),
             true
         );
         return 1;
@@ -308,6 +368,15 @@ public class EconomyCommands {
                 .filter(id -> CommodityUtil.isCanonicalFluid(BuiltInRegistries.FLUID.getValue(id)))
                 .forEach(ids::add);
         return SharedSuggestionProvider.suggestResource(ids, builder);
+    }
+
+    private static java.util.concurrent.CompletableFuture<com.mojang.brigadier.suggestion.Suggestions>
+            suggestServerOrderIds(com.mojang.brigadier.suggestion.SuggestionsBuilder builder) {
+        List<String> ids = Economy.getOrderManager().getAllOrders().stream()
+                .filter(Order::isServerOrder)
+                .map(order -> order.getOrderId().toString())
+                .toList();
+        return SharedSuggestionProvider.suggest(ids, builder);
     }
 
     private static void playMoneySound(ServerPlayer player) {

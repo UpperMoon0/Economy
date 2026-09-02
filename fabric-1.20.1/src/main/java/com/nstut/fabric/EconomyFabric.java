@@ -75,8 +75,8 @@ public class EconomyFabric implements ModInitializer {
     }
 
     private void onServerStopping(MinecraftServer server) {
-        EconomyServerLifecycle.save();
-        Economy.LOGGER.info("Economy data saved");
+        EconomyServerLifecycle.stop();
+        Economy.LOGGER.info("Economy data saved and API runtime unbound");
     }
 
     private void onEndServerTick(MinecraftServer server) {

@@ -6,11 +6,18 @@ def commonProject = project(':common-1.20.1')
 ext.minecraft_version = commonProject.minecraft_version
 ext.architectury_api_version = commonProject.architectury_api_version
 ext.forge_version = commonProject.forge_version
+def economyModId = rootProject.mod_id
 
 loom {
     forge {
     }
     runs {
+        gameTestServer {
+            server()
+            environment("gametestserver")
+            runDir("run/gametest")
+            property "forge.enabledGameTestNamespaces", economyModId
+        }
         liveJoinTestClient {
             client()
             runDir("run/live-join/client")
@@ -70,6 +77,48 @@ dependencies {
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
+// Compile a consumer-shaped fixture independently from the normal test source
+// set. It deliberately lives outside com.nstut and its imports are checked so
+// the fixture cannot silently rely on Economy implementation packages.
+sourceSets {
+    addonFixture {
+        java.srcDir 'src/addonFixture/java'
+        compileClasspath = sourceSets.main.compileClasspath + sourceSets.main.output
+    }
+}
+
+tasks.register('verifyAddonFixtureApiBoundary') {
+    group = 'verification'
+    description = 'Ensures the external addon fixture imports Economy only through the supported top-level com.nstut.economy.api package.'
+    inputs.files(sourceSets.addonFixture.java)
+    doLast {
+        def violations = []
+        sourceSets.addonFixture.java.files.each { source ->
+            source.eachLine { line, number ->
+                def trimmed = line.trim()
+                def economyImport = trimmed.startsWith('import com.nstut.economy.')
+                def publicApiImport = trimmed.startsWith('import com.nstut.economy.api.')
+                        && !trimmed.startsWith('import com.nstut.economy.api.internal.')
+                if (economyImport && !publicApiImport) {
+                    violations << "${source}:$number: $trimmed"
+                }
+            }
+        }
+        if (!violations.isEmpty()) {
+            throw new GradleException('External addon fixture crossed the public API boundary:\n' + violations.join('\n'))
+        }
+    }
+}
+
+tasks.named('compileAddonFixtureJava', JavaCompile).configure {
+    dependsOn tasks.named('verifyAddonFixtureApiBoundary')
+    options.release = 17
+}
+
+tasks.named('check').configure {
+    dependsOn tasks.named('compileAddonFixtureJava')
+}
+
 tasks.named('test', Test).configure {
     useJUnitPlatform()
     systemProperty 'economy.repoRoot', rootProject.projectDir.absolutePath
@@ -103,6 +152,13 @@ processResources {
                 mod_license: rootProject.findProperty('mod_license') ?: 'All Rights Reserved',
                 issue_tracker_url: rootProject.findProperty('issue_tracker_url') ?: 'https://github.com/UpperMoon0/Economy/issues'
     }
+}
+
+// GameTest classes/templates are development-only. They stay on the dev run
+// classpath but are not shipped in production artifacts.
+tasks.withType(Jar).configureEach {
+    exclude 'com/nstut/forge/gametest/**'
+    exclude 'data/economy/structures/economy_gametest_empty.nbt'
 }
 
 shadowJar {

@@ -17,6 +17,12 @@ on:
 permissions:
   contents: write
 
+# Only the latest head of a PR is useful. Cancel older matrices as soon as a
+# new commit arrives, while never cancelling main/tag/release validation.
+concurrency:
+  group: economy-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   release-gate:
     name: Check release trigger
@@ -162,31 +168,27 @@ jobs:
           cache: 'gradle'
       - run: chmod +x gradlew
       - name: Run shared unit tests
-        run: ./gradlew :common:test :common-1.20.1:test :common-1.21.1:test
+        run: ./gradlew :common:test :common-1.20.1:test :common-1.21.1:test --build-cache
 
   verify-and-build:
     needs: prepare-openui
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         include:
           - target: fabric-1.20.1
             java: 21
-            build: true
           - target: forge-1.20.1
             java: 21
-            build: true
           - target: fabric-1.21.1
             java: 21
-            build: true
           - target: neoforge-1.21.1
             java: 21
-            build: true
           # Gradle runs on Java 21; ModDevGradle provisions the Java 25 toolchain.
           - target: neoforge-26.1.2
             java: 21
-            build: true
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -215,15 +217,34 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x gradlew
 
-      - name: Test ${{ matrix.target }}
-        run: ./gradlew :${{ matrix.target }}:test
+      # Gradle's build lifecycle already includes check -> test. Forge 1.20.1
+      # also runs the canonical real-world GameTest in this same invocation so
+      # GameTest does not require another Gradle configuration/startup.
+      - name: Verify, build and GameTest ${{ matrix.target }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tasks=(":${{ matrix.target }}:build")
+          if [[ "${{ matrix.target }}" == "forge-1.20.1" ]]; then
+            tasks+=(":forge-1.20.1:runGameTestServer")
+          fi
+          ./gradlew "${tasks[@]}" --build-cache --no-daemon --console=plain
 
-      - name: Build ${{ matrix.target }}
-        if: matrix.build
-        run: ./gradlew :${{ matrix.target }}:build
+      - name: Run real client/server join ${{ matrix.target }}
+        run: python3 tools/live_join_test.py --target "${{ matrix.target }}"
+
+      - name: Upload integration logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-logs-${{ matrix.target }}
+          path: |
+            ${{ matrix.target }}/run/gametest/logs
+            ${{ matrix.target }}/run/live-join/client/logs
+            ${{ matrix.target }}/run/live-join/server/logs
+          if-no-files-found: ignore
 
       - name: Upload release artifact
-        if: matrix.build
         uses: actions/upload-artifact@v4
         with:
           name: economy-${{ matrix.target }}
@@ -234,7 +255,7 @@ jobs:
           if-no-files-found: error
 
   release:
-    needs: [release-gate, test-shared, verify-and-build, live-client]
+    needs: [release-gate, test-shared, verify-and-build]
     if: needs.release-gate.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -365,8 +386,3 @@ jobs:
               exit 1
             fi
           done
-
-  live-client:
-    name: Live client join compatibility
-    needs: prepare-openui
-    uses: ./.github/workflows/live-join-test.yml

@@ -1,12 +1,14 @@
 # NsTut Economy
 
-**NsTut Economy** adds a complete player economy and trading market to Minecraft 1.20.1 Forge.
+**NsTut Economy** adds a complete player economy and trading market to Minecraft across the supported Fabric, Forge, and NeoForge targets.
+
+Current source targets include Minecraft 1.20.1 (Fabric/Forge), 1.21.1 (Fabric/NeoForge), and 26.1.2 (NeoForge). Install the Economy file that matches your exact Minecraft version and loader.
 
 Buy and sell items or fluids through an in-game Market Terminal, build storage that connects directly to the market, follow changing prices, manage your orders, track your wealth, and send coins to other players.
 
 ## Required dependency
 
-Economy requires **OpenUI MC 0.0.6 or newer** on the client. Install the Forge 1.20.1 OpenUI MC file alongside Economy. CurseForge marks it as a required dependency for automatic installation.
+Economy requires **OpenUI MC** on the client. Install the matching OpenUI MC file/version required by the Economy file you are using. CurseForge marks it as a required dependency where supported so compatible installations can resolve it automatically.
 
 ---
 
@@ -62,7 +64,7 @@ Fluid Tanks provide market-connected storage for fluids.
 - Each Tank stores up to `128,000 mB`.
 - A Tank holds one compatible fluid at a time.
 - Use buckets, cells, and other compatible fluid containers in the Tank slot.
-- Connect compatible Forge pipes and automation through the Tank's fluid capability.
+- Connect compatible loader-supported pipes and automation through the Tank's standard fluid API/capability.
 - Transfer guidance is anchored to the processing slot so it remains aligned with the actual interaction area.
 - Fluid Sell Orders draw from connected Tanks.
 - Bought fluids are delivered into Tanks with compatible free space.
@@ -128,10 +130,18 @@ The market tracks more than your coin balance:
 - `/economy pay <player> <amount>` — Send coins to another player.
 - `/economy serverorder buy <commodity> <qty> <price>` — Create a server Buy Order for an item or fluid.
 - `/economy serverorder sell <commodity> <qty> <price>` — Create a server Sell Order for an item or fluid.
+- `/economy serverorder list` — List active server orders and their IDs.
+- `/economy serverorder remove <order-id>` — Remove a mistaken server order by ID; active IDs are tab-completed.
 - `/economy give <player> <amount>` — Give coins to a player.
 - `/economy take <player> <amount>` — Take coins from a player.
 - `/economy set <player> <amount>` — Set a player’s balance.
 
-Balance and payment commands are available to players. Server-order and balance-management commands require operator permission.
+Balance and payment commands are available to players. Server-order and balance-management commands require operator permission. Newly created server orders print their order ID; for an older or forgotten order, run `/economy serverorder list` and then `/economy serverorder remove <order-id>`.
 
 For fluid server orders, quantity is entered in millibuckets. For example, `16000` represents `16k mB`.
+
+---
+
+## Addon developers
+
+Economy exposes a supported addon API for accounts, atomic transfers, orders, market analytics, events, custom commodity codecs, and pluggable storage providers. The compatibility boundary is the top-level `com.nstut.economy.api` package; `com.nstut.economy.api.internal` and other implementation packages are not supported addon dependencies. Developer documentation is maintained in the GitHub repository under `docs/GETTING_STARTED.md`, `docs/EXTENDING_ECONOMY.md`, and `docs/API_REFERENCE.md`.
