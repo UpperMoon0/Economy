@@ -1,6 +1,7 @@
 package com.nstut.economy.core;
 
 import com.nstut.economy.api.EconomyEvents;
+import com.nstut.economy.api.EconomyId;
 import com.nstut.economy.api.IBankAccount;
 import com.nstut.economy.api.ITransactionContext;
 import com.nstut.economy.api.ITransactionRecord;
@@ -49,9 +50,10 @@ public class BankAccount implements IBankAccount {
 
     @Override
     public synchronized boolean credit(BigDecimal amount, ITransactionContext ctx) {
-        if (!validAmount(amount) || ctx == null) {
+        if (!validAmount(amount)) {
             return false;
         }
+        ctx = contextOrDefault(ctx, TransactionCauses.CREDIT, "Legacy credit");
         BigDecimal previous = balance;
         EconomyEvents.BalanceChangePre pre = EconomyEvents.post(
                 new EconomyEvents.BalanceChangePre(owner, previous, amount, ctx));
@@ -68,9 +70,10 @@ public class BankAccount implements IBankAccount {
 
     @Override
     public synchronized boolean debit(BigDecimal amount, ITransactionContext ctx) {
-        if (!validAmount(amount) || ctx == null || balance.compareTo(amount) < 0) {
+        if (!validAmount(amount) || balance.compareTo(amount) < 0) {
             return false;
         }
+        ctx = contextOrDefault(ctx, TransactionCauses.DEBIT, "Legacy debit");
         BigDecimal previous = balance;
         BigDecimal delta = amount.negate();
         EconomyEvents.BalanceChangePre pre = EconomyEvents.post(
@@ -88,9 +91,10 @@ public class BankAccount implements IBankAccount {
 
     @Override
     public boolean transferTo(IBankAccount target, BigDecimal amount, ITransactionContext ctx) {
-        if (target == null || target == this || !validAmount(amount) || ctx == null) {
+        if (target == null || target == this || !validAmount(amount)) {
             return target == this && validAmount(amount);
         }
+        ctx = contextOrDefault(ctx, TransactionCauses.TRANSFER, "Legacy transfer");
         if (target instanceof BankAccount bankTarget) {
             return transferToBuiltIn(bankTarget, amount, ctx);
         }
@@ -197,6 +201,11 @@ public class BankAccount implements IBankAccount {
                 owner, sourceBefore, balance, amount.negate(), ctx));
         EconomyEvents.post(new EconomyEvents.TransferCompleted(owner, target.getOwner(), amount, ctx));
         return true;
+    }
+
+    private ITransactionContext contextOrDefault(ITransactionContext context, EconomyId cause,
+                                                 String description) {
+        return context != null ? context : new TransactionContext(cause, description, owner.toString());
     }
 
     private static ITransactionContext counterpartContext(ITransactionContext original, UUID source) {
