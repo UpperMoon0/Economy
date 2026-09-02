@@ -26,6 +26,14 @@ public interface IOrder {
     TransactionResult execute(UUID trader, ServerLevel level);
     TransactionResult execute(UUID trader);
 
+    /**
+     * Legacy cancellation entry point. Implementations must route this through the active
+     * {@link IOrderManager} so escrow/provider restoration remains authoritative and atomic.
+     * New addon code should call {@link IOrderManager#cancelOrder(UUID, UUID)} directly.
+     */
+    @Deprecated
+    boolean cancel();
+
     enum OrderType { BUY, SELL }
 
     final class TransactionResult {
