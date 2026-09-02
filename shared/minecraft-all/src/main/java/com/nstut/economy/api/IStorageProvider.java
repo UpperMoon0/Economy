@@ -18,7 +18,11 @@ public interface IStorageProvider {
     int available(ServerLevel level, UUID owner, ICommodity commodity);
     int receivable(ServerLevel level, UUID owner, ICommodity commodity, int requestedAmount);
 
-    /** Atomically extracts/escrows up to the requested amount or returns empty without mutation. */
+    /**
+     * Atomically extracts/escrows exactly the requested amount or returns empty without mutation.
+     * A non-empty result must keep this provider ID and commodity ID, report the exact requested
+     * amount, and provide a non-blank durable token. The registry validates these invariants.
+     */
     Optional<StorageReservation> reserve(ServerLevel level, UUID owner, ICommodity commodity, int amount);
 
     /**
