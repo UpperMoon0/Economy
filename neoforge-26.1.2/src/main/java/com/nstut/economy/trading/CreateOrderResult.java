@@ -1,22 +1,24 @@
 package com.nstut.economy.trading;
 
+import com.nstut.economy.api.OrderCreateResult;
+
 import java.util.List;
 
 /**
- * Explicit outcome of an order creation request. Order existence on the book
- * only tells whether a remainder remains; it cannot express "fully executed"
- * or "rejected", so callers must branch on the status instead of null checks.
+ * Internal concrete result retained for source compatibility. It now extends
+ * the stable addon-facing result so {@link OrderManager} can implement the
+ * public order service without changing existing internal callers.
  */
-public record CreateOrderResult(
-        Status status,
-        Order remainingOrder,
-        int requestedQuantity,
-        int filledQuantity,
-        String errorKey,
-        List<String> errorArgs
-) {
+public final class CreateOrderResult extends OrderCreateResult {
+    public CreateOrderResult(Status status, Order remainingOrder, int requestedQuantity,
+                             int filledQuantity, String errorKey, List<String> errorArgs) {
+        super(status, remainingOrder, requestedQuantity, filledQuantity, errorKey, errorArgs);
+    }
 
-    public enum Status { POSTED, PARTIALLY_FILLED, FILLED, REJECTED }
+    @Override
+    public Order remainingOrder() {
+        return (Order) super.remainingOrder();
+    }
 
     public static CreateOrderResult rejected(String errorKey, List<String> errorArgs) {
         return new CreateOrderResult(Status.REJECTED, null, 0, 0, errorKey, List.copyOf(errorArgs));
