@@ -196,8 +196,14 @@ public class Order implements IOrder {
         if (commodity instanceof ItemCommodity item) {
             if (!serverOrder) {
                 items = buildItemDelivery(item.getItem(), amount);
-                amount = Math.min(amount, VaultInventoryOps.total(items));
-                if (amount <= 0) return TransactionResult.failure("Sell order has no reserved items");
+                // A no-world call cannot inspect storage. Preserve the legacy/API
+                // settlement path when the counterparty is the server itself;
+                // real in-world player SELL creation still requires escrow.
+                boolean virtualServerSettlement = serverBuyer && level == null && reservedItems.isEmpty();
+                if (!virtualServerSettlement) {
+                    amount = Math.min(amount, VaultInventoryOps.total(items));
+                    if (amount <= 0) return TransactionResult.failure("Sell order has no reserved items");
+                }
             } else items = generateItemStacks(item.getItem(), amount);
             if (!serverBuyer && level != null) {
                 int space = VaultManager.hasVault(buyerId) ? VaultManager.countMaxAcceptableItems(level, buyerId, items) : 0;
