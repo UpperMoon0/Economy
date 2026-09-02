@@ -224,14 +224,16 @@ class OrderMoneyFlowTest extends MinecraftTestBase {
     }
 
     @Test
-    @DisplayName("Orders can only be cancelled once and only while quantity remains")
-    void cancelIsIdempotentAndQuantityGuarded() {
+    @DisplayName("Direct cancellation cannot bypass manager escrow restoration")
+    void directCancelRefusesToOrphanEscrow() {
         Order order = sellOrder(10, "5", 10);
 
         assertTrue(order.canCancel());
-        assertTrue(order.cancel());
-        assertFalse(order.canCancel());
+        assertEquals(10, order.getEscrowedItemCount());
         assertFalse(order.cancel());
+        assertTrue(order.canCancel(), "failed direct cancellation must leave the order active");
+        assertEquals(10, order.getQuantity());
+        assertEquals(10, order.getEscrowedItemCount(), "failed direct cancellation must preserve escrow exactly");
 
         Order exhausted = sellOrder(1, "5", 1);
         exhausted.consumeEscrow(1);
