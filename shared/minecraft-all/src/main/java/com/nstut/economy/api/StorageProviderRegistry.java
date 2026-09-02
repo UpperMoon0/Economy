@@ -77,19 +77,37 @@ public final class StorageProviderRegistry {
             if (violation != null) {
                 IllegalStateException invalid = new IllegalStateException(
                         "Storage provider " + provider.id() + " returned invalid reservation: " + violation);
+                boolean released = false;
                 try {
-                    if (!provider.release(level, reservation)) {
-                        invalid.addSuppressed(new IllegalStateException(
-                                "Provider could not release its invalid reservation " + reservation.token()));
-                    }
+                    released = provider.release(level, reservation);
                 } catch (RuntimeException releaseFailure) {
                     invalid.addSuppressed(releaseFailure);
+                }
+                if (!released) {
+                    String reason = "invalid provider reservation could not be released: " + provider.id() + " (" + violation + ")";
+                    if (!preserveUnreleasedReservation(owner, commodity, reservation, reason, invalid)) {
+                        invalid.addSuppressed(new IllegalStateException(
+                                "Provider escrow could not be durably quarantined: " + reservation.token()));
+                    }
                 }
                 throw invalid;
             }
             return candidate;
         }
         return Optional.empty();
+    }
+
+    private static boolean preserveUnreleasedReservation(UUID owner, ICommodity commodity,
+                                                         StorageReservation reservation, String reason,
+                                                         IllegalStateException parent) {
+        if (!EconomyApi.isReady()) return false;
+        try {
+            EconomyApi.orders().preserveProviderReservation(owner, commodity, reservation, null, reason);
+            return true;
+        } catch (RuntimeException preservationFailure) {
+            parent.addSuppressed(preservationFailure);
+            return false;
+        }
     }
 
     private static String reservationViolation(IStorageProvider provider, ICommodity commodity, int requested,
