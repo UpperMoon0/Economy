@@ -27,6 +27,23 @@ public interface IStorageProvider {
      */
     int deliverReserved(ServerLevel level, StorageReservation reservation, UUID receiver, int amount);
 
+    /**
+     * Returns the provider-owned reservation representing what remains after a successful delivery.
+     * Economy deliberately does not fabricate a smaller reservation/token because provider tokens may
+     * encode amount- or state-specific ownership. Providers that can partially deliver MUST override
+     * this method. The default is only valid for zero- or full-delivery results.
+     */
+    default Optional<StorageReservation> remainingAfterDelivery(ServerLevel level, StorageReservation reservation,
+                                                                int deliveredAmount) {
+        if (deliveredAmount < 0 || deliveredAmount > reservation.amount()) {
+            throw new IllegalArgumentException("deliveredAmount outside reservation bounds");
+        }
+        if (deliveredAmount == 0) return Optional.of(reservation);
+        if (deliveredAmount == reservation.amount()) return Optional.empty();
+        throw new IllegalStateException("Storage provider " + id()
+                + " returned a partial delivery without supplying provider-owned remaining reservation state");
+    }
+
     /** Returns all remaining reserved goods to their original owner. */
     boolean release(ServerLevel level, StorageReservation reservation);
 
