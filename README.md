@@ -10,6 +10,18 @@ A modern multi-loader order-book economy for Minecraft, with physical item and f
 
 The client UI requires [OpenUI MC](https://github.com/UpperMoon0/OpenUI-MC), which must be installed alongside Economy. Economy owns the market-specific screens and logic; reusable layout, widget, rendering, scrolling, and animation primitives live in OpenUI MC. Use the dependency version declared by the Economy jar or its release page.
 
+## Supported targets
+
+| Minecraft | Loader | Runtime Java | Module / artifact |
+| :--- | :--- | ---: | :--- |
+| 1.20.1 | Fabric | 17 | `fabric-1.20.1` / `economy-fabric-1.20.1` |
+| 1.20.1 | Forge | 17 | `forge-1.20.1` / `economy-forge-1.20.1` |
+| 1.21.1 | Fabric | 21 | `fabric-1.21.1` / `economy-fabric-1.21.1` |
+| 1.21.1 | NeoForge | 21 | `neoforge-1.21.1` / `economy-neoforge-1.21.1` |
+| 26.1.2 | NeoForge | 25 | `neoforge-26.1.2` / `economy-neoforge-26.1.2` |
+
+Install the file matching both your Minecraft version and loader. A jar built for one target is not a cross-loader/cross-version artifact.
+
 ---
 
 ## Key Features
@@ -100,7 +112,7 @@ This creates a server sell order for `16k mB` of water at 2 coins per mB.
 
 ## Addon / Developer API
 
-Economy exposes a supported addon API under `com.nstut.economy.api`. Addons should enter through `EconomyApi` instead of depending on concrete managers, saved-data classes, blocks, menus, packets, or other implementation packages.
+Economy exposes a supported addon API in the top-level `com.nstut.economy.api` package. Addons should enter through `EconomyApi` instead of depending on concrete managers, saved-data classes, blocks, menus, packets, or other implementation packages. `com.nstut.economy.api.internal` is explicitly not part of the supported addon surface.
 
 The public API supports:
 
@@ -125,14 +137,22 @@ Economy currently defines loader-specific Maven publications but does not config
 ## Building and Testing
 
 ```bash
-# Run every shared and version-specific test suite
+# JVM/unit/regression suites across supported version families
 ./gradlew testAllVersions
 
 # Build every supported loader target
 ./gradlew buildAll
+
+# Canonical real-server world/GameTest coverage
+./gradlew :forge-1.20.1:runGameTestServer
+
+# Real client/server join smoke for one target
+python3 tools/live_join_test.py --target forge-1.20.1
 ```
 
-Each loader module writes its compiled JAR to its own `build/libs/` directory.
+`testAllVersions` is the fast JVM layer; it does not replace real-game validation. CI additionally runs the Forge 1.20.1 GameTest and a real client/server join for each supported loader target. On headless Linux, `tools/live_join_test.py` uses `xvfb-run` when `DISPLAY` is unset.
+
+Each loader module writes its compiled JAR to its own `build/libs/` directory. The NeoForge 26.1.2 target runs on Java 25; CI drives Gradle with Java 21 and lets ModDevGradle provision the Java 25 toolchain for that target.
 
 ---
 
