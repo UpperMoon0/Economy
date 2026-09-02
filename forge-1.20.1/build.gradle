@@ -89,15 +89,17 @@ sourceSets {
 
 tasks.register('verifyAddonFixtureApiBoundary') {
     group = 'verification'
-    description = 'Ensures the external addon fixture imports Economy only through com.nstut.economy.api.'
+    description = 'Ensures the external addon fixture imports Economy only through the supported top-level com.nstut.economy.api package.'
     inputs.files(sourceSets.addonFixture.java)
     doLast {
         def violations = []
         sourceSets.addonFixture.java.files.each { source ->
             source.eachLine { line, number ->
                 def trimmed = line.trim()
-                if (trimmed.startsWith('import com.nstut.economy.')
-                        && !trimmed.startsWith('import com.nstut.economy.api.')) {
+                def economyImport = trimmed.startsWith('import com.nstut.economy.')
+                def publicApiImport = trimmed.startsWith('import com.nstut.economy.api.')
+                        && !trimmed.startsWith('import com.nstut.economy.api.internal.')
+                if (economyImport && !publicApiImport) {
                     violations << "${source}:$number: $trimmed"
                 }
             }
