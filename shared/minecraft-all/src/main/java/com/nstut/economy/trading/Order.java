@@ -26,12 +26,14 @@ import net.minecraft.world.level.material.Fluid;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
 /** Internal default implementation of the stable {@link IOrder} contract. */
 public class Order implements IOrder {
+    private static final String QUARANTINE_REASON = "economy:quarantine_reason";
     private final UUID orderId;
     private final UUID owner;
     private final ICommodity commodity;
@@ -137,6 +139,20 @@ public class Order implements IOrder {
     public void setExternalReservation(StorageReservation reservation) { this.externalReservation = reservation; }
     public Map<String, String> getAddonMetadata() { return addonMetadata; }
     public void setAddonMetadata(Map<String, String> metadata) { addonMetadata = metadata == null ? Map.of() : Map.copyOf(metadata); }
+    public void markQuarantined(String reason) {
+        HashMap<String, String> metadata = new HashMap<>(addonMetadata);
+        metadata.put(QUARANTINE_REASON, reason == null || reason.isBlank() ? "provider escrow requires recovery" : reason);
+        addonMetadata = Map.copyOf(metadata);
+    }
+    public boolean isQuarantined() { return addonMetadata.containsKey(QUARANTINE_REASON); }
+
+    private void markCompensationDue(UUID debtor, UUID creditor, BigDecimal amount) {
+        HashMap<String, String> metadata = new HashMap<>(addonMetadata);
+        metadata.put("economy:compensation_debtor", debtor == null ? "unknown" : debtor.toString());
+        metadata.put("economy:compensation_creditor", creditor == null ? "unknown" : creditor.toString());
+        metadata.put("economy:compensation_amount", amount == null ? "0" : amount.toPlainString());
+        addonMetadata = Map.copyOf(metadata);
+    }
 
     @Override public UUID getOrderId() { return orderId; }
     @Override public UUID getOwner() { return owner; }
@@ -149,7 +165,7 @@ public class Order implements IOrder {
 
     @Override
     public boolean isValid() {
-        if (cancelled || (!infinite && quantity <= 0) || pricePerUnit == null || pricePerUnit.signum() <= 0) return false;
+        if (cancelled || isQuarantined() || (!infinite && quantity <= 0) || pricePerUnit == null || pricePerUnit.signum() <= 0) return false;
         if (expiresAt != null && Instant.now().isAfter(expiresAt)) return false;
         if (commodity instanceof ItemCommodity item && item.getItem() == net.minecraft.world.item.Items.AIR) return false;
         return !(commodity instanceof FluidCommodity fluid) || fluid.getFluid() != net.minecraft.world.level.material.Fluids.EMPTY;
@@ -253,11 +269,31 @@ public class Order implements IOrder {
                 TransactionContext.transfer("Purchase of " + commodity.getDisplayName().getString(), buyerId))) {
             return TransactionResult.failure("Payment failed");
         }
+
         StorageReservation beforeDelivery = externalReservation;
-        StorageDeliveryResult delivery = provider.deliverReserved(level, beforeDelivery,
-                serverBuyer ? OrderManager.SERVER_ID : buyerId, amount).validateAgainst(beforeDelivery, amount);
+        StorageDeliveryResult delivery;
+        try {
+            delivery = provider.deliverReserved(level, beforeDelivery,
+                    serverBuyer ? OrderManager.SERVER_ID : buyerId, amount).validateAgainst(beforeDelivery, amount);
+        } catch (RuntimeException providerFailure) {
+            boolean compensated = refund(sellerAccount, buyerAccount, buyerId, total, "Refund - provider delivery failed");
+            markQuarantined("provider delivery failed after payment: " + provider.id());
+            if (!compensated) markCompensationDue(owner, buyerId, total);
+            Economy.LOGGER.error("Provider {} failed after payment on SELL order {}; payment compensated={}, reservation {} quarantined",
+                    provider.id(), orderId, compensated, beforeDelivery.token(), providerFailure);
+            return TransactionResult.failure(compensated
+                    ? "Storage provider failed; payment refunded and escrow quarantined"
+                    : "Storage provider failed; escrow and compensation debt quarantined");
+        }
+
         int delivered = delivery.deliveredAmount();
-        if (delivered < amount) refund(sellerAccount, buyerAccount, buyerId, totalFor(amount - delivered), "Refund - partial provider delivery");
+        if (delivered < amount) {
+            BigDecimal refundAmount = totalFor(amount - delivered);
+            if (!refund(sellerAccount, buyerAccount, buyerId, refundAmount, "Refund - partial provider delivery")) {
+                markQuarantined("partial provider delivery refund failed: " + provider.id());
+                markCompensationDue(owner, buyerId, refundAmount);
+            }
+        }
         externalReservation = delivery.remainingReservation().orElse(null);
         reduceAfterFill(delivered);
         return delivered <= 0 ? TransactionResult.failure("Nothing could be delivered")
@@ -325,26 +361,47 @@ public class Order implements IOrder {
         StorageReservation reservation = EconomyApi.storage().reserve(level, sellerId, commodity, requested).orElse(null);
         if (reservation == null) return TransactionResult.failure("Seller has no compatible registered storage provider");
         IStorageProvider provider = EconomyApi.storage().provider(reservation.providerId()).orElse(null);
-        if (provider == null) return TransactionResult.failure("Storage provider unavailable");
+        if (provider == null) {
+            preserveProviderReservation(sellerId, reservation, "provider disappeared after reserve");
+            return TransactionResult.failure("Storage provider unavailable; reservation quarantined");
+        }
         int amount = Math.min(requested, reservation.amount());
         if (amount <= 0) {
-            provider.release(level, reservation);
+            releaseOrPreserve(provider, level, sellerId, reservation, "release failed for zero-sized provider BUY reservation");
             return TransactionResult.failure("Nothing to deliver");
         }
         BigDecimal total = totalFor(amount);
         if (!accounts().transfer(buyerAccount, sellerAccount, total,
                 TransactionContext.transfer("Sale of " + commodity.getDisplayName().getString(), owner))) {
-            provider.release(level, reservation);
+            releaseOrPreserve(provider, level, sellerId, reservation, "release failed after provider BUY payment rejection");
             return TransactionResult.failure("Payment failed");
         }
-        StorageDeliveryResult delivery = provider.deliverReserved(level, reservation,
-                serverOrder ? OrderManager.SERVER_ID : owner, amount).validateAgainst(reservation, amount);
+
+        StorageDeliveryResult delivery;
+        try {
+            delivery = provider.deliverReserved(level, reservation,
+                    serverOrder ? OrderManager.SERVER_ID : owner, amount).validateAgainst(reservation, amount);
+        } catch (RuntimeException providerFailure) {
+            boolean compensated = refund(sellerAccount, buyerAccount, sellerId, total, "Refund - provider delivery failed");
+            preserveProviderReservation(sellerId, reservation,
+                    compensated ? "provider delivery failed after payment"
+                            : "provider delivery failed; compensation due " + total.toPlainString());
+            Economy.LOGGER.error("Provider {} failed after payment on BUY order {}; payment compensated={}, reservation {} quarantined",
+                    provider.id(), orderId, compensated, reservation.token(), providerFailure);
+            return TransactionResult.failure(compensated
+                    ? "Storage provider failed; payment refunded and escrow quarantined"
+                    : "Storage provider failed; escrow and compensation debt quarantined");
+        }
+
         int delivered = delivery.deliveredAmount();
-        if (delivered < amount) refund(sellerAccount, buyerAccount, sellerId, totalFor(amount - delivered), "Refund - partial provider delivery");
+        BigDecimal refundAmount = totalFor(amount - delivered);
+        boolean compensated = delivered >= amount || refund(sellerAccount, buyerAccount, sellerId, refundAmount,
+                "Refund - partial provider delivery");
         var remainingReservation = delivery.remainingReservation();
-        if (remainingReservation.isPresent() && !provider.release(level, remainingReservation.get())) {
-            Economy.LOGGER.error("Provider {} could not release exact remainder for reservation {}; provider retains durable ownership",
-                    provider.id(), reservation.token());
+        if (remainingReservation.isPresent()) {
+            releaseOrPreserve(provider, level, sellerId, remainingReservation.get(),
+                    compensated ? "provider BUY remainder release failed after partial delivery"
+                            : "provider BUY remainder release failed; compensation due " + refundAmount.toPlainString());
         }
         if (delivered <= 0) return TransactionResult.failure("Nothing could be delivered");
         reduceAfterFill(delivered);
@@ -384,10 +441,38 @@ public class Order implements IOrder {
         return requested;
     }
 
-    private void refund(IBankAccount from, IBankAccount to, UUID initiator, BigDecimal amount, String reason) {
-        if (amount.signum() > 0 && !accounts().transfer(from, to, amount, TransactionContext.transfer(reason, initiator))) {
-            Economy.LOGGER.error("FAILED TO REFUND {} coins ({}) on order {}", amount.toPlainString(), reason, orderId);
+    private boolean refund(IBankAccount from, IBankAccount to, UUID initiator, BigDecimal amount, String reason) {
+        if (amount.signum() <= 0) return true;
+        boolean success = accounts().transfer(from, to, amount, TransactionContext.transfer(reason, initiator));
+        if (!success) Economy.LOGGER.error("FAILED TO REFUND {} coins ({}) on order {}", amount.toPlainString(), reason, orderId);
+        return success;
+    }
+
+    private boolean releaseOrPreserve(IStorageProvider provider, ServerLevel level, UUID escrowOwner,
+                                      StorageReservation reservation, String reason) {
+        boolean released = false;
+        try {
+            released = provider.release(level, reservation);
+        } catch (RuntimeException releaseFailure) {
+            Economy.LOGGER.error("Provider {} threw while releasing reservation {}", provider.id(), reservation.token(), releaseFailure);
         }
+        if (!released) preserveProviderReservation(escrowOwner, reservation, reason);
+        return released;
+    }
+
+    private void preserveProviderReservation(UUID escrowOwner, StorageReservation reservation, String reason) {
+        try {
+            if (EconomyApi.isReady() && EconomyApi.orders() instanceof OrderManager manager) {
+                manager.preserveProviderReservation(escrowOwner, commodity, reservation, pricePerUnit, reason);
+                return;
+            }
+        } catch (RuntimeException unavailable) {
+            Economy.LOGGER.error("Could not access OrderManager while preserving provider reservation {}", reservation.token(), unavailable);
+        }
+        externalReservation = reservation;
+        markQuarantined(reason);
+        Economy.LOGGER.error("Attached provider reservation {} to order {} quarantine because no runtime OrderManager was available",
+                reservation.token(), orderId);
     }
 
     private void recordTrade(BigDecimal price, int amount, UUID buyer, UUID seller) {

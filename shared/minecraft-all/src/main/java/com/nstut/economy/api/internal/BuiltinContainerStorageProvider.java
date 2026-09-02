@@ -130,27 +130,91 @@ public final class BuiltinContainerStorageProvider implements IStorageProvider {
             NonNullList<ItemStack> stacks = decodeStacks(level, reservation);
             if (stacks == null || VaultInventoryOps.total(stacks) != reservation.amount()) return false;
             if (!VaultManager.simulateInsertItemStacksToVaults(level, owner, stacks).isEmpty()) return false;
-            NonNullList<ItemStack> leftover = VaultManager.insertItemStacksToVaults(level, owner, stacks);
-            if (!leftover.isEmpty()) {
-                Economy.LOGGER.error("Vault restore diverged from successful simulation for reservation {}; refusing to report release success",
-                        reservation.token());
-                return false;
+
+            var vaults = VaultManager.getVaults(level, owner);
+            List<NonNullList<ItemStack>> snapshots = new ArrayList<>(vaults.size());
+            for (var vault : vaults) {
+                NonNullList<ItemStack> snapshot = NonNullList.withSize(vault.getContainerSize(), ItemStack.EMPTY);
+                for (int slot = 0; slot < vault.getContainerSize(); slot++) {
+                    ItemStack current = vault.getItem(slot);
+                    snapshot.set(slot, current == null ? ItemStack.EMPTY : current.copy());
+                }
+                snapshots.add(snapshot);
             }
-            return true;
+
+            NonNullList<ItemStack> leftover = VaultManager.insertItemStacksToVaults(level, owner, stacks);
+            if (leftover.isEmpty()) return true;
+
+            restoreVaultSnapshots(vaults, snapshots);
+            Economy.LOGGER.error("Vault restore diverged from successful simulation for reservation {}; committed mutation rolled back",
+                    reservation.token());
+            return false;
         }
 
         if (commodity instanceof FluidCommodity fluid) {
             EconomyFluidStack payload = new EconomyFluidStack(fluid.getFluid(), reservation.amount());
             if (TankManager.simulateInsertFluidToTanks(level, owner, payload) < reservation.amount()) return false;
+
+            var tanks = TankManager.getTanks(level, owner);
+            List<EconomyFluidStack> snapshots = new ArrayList<>(tanks.size());
+            for (var tank : tanks) snapshots.add(tank.getFluid().copy());
+
             int inserted = TankManager.insertFluidToTanks(level, owner, payload);
-            if (inserted != reservation.amount()) {
-                Economy.LOGGER.error("Tank restore diverged from successful simulation for reservation {}: {}/{} mB",
-                        reservation.token(), inserted, reservation.amount());
-                return false;
-            }
-            return true;
+            if (inserted == reservation.amount()) return true;
+
+            restoreTankSnapshots(tanks, snapshots);
+            Economy.LOGGER.error("Tank restore diverged from successful simulation for reservation {}: {}/{} mB; committed mutation rolled back",
+                    reservation.token(), inserted, reservation.amount());
+            return false;
         }
         return false;
+    }
+
+    private static void restoreVaultSnapshots(List<? extends net.minecraft.world.Container> vaults,
+                                              List<NonNullList<ItemStack>> snapshots) {
+        if (vaults.size() != snapshots.size()) {
+            throw new IllegalStateException("Vault topology changed during atomic reservation release");
+        }
+        for (int i = 0; i < vaults.size(); i++) {
+            var vault = vaults.get(i);
+            NonNullList<ItemStack> snapshot = snapshots.get(i);
+            if (vault.getContainerSize() != snapshot.size()) {
+                throw new IllegalStateException("Vault size changed during atomic reservation release");
+            }
+            for (int slot = 0; slot < snapshot.size(); slot++) vault.setItem(slot, snapshot.get(slot).copy());
+            for (int slot = 0; slot < snapshot.size(); slot++) {
+                if (!com.nstut.economy.compat.Compat.stacksEqual(vault.getItem(slot), snapshot.get(slot))) {
+                    throw new IllegalStateException("Could not roll back vault mutation during reservation release");
+                }
+            }
+        }
+    }
+
+    private static <T> void restoreTankSnapshots(List<T> tanks, List<EconomyFluidStack> snapshots) {
+        if (tanks.size() != snapshots.size()) {
+            throw new IllegalStateException("Tank topology changed during atomic reservation release");
+        }
+        for (int i = 0; i < tanks.size(); i++) {
+            Object value = tanks.get(i);
+            EconomyFluidStack snapshot = snapshots.get(i);
+            try {
+                java.lang.reflect.Method setFluid = value.getClass().getMethod("setFluid", EconomyFluidStack.class);
+                java.lang.reflect.Method getFluid = value.getClass().getMethod("getFluid");
+                setFluid.invoke(value, snapshot.copy());
+                EconomyFluidStack restored = (EconomyFluidStack) getFluid.invoke(value);
+                if (!sameFluid(restored, snapshot)) {
+                    throw new IllegalStateException("Could not roll back tank mutation during reservation release");
+                }
+            } catch (ReflectiveOperationException failure) {
+                throw new IllegalStateException("Could not roll back tank mutation during reservation release", failure);
+            }
+        }
+    }
+
+    private static boolean sameFluid(EconomyFluidStack left, EconomyFluidStack right) {
+        if (left == null || left.isEmpty()) return right == null || right.isEmpty();
+        if (right == null || right.isEmpty()) return false;
+        return left.getAmount() == right.getAmount() && left.isFluidEqual(right);
     }
 
     @Override public String describe(ServerLevel level, UUID owner) { return "Economy Vaults and Tanks"; }

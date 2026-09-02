@@ -39,12 +39,18 @@ public final class StorageProviderRegistry {
         return List.copyOf(result);
     }
 
+    /**
+     * Maximum amount that can be reserved atomically from one provider. This intentionally
+     * mirrors {@link #reserve}; reservations are provider-owned and are not split across providers.
+     */
     public int available(ServerLevel level, UUID owner, ICommodity commodity) {
-        long total = 0;
+        int max = 0;
         for (IStorageProvider provider : providers()) {
-            if (provider.supports(commodity)) total += Math.max(0, provider.available(level, owner, commodity));
+            if (provider.supports(commodity)) {
+                max = Math.max(max, Math.max(0, provider.available(level, owner, commodity)));
+            }
         }
-        return (int) Math.min(Integer.MAX_VALUE, total);
+        return max;
     }
 
     public int receivable(ServerLevel level, UUID owner, ICommodity commodity, int requested) {
