@@ -6,7 +6,7 @@ Buy and sell items or fluids through an in-game Market Terminal, build storage t
 
 ## Required dependency
 
-Economy requires **OpenUI MC 0.0.6 or newer** on the client. Install the Forge 1.20.1 OpenUI MC file alongside Economy. CurseForge marks it as a required dependency for automatic installation.
+Economy requires **OpenUI MC 0.0.9 or newer** on the client. Install the matching OpenUI MC file alongside Economy. CurseForge marks it as a required dependency for automatic installation.
 
 ---
 
@@ -128,10 +128,12 @@ The market tracks more than your coin balance:
 - `/economy pay <player> <amount>` — Send coins to another player.
 - `/economy serverorder buy <commodity> <qty> <price>` — Create a server Buy Order for an item or fluid.
 - `/economy serverorder sell <commodity> <qty> <price>` — Create a server Sell Order for an item or fluid.
+- `/economy serverorder list` — List active server orders and their IDs.
+- `/economy serverorder remove <order-id>` — Remove a mistaken server order by ID; active IDs are tab-completed.
 - `/economy give <player> <amount>` — Give coins to a player.
 - `/economy take <player> <amount>` — Take coins from a player.
 - `/economy set <player> <amount>` — Set a player’s balance.
 
-Balance and payment commands are available to players. Server-order and balance-management commands require operator permission.
+Balance and payment commands are available to players. Server-order and balance-management commands require operator permission. Newly created server orders print their order ID; for an older or forgotten order, run `/economy serverorder list` and then `/economy serverorder remove <order-id>`.
 
 For fluid server orders, quantity is entered in millibuckets. For example, `16000` represents `16k mB`.
