@@ -22,29 +22,23 @@ public interface IStorageProvider {
     Optional<StorageReservation> reserve(ServerLevel level, UUID owner, ICommodity commodity, int amount);
 
     /**
-     * Commits up to {@code amount} reserved units to receiver. Returning N means exactly N units
-     * left escrow and reached the receiver/consumer. Must never exceed amount.
+     * Atomically commits up to {@code amount} reserved units to the receiver and
+     * returns both what actually moved and the exact provider-owned remainder.
+     *
+     * <p>The returned remainder must account for every unit that did not move,
+     * including exact item/component state. Economy will never infer a remainder
+     * from the delivered count.</p>
      */
-    int deliverReserved(ServerLevel level, StorageReservation reservation, UUID receiver, int amount);
+    StorageDeliveryResult deliverReserved(ServerLevel level, StorageReservation reservation,
+                                          UUID receiver, int amount);
 
     /**
-     * Returns the provider-owned reservation representing what remains after a successful delivery.
-     * Economy deliberately does not fabricate a smaller reservation/token because provider tokens may
-     * encode amount- or state-specific ownership. Providers that can partially deliver MUST override
-     * this method. The default is only valid for zero- or full-delivery results.
+     * Returns every remaining reserved unit to the original owner.
+     *
+     * <p>This operation is strictly all-or-nothing: returning {@code false}
+     * means storage and reservation ownership were not mutated. Providers must
+     * simulate/validate the complete restoration before committing it.</p>
      */
-    default Optional<StorageReservation> remainingAfterDelivery(ServerLevel level, StorageReservation reservation,
-                                                                int deliveredAmount) {
-        if (deliveredAmount < 0 || deliveredAmount > reservation.amount()) {
-            throw new IllegalArgumentException("deliveredAmount outside reservation bounds");
-        }
-        if (deliveredAmount == 0) return Optional.of(reservation);
-        if (deliveredAmount == reservation.amount()) return Optional.empty();
-        throw new IllegalStateException("Storage provider " + id()
-                + " returned a partial delivery without supplying provider-owned remaining reservation state");
-    }
-
-    /** Returns all remaining reserved goods to their original owner. */
     boolean release(ServerLevel level, StorageReservation reservation);
 
     /** Immutable provider-facing summary text suitable for diagnostics/UI aggregation. */
