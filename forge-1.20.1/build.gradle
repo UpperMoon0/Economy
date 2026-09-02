@@ -15,7 +15,6 @@ loom {
         gameTestServer {
             server()
             environment("gametestserver")
-            forgeTemplate("gametestserver")
             runDir("run/gametest")
             property "forge.enabledGameTestNamespaces", economyModId
         }
