@@ -1,544 +1,351 @@
-# Global Economy System Design
+# Economy System Design
 
-## Overview
-A universal economy system supporting trade of items, fluids, energy, and custom commodities with a single global currency.
+> **Status:** current architecture reference for Economy 0.0.11. Earlier versions of this file described aspirational `IOffer`, `IEconomyAPI`, Bank/Trading blocks, direct-storage commodity hooks, and standalone price-model systems that are not the implemented public architecture. For addon contracts, the authoritative references are [`docs/API_REFERENCE.md`](../docs/API_REFERENCE.md), [`docs/GETTING_STARTED.md`](../docs/GETTING_STARTED.md), and [`docs/EXTENDING_ECONOMY.md`](../docs/EXTENDING_ECONOMY.md).
+
+## Goals
+
+Economy provides one server-authoritative order-book market with virtual currency accounts, physical item/fluid storage, durable escrow, immutable market reads, and a stable addon boundary across supported Minecraft/loader targets.
+
+The design prioritizes:
+
+- no currency or commodity duplication/loss on failed transactions;
+- server authority for balances, orders, storage, and matching;
+- exact preservation of item/component/NBT state in escrow;
+- loader-neutral addon contracts where Minecraft itself allows it;
+- explicit lifecycle and persistence behavior;
+- version-specific adapters kept behind shared services;
+- real-game validation in addition to JVM tests.
+
+## Supported runtime targets
+
+| Minecraft | Loader | Runtime Java |
+|---|---|---:|
+| 1.20.1 | Fabric | 17 |
+| 1.20.1 | Forge | 17 |
+| 1.21.1 | Fabric | 21 |
+| 1.21.1 | NeoForge | 21 |
+| 26.1.2 | NeoForge | 25 |
+
+A compiled addon or Economy jar must target the matching Minecraft generation and loader.
 
 ## Architecture
 
 ```mermaid
 graph TB
-    subgraph Core[Core Systems]
-        CS[CurrencySystem]
-        TS[TransactionSystem]
-        PS[PriceSystem]
+    subgraph Addons[Supported addon boundary]
+        EA[EconomyApi]
+        EV[EconomyEvents / MarketEvents]
+        CT[CommodityTypeRegistry]
+        SP[StorageProviderRegistry]
     end
 
-    subgraph Trading[Trading Layer]
-        TM[TradeManager]
-        OM[OfferManager]
-        CM[ContractManager]
+    subgraph Runtime[Server runtime]
+        AM[IAccountManager]
+        OM[IOrderManager]
+        MD[IMarketDataService]
+        MATCH[Order matching]
+        LEDGER[Trade ledger]
     end
 
-    subgraph Commodities[Commodity Types]
-        IC[ItemCommodity]
-        FC[FluidCommodity]
-        EC[EnergyCommodity]
-        CC[CustomCommodity]
+    subgraph Persistence[Persistent state]
+        ACC[Account data]
+        ORD[Order + reservation data]
+        QUAR[Quarantined unknown addon state]
     end
 
-    subgraph Storage[Storage Layer]
-        AM[AccountManager]
-        BA[BankAccount]
-        IB[ItemBank]
+    subgraph Storage[Physical market storage]
+        VAULT[Vaults]
+        TANK[Tanks]
+        ADDON[Addon storage providers]
     end
 
-    subgraph Blocks[World Blocks]
-        MB[MarketBlock]
-        TB[TradingBlock]
-        BB[BankBlock]
-        VB[VaultBlock]
+    subgraph Client[Client]
+        TERM[Market terminal]
+        CONTAINERS[Container UI]
+        CHARTS[Market / portfolio views]
     end
 
-    CS --> TS
-    TS --> TM
-    TM --> OM
-    OM --> CM
-    
-    IC --> TM
-    FC --> TM
-    EC --> TM
-    CC --> TM
-    
-    CS --> AM
-    AM --> BA
-    BA --> IB
-    
-    MB --> TM
-    TB --> TM
-    BB --> AM
-    VB --> IB
+    EA --> AM
+    EA --> OM
+    EA --> MD
+    EA --> CT
+    EA --> SP
+    OM --> MATCH
+    MATCH --> AM
+    MATCH --> SP
+    MATCH --> LEDGER
+    AM --> ACC
+    OM --> ORD
+    ORD --> QUAR
+    SP --> VAULT
+    SP --> TANK
+    SP --> ADDON
+    LEDGER --> MD
+    AM --> EV
+    OM --> EV
+    MATCH --> EV
+    TERM --> Runtime
+    CONTAINERS --> Storage
+    CHARTS --> MD
 ```
 
-## 1. Core Currency System
+## 1. Public API boundary
 
-### Currency Unit
-- **Base Unit**: "Coin" (configurable display name)
-- **Fractional**: Supports decimals (0.01 precision)
-- **Universal**: Single currency across all dimensions
+The supported addon surface is the **top-level** `com.nstut.economy.api` package.
 
-### Currency Storage
+`com.nstut.economy.api.internal` and implementation packages such as `core`, `trading`, `data`, blocks, menus, packets, and loader adapters are not compatibility contracts even when Java visibility makes them reachable.
+
+`EconomyApi` is the stable entry point for active runtime services:
+
 ```java
-// Server-side player balance storage - purely virtual
-public interface IBankAccount {
-    UUID getOwner();
-    BigDecimal getBalance();
-    
-    // Direct operations - no physical items involved
-    boolean credit(BigDecimal amount, TransactionContext ctx);
-    boolean debit(BigDecimal amount, TransactionContext ctx);
-    boolean transferTo(IBankAccount target, BigDecimal amount, TransactionContext ctx);
-    
-    // Transaction history
-    List<TransactionRecord> getRecentTransactions(int count);
-}
-
-// Account manager handles all player accounts
-public interface IAccountManager {
-    IBankAccount getPlayerAccount(UUID player);
-    IBankAccount getOrCreatePlayerAccount(UUID player);
-    boolean hasAccount(UUID player);
-    
-    // Server accounts for system operations
-    IBankAccount getServerAccount();
-    IBankAccount getTaxAccount();
+if (EconomyApi.isReady()) {
+    IAccountManager accounts = EconomyApi.accounts();
+    IOrderManager orders = EconomyApi.orders();
+    IMarketDataService market = EconomyApi.marketData();
 }
 ```
 
-### Wallet System
-- **Virtual Accounts Only**: All currency stored in secure server-side accounts
-- **No Physical Items**: Currency exists only as account balances
-- **Universal Access**: Players can access their funds from any Bank Block or command
-- **Offline Support**: Transactions processed even when players are offline
+`accounts()`, `orders()`, `marketData()`, and `serverLevel()` are bound only while a server runtime is active and must not be cached across restarts.
 
-## 2. Commodity Framework
+`commodityTypes()` and `storage()` are process-level extension registries and survive server restarts. Addons register handlers/providers once during common initialization.
 
-### Commodity Interface
-```java
-public interface ICommodity {
-    ResourceLocation getId();
-    CommodityType getType(); // ITEM, FLUID, ENERGY, CUSTOM
-    Component getDisplayName();
-    
-    // For trading
-    boolean canExtractFrom(IStorage storage, int amount);
-    boolean canInsertInto(IStorage storage, int amount);
-    boolean extractFrom(IStorage storage, int amount);
-    boolean insertInto(IStorage storage, int amount);
-    
-    // Pricing
-    BigDecimal getBasePrice();
-    boolean hasDynamicPricing();
-}
+## 2. Currency and accounts
+
+Currency is virtual and server-owned. `IBankAccount` exposes balance reads, credit/debit, atomic transfer, and transaction history. `IAccountManager` owns player, server, and tax accounts.
+
+Money movement should carry an `ITransactionContext` with a namespaced `EconomyId` cause and optional immutable metadata. The legacy transaction enum remains only for compatibility projection.
+
+### Atomic transfer invariant
+
+A transfer must behave as one logical operation:
+
+```text
+failed/rejected transfer => source unchanged && target unchanged
+successful transfer      => source -= amount && target += amount
 ```
 
-### Commodity Types
+A target rejection or exception must never leave the source debited.
 
-#### Items
-- Standard Minecraft items
-- Support for NBT data matching (configurable strictness)
-- Bulk trading support (stacks, shulkers)
+## 3. Events
 
-#### Fluids
-- Forge/NeoForge fluid tanks
-- Fabric fluid storage
-- Universal buckets as intermediary
+`EconomyEvents` is a synchronous, loader-neutral exact-class event bus. Listeners registered for one event class receive that class only; base-interface registration is not polymorphic subscription.
 
-#### Energy
-- Forge Energy (FE) support
-- Fabric Energy API support
-- EU (IndustrialCraft) support via adapters
+Cancellable pre-events include:
 
-#### Custom Commodities
-- API for other mods to register tradeable resources
-- Examples: Thaumcraft essentia, Botania mana, XP
+- `EconomyEvents.BalanceChangePre`
+- `EconomyEvents.TransferPre`
+- `MarketEvents.OrderCreatePre`
 
-## 3. Trading System
+Committed-state events include balance/transfer completion, order creation/edit/cancel, trades, and storage-provider registration changes.
 
-### Offer System
-```java
-public interface IOffer {
-    UUID getOfferId();
-    UUID getOwner();
-    
-    // What the seller is selling
-    ICommodity getCommodity();
-    int getQuantity();
-    
-    // What the seller wants
-    BigDecimal getPrice(); // Price per unit or total
-    
-    OfferType getType(); // SELL, BUY, BARTER
-    
-    // Execution
-    boolean canExecute(ITrader buyer);
-    TransactionResult execute(ITrader buyer);
-}
+Pre-event cancellation happens before new provider escrow is created. Post-events are observations, not rollback hooks. Event handlers execute inline and must stay fast.
+
+## 4. Commodity model
+
+A commodity is identified by both its type and product ID:
+
+```text
+CommodityKey = (commodityTypeId, commodityId)
 ```
 
-### Market Types
+This full identity is required for analytics and persistence because two addon commodity types may intentionally expose the same product ID.
 
-#### Player Markets
-- **Direct Trading**: Player-to-player instant trade
-- **Shop Blocks**: Physical shops players place in world
-- **Auction House**: Time-based bidding system
-- **Global Market**: Server-wide listing board
+`EconomyId` is used by the public API instead of exposing Minecraft's changing identifier class names.
 
-#### Automated Markets
-- **Villager Integration**: Trade with villagers using currency
-- **Dungeon Loot**: Buy/sell with dungeon "merchants"
-- **World Events**: Dynamic pricing during events
+### Built-in and addon types
 
-### Price Dynamics (Optional)
-```java
-public interface IPriceModel {
-    BigDecimal getCurrentPrice(ICommodity commodity);
-    void recordTransaction(ICommodity commodity, int quantity, BigDecimal price);
-    
-    // Supply/Demand tracking
-    double getDemandFactor(ICommodity commodity);
-    double getSupplyFactor(ICommodity commodity);
-}
+The API defines item, fluid, and energy type IDs plus `CUSTOM` as a broad legacy category. The implemented player-facing storage/trading path currently centers on items and fluids; an API type ID does not by itself imply a complete built-in storage/UI implementation for that resource.
+
+Addon commodity behavior/persistence is registered through `ICommodityTypeHandler`. Each handler owns a versioned `CommodityPayload` codec and must continue decoding old schema versions while released saves may contain them.
+
+The nested `ICommodity.IStorage` hooks are legacy compatibility APIs. New storage integrations use `IStorageProvider`.
+
+## 5. Orders and matching
+
+`IOrderManager` is the supported mutation/query surface. Addons should not construct or mutate internal order implementations directly.
+
+Player creation returns `OrderCreateResult` with one of:
+
+- `POSTED`
+- `PARTIALLY_FILLED`
+- `FILLED`
+- `REJECTED`
+
+An accepted fully filled order has no remaining book order. Server-order compatibility methods return `IOrder` on success and may return `null` when domain validation rejects creation.
+
+Order edits/cancellation must go through the manager so authorization, persistence, money, escrow, and events remain centralized.
+
+### Order-book authority
+
+Matching occurs server-side. A completed trade updates money, delivery/escrow state, order quantities, trade history, and events as one coordinated flow. Client UI is never the authority for a trade.
+
+## 6. Storage-provider model
+
+`IStorageProvider` is the extension boundary for owner-scoped market inventory.
+
+Providers expose:
+
+- support and priority;
+- side-effect-free `available` and `receivable` probes;
+- atomic reservation creation;
+- atomic delivery with the exact remaining reservation;
+- all-or-nothing release.
+
+### Single-provider reservation rule
+
+One reservation belongs to exactly one provider.
+
+`StorageProviderRegistry.available(...)` therefore reports the largest amount atomically available from **one** supporting provider, not the sum across providers. `reserve(...)` walks providers in priority order until one can reserve the full amount.
+
+Receiving capacity differs: `receivable(...)` may aggregate capacity across providers up to the requested amount.
+
+Once escrow exists, delivery/release routes strictly to `reservation.providerId()`. Economy does not reassign opaque escrow to another backend if that provider disappears.
+
+## 7. Escrow and delivery invariants
+
+A successful sell reservation transfers ownership of the reserved goods from ordinary storage into durable provider-owned escrow.
+
+Across reservation, partial delivery, cancellation, restart, and provider outage:
+
+```text
+initial goods = delivered + still escrowed + successfully released
 ```
 
-Price models:
-- **Fixed**: Admin-set prices
-- **Dynamic**: Supply/demand based
-- **Hybrid**: Base price + fluctuation limits
+### Reservation
 
-## 3.1 Global Market Price Calculation
+`reserve(...)` must be atomic:
 
-### Price Discovery Mechanisms
-
-#### 1. Order Book Analysis (Primary Method)
-The market price is derived from active buy and sell offers:
-
-```java
-public class OrderBookPriceCalculator {
-    /**
-     * Calculates market price based on order book depth
-     * Uses Volume Weighted Average Price (VWAP) of best bids/asks
-     */
-    public BigDecimal calculateMarketPrice(ICommodity commodity) {
-        List<IOffer> buyOffers = getActiveBuyOffers(commodity);  // Sorted highest first
-        List<IOffer> sellOffers = getActiveSellOffers(commodity); // Sorted lowest first
-        
-        if (buyOffers.isEmpty() && sellOffers.isEmpty()) {
-            return commodity.getBasePrice(); // Fallback to base price
-        }
-        
-        // Find the spread
-        BigDecimal bestBid = buyOffers.isEmpty() ? BigDecimal.ZERO : buyOffers.get(0).getPrice();
-        BigDecimal bestAsk = sellOffers.isEmpty() ? BigDecimal.valueOf(Double.MAX_VALUE) : sellOffers.get(0).getPrice();
-        
-        // Calculate mid-price when there's overlap or gap
-        if (bestBid.compareTo(bestAsk) >= 0) {
-            // Market has overlapping orders - use last trade price or mid
-            return getLastTradePrice(commodity)
-                .orElse(bestBid.add(bestAsk).divide(BigDecimal.valueOf(2), 2, RoundingMode.HALF_UP));
-        }
-        
-        // Calculate VWAP of top N offers on each side
-        BigDecimal bidVWAP = calculateVWAP(buyOffers.subList(0, Math.min(5, buyOffers.size())));
-        BigDecimal askVWAP = calculateVWAP(sellOffers.subList(0, Math.min(5, sellOffers.size())));
-        
-        // Market price is midpoint between bid/ask VWAP
-        return bidVWAP.add(askVWAP).divide(BigDecimal.valueOf(2), 2, RoundingMode.HALF_UP);
-    }
-}
+```text
+success => exact requested amount is durably escrowed
+failure => no mutation
 ```
 
-#### 2. Trade History Weighting
-Recent trades have more influence on current price:
+### Delivery
 
-```java
-public class TradeHistoryPriceCalculator {
-    /**
-     * Exponential Moving Average of recent trade prices
-     * Gives more weight to recent transactions
-     */
-    public BigDecimal calculateEMAPrice(ICommodity commodity, int periods) {
-        List<TradeRecord> recentTrades = getRecentTrades(commodity, periods);
-        
-        if (recentTrades.isEmpty()) {
-            return commodity.getBasePrice();
-        }
-        
-        double multiplier = 2.0 / (periods + 1);
-        BigDecimal ema = recentTrades.get(0).getPrice();
-        
-        for (int i = 1; i < recentTrades.size(); i++) {
-            BigDecimal price = recentTrades.get(i).getPrice();
-            ema = price.multiply(BigDecimal.valueOf(multiplier))
-                      .add(ema.multiply(BigDecimal.valueOf(1 - multiplier)));
-        }
-        
-        return ema;
-    }
-}
+`deliverReserved(...)` returns both the amount actually delivered and the provider-owned exact remainder.
+
+Economy validates:
+
+```text
+delivered + remaining.amount = before.amount
 ```
 
-#### 3. Supply/Demand Index (SDI)
-Measures market pressure based on order book imbalance:
+It also rejects delivery beyond the requested amount and rejects remaining reservations that change provider or commodity identity.
 
-```java
-public class SupplyDemandIndex {
-    /**
-     * SDI ranges from -100 (extreme oversupply) to +100 (extreme demand)
-     * 0 indicates balanced market
-     */
-    public double calculateSDI(ICommodity commodity) {
-        double totalBuyVolume = getTotalBuyVolume(commodity);
-        double totalSellVolume = getTotalSellVolume(commodity);
-        double totalVolume = totalBuyVolume + totalSellVolume;
-        
-        if (totalVolume == 0) return 0;
-        
-        // Normalize to -100 to +100 range
-        return ((totalBuyVolume - totalSellVolume) / totalVolume) * 100;
-    }
-    
-    /**
-     * Adjusts base price based on SDI
-     * High demand (+SDI) increases price, high supply (-SDI) decreases price
-     */
-    public BigDecimal adjustPriceBySDI(BigDecimal basePrice, double sdi, double maxFluctuation) {
-        // sdi is -100 to +100, normalize to -1 to +1
-        double factor = sdi / 100.0;
-        
-        // Apply non-linear curve for more realistic price movement
-        double adjustment = Math.signum(factor) * Math.pow(Math.abs(factor), 1.5);
-        
-        // Cap at max fluctuation percentage
-        double cappedAdjustment = Math.max(-maxFluctuation, Math.min(maxFluctuation, adjustment));
-        
-        return basePrice.multiply(BigDecimal.valueOf(1 + cappedAdjustment));
-    }
-}
+For items, the remainder must preserve the exact rejected/untouched stacks including components/NBT. Reconstructing generic stacks from a numeric count is not valid.
+
+### Release
+
+`release(...) == true` means every remaining unit was restored exactly once.
+
+`release(...) == false` means the whole input reservation is still escrow. A provider must not partially restore goods and then return false. Providers must simulate first or use an internal rollback/transaction mechanism.
+
+## 8. Built-in physical storage
+
+### Vault
+
+Vaults provide item storage connected to an owner and support market modes:
+
+- `BOTH`: supply and receive;
+- `INPUT`: supply market sells only;
+- `OUTPUT`: receive purchases only.
+
+The built-in storage provider preserves exact extracted item stacks in structured provider state.
+
+### Tank
+
+Tanks provide single-fluid storage up to `128,000 mB` and expose loader-compatible fluid automation. They use the same market mode model as Vaults.
+
+Direct player/automation interaction is separate from whether a container is eligible to supply/receive through the market.
+
+## 9. Persistence and missing addons
+
+Order persistence stores commodity type identity, versioned codec payloads, provider reservations, metadata, and structured provider-owned NBT state.
+
+Unknown/corrupt/unavailable addon state is not silently discarded when it could own escrow. Economy quarantines raw escrow-bearing snapshots so absence of a provider/codec does not become item deletion.
+
+Providers and codecs must be restart-safe and must not depend on transient object identity or registry iteration order.
+
+## 10. Market reads
+
+`IMarketDataService` exposes immutable analytics rather than internal ledger collections:
+
+- recent trades;
+- last trade price;
+- traded volume;
+- active order count.
+
+Commodity-specific queries use `CommodityKey`, not product ID alone.
+
+The market terminal and addon dashboards should consume these read models instead of mirroring internal order/trade state.
+
+## 11. Client/server split
+
+### Server authority
+
+The server owns:
+
+- balances and transaction records;
+- order validation and matching;
+- storage reservations/delivery/release;
+- persistence and quarantine;
+- market/trade state.
+
+### Client responsibilities
+
+The client owns presentation and interaction only:
+
+- Market Terminal screens;
+- container screens;
+- charts and filtering;
+- client-side layout/rendering state.
+
+OpenUI MC supplies reusable UI primitives; Economy owns market-specific screens and behavior.
+
+## 12. Validation strategy
+
+Economy intentionally uses multiple test layers.
+
+### Fast JVM/regression tests
+
+```shell
+./gradlew testAllVersions
 ```
 
-#### 4. Composite Price Algorithm
-Combines multiple factors for final market price:
+These cover domain logic, API regression behavior, persistence codecs, escrow compensation, order validation, and version-specific adapters where a real world is not required.
 
-```java
-public class CompositePriceCalculator {
-    
-    public MarketPrice calculatePrice(ICommodity commodity) {
-        // 1. Base price from commodity definition or admin config
-        BigDecimal basePrice = commodity.getBasePrice();
-        
-        // 2. Order book price (30% weight) - current market sentiment
-        BigDecimal orderBookPrice = orderBookCalculator.calculate(commodity);
-        
-        // 3. Trade history EMA (40% weight) - what people actually paid
-        BigDecimal emaPrice = tradeHistoryCalculator.calculateEMA(commodity, 20);
-        
-        // 4. Supply/Demand adjustment (20% weight) - market pressure
-        double sdi = sdiCalculator.calculate(commodity);
-        BigDecimal sdiAdjustedPrice = sdiCalculator.adjustPriceBySDI(basePrice, sdi, 0.5);
-        
-        // 5. Volatility adjustment (10% weight) - market stability
-        BigDecimal volatilityFactor = calculateVolatilityAdjustment(commodity);
-        
-        // Weighted composite
-        BigDecimal composite = orderBookPrice.multiply(BigDecimal.valueOf(0.30))
-            .add(emaPrice.multiply(BigDecimal.valueOf(0.40)))
-            .add(sdiAdjustedPrice.multiply(BigDecimal.valueOf(0.20)))
-            .add(basePrice.multiply(volatilityFactor).multiply(BigDecimal.valueOf(0.10)));
-        
-        return new MarketPrice(
-            composite,
-            calculateConfidence(commodity), // How reliable is this price?
-            sdi, // Market pressure indicator
-            getPriceTrend(commodity) // Rising, falling, stable
-        );
-    }
-}
+### External addon compile boundary
+
+```shell
+./gradlew :forge-1.20.1:compileAddonFixtureJava
 ```
 
-### Special Cases
+This fixture compiles consumer-shaped code and rejects imports outside the supported top-level API, including `com.nstut.economy.api.internal`.
 
-#### Low Liquidity Handling
-When few or no orders exist:
-- Use **base price** with confidence marker "LOW_LIQUIDITY"
-- Widen the bid-ask spread indicator
-- Flag for admin review if no trades in 24 hours
+### Real server GameTest
 
-```java
-if (getActiveOfferCount(commodity) < 3) {
-    return MarketPrice.builder()
-        .price(commodity.getBasePrice())
-        .confidence(PriceConfidence.LOW_LIQUIDITY)
-        .spread(BigDecimal.valueOf(0.20)) // 20% spread
-        .build();
-}
+```shell
+./gradlew :forge-1.20.1:runGameTestServer
 ```
 
-#### Price Floor/Ceiling
-Configurable limits to prevent extreme volatility:
+The canonical GameTest verifies runtime binding plus registered Vault/Tank placement, block-entity creation, and actual inventory/fluid mutation in a `ServerLevel`.
 
-```java
-public BigDecimal applyPriceLimits(BigDecimal calculatedPrice, BigDecimal basePrice) {
-    double maxChange = config.getMaxPriceChangePercent() / 100.0; // e.g., 50%
-    
-    BigDecimal minPrice = basePrice.multiply(BigDecimal.valueOf(1 - maxChange));
-    BigDecimal maxPrice = basePrice.multiply(BigDecimal.valueOf(1 + maxChange));
-    
-    if (calculatedPrice.compareTo(minPrice) < 0) return minPrice;
-    if (calculatedPrice.compareTo(maxPrice) > 0) return maxPrice;
-    return calculatedPrice;
-}
+### Real client/server join
+
+```shell
+python3 tools/live_join_test.py --target forge-1.20.1
 ```
 
-### Price Update Frequency
-- **Active commodities** (many trades): Every 5 minutes
-- **Normal commodities**: Every 15 minutes  
-- **Inactive commodities**: Every hour
-- **Immediate update** on any trade execution
+CI runs a real client/server join for every supported target. The script separates Gradle/Loom setup timeout from game readiness so slow dependency preparation is not confused with a hung Minecraft startup.
 
-### Displayed Price Information
-When players view a commodity in the market:
-- **Current Market Price**: The composite calculated price
-- **Bid/Ask Spread**: Best buy vs best sell offer
-- **24h Volume**: Number of units traded
-- **24h Change**: Percentage price change
-- **Confidence**: High/Medium/Low liquidity indicator
-- **Trend Arrow**: ↗ Rising, ↘ Falling, → Stable
+Normal PR validation runs these joins inside the main build matrix to reuse build work. `.github/workflows/live-join-test.yml` remains a self-contained manual full-matrix diagnostic.
 
-## 4. Transaction System
+## 13. Release behavior
 
-### Transaction Safety
-```java
-public class Transaction {
-    private final UUID transactionId;
-    private final TransactionType type;
-    private final List<TransactionStep> steps;
-    
-    public TransactionResult commit() {
-        // Two-phase commit
-        // 1. Validate all steps can execute
-        // 2. Execute all steps
-        // 3. Rollback on failure
-    }
-}
-```
+`mod_version` in `gradle.properties` is the release version. A matching `changelogs/v<version>.md` is required for release publishing.
 
-### Transaction Types
-- **Instant**: Direct player trade
-- **Queued**: Offline trading (delivered when player returns)
-- **Contract**: Future delivery agreements
-- **Recurring**: Subscription-based trades
+The main workflow builds all supported target jars, publishes the GitHub release when the release gate is satisfied, and publishes matching CurseForge files with OpenUI MC declared as a required dependency.
 
-## 5. Storage Blocks
+## Future work rule
 
-### Market Block
-- Interface for browsing offers
-- Create new sell/buy orders
-- View price history charts
-
-### Trading Block (Terminal)
-- Quick buy/sell at market price
-- Bulk trading interface
-- Favorites/bookmarks
-
-### Bank Block
-- Access virtual wallet
-- Transfer funds
-- View transaction history
-- Set up recurring payments
-
-### Vault Block
-- Secure item storage for trading
-- Linked to offers (items held in escrow)
-- Upgradeable storage tiers
-
-## 6. Network Architecture
-
-### Server-Side (Authority)
-- All balances stored server-side
-- Transaction validation
-- Offer matching engine
-- Price history recording
-
-### Client-Side
-- Cached balance display
-- Offer browsing (synced from server)
-- UI rendering only
-
-### Synchronization
-```java
-// Key network packets
-- BalanceUpdatePacket (to client)
-- OfferSyncPacket (bidirectional)
-- TransactionRequestPacket (client to server)
-- TransactionResultPacket (server to client)
-- MarketDataPacket (periodic sync)
-```
-
-## 7. API for Mod Integration
-
-### Registering Custom Commodities
-```java
-public interface IEconomyAPI {
-    // Currency
-    IBankAccount getOrCreateAccount(UUID player);
-    
-    // Commodities
-    void registerCommodity(ICommodity commodity);
-    ICommodity getCommodity(ResourceLocation id);
-    
-    // Trading
-    void registerMarket(IMarket market);
-    IOffer createOffer(OfferBuilder builder);
-    
-    // Events
-    void registerTransactionListener(ITransactionListener listener);
-}
-```
-
-### Event Hooks
-- `TransactionEvent.Pre/Post`
-- `PriceChangeEvent`
-- `OfferCreateEvent`
-- `OfferExecuteEvent`
-
-## 8. Configuration
-
-### Server Config
-```toml
-[currency]
-    name = "Coin"
-    symbol = "¤"
-    starting_balance = 100.0
-    
-[trading]
-    tax_rate = 0.05
-    min_price = 0.01
-    max_price = 1000000
-    enable_dynamic_pricing = true
-    
-[storage]
-    max_bank_accounts_per_player = 3
-    vault_base_capacity = 54
-    vault_upgrade_multiplier = 2
-```
-
-## 9. Commands
-
-- `/balance [player]` - Check balance
-- `/pay <player> <amount>` - Transfer currency
-- `/market` - Open market UI
-- `/sell <amount> <commodity> <price>` - Quick sell command
-- `/buy <amount> <commodity> [max_price]` - Quick buy command
-- `/economy admin give|take|set <player> <amount>` - Admin commands
-
-## Implementation Phases
-
-### Phase 1: Core
-- Currency system
-- Basic bank accounts
-- Item trading only
-
-### Phase 2: Trading
-- Offer system
-- Market blocks
-- Price history
-
-### Phase 3: Expansion
-- Fluid/energy support
-- Custom commodity API
-- Dynamic pricing
-
-### Phase 4: Polish
-- Advanced UIs
-- Quest integration
-- Analytics dashboard
+Future systems—additional commodity backends, new market mechanics, contracts, auctions, recurring payments, or new world blocks—must be described as **future** until implemented. New addon needs should extend the top-level public API rather than normalize dependencies on internal managers or saved-data classes.
