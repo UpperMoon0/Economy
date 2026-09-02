@@ -161,17 +161,21 @@ class OrderMoneyFlowTest extends MinecraftTestBase {
     }
 
     @Test
-    @DisplayName("Full sell executes charge the buyer the total price")
-    void fullSellChargesBuyerTotalPrice() {
+    @DisplayName("Public order execution refuses to settle without a running server world")
+    void publicExecuteRequiresServerLevel() {
         accounts.getOrCreatePlayerAccount(buyer).credit(new BigDecimal("50"), null);
         Order order = sellOrder(10, "5", 10);
 
-        IOrder.TransactionResult result = order.execute(buyer, (net.minecraft.server.level.ServerLevel) null);
+        IOrder.TransactionResult implicit = order.execute(buyer);
+        IOrder.TransactionResult explicitNull = order.execute(buyer, (net.minecraft.server.level.ServerLevel) null);
 
-        assertTrue(result.success);
-        assertEquals(0, BigDecimal.ZERO.compareTo(accounts.getPlayerAccount(buyer).get().getBalance()));
-        assertEquals(0, new BigDecimal("50").compareTo(accounts.getPlayerAccount(seller).get().getBalance()));
-        assertEquals(0, order.getQuantity());
+        assertFalse(implicit.success);
+        assertFalse(explicitNull.success);
+        assertTrue(implicit.message.contains("server level"));
+        assertEquals(0, new BigDecimal("50").compareTo(accounts.getPlayerAccount(buyer).get().getBalance()));
+        assertEquals(0, BigDecimal.ZERO.compareTo(accounts.getPlayerAccount(seller).get().getBalance()));
+        assertEquals(10, order.getQuantity());
+        assertEquals(10, order.getEscrowedItemCount());
     }
 
     @Test
