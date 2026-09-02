@@ -9,10 +9,20 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Supplier;
 
 /** Thread-safe registry and dispatcher for addon market storage providers. */
 public final class StorageProviderRegistry {
     private final Map<EconomyId, IStorageProvider> providers = new ConcurrentHashMap<>();
+    private final Supplier<IOrderManager> recoveryOrders;
+
+    public StorageProviderRegistry() {
+        this(EconomyApi::orders);
+    }
+
+    StorageProviderRegistry(Supplier<IOrderManager> recoveryOrders) {
+        this.recoveryOrders = recoveryOrders;
+    }
 
     public void register(IStorageProvider provider) {
         IStorageProvider previous = providers.putIfAbsent(provider.id(), provider);
@@ -97,12 +107,13 @@ public final class StorageProviderRegistry {
         return Optional.empty();
     }
 
-    private static boolean preserveUnreleasedReservation(UUID owner, ICommodity commodity,
-                                                         StorageReservation reservation, String reason,
-                                                         IllegalStateException parent) {
-        if (!EconomyApi.isReady()) return false;
+    private boolean preserveUnreleasedReservation(UUID owner, ICommodity commodity,
+                                                  StorageReservation reservation, String reason,
+                                                  IllegalStateException parent) {
         try {
-            EconomyApi.orders().preserveProviderReservation(owner, commodity, reservation, null, reason);
+            IOrderManager orders = recoveryOrders.get();
+            if (orders == null) return false;
+            orders.preserveProviderReservation(owner, commodity, reservation, null, reason);
             return true;
         } catch (RuntimeException preservationFailure) {
             parent.addSuppressed(preservationFailure);
