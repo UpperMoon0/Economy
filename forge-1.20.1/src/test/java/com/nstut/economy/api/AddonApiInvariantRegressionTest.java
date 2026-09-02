@@ -1,6 +1,7 @@
 package com.nstut.economy.api;
 
 import com.nstut.Economy;
+import com.nstut.economy.data.EconomyOrderData;
 import com.nstut.economy.test.MinecraftTestBase;
 import com.nstut.economy.trading.OrderManager;
 import net.minecraft.network.chat.Component;
@@ -47,7 +48,7 @@ class AddonApiInvariantRegressionTest extends MinecraftTestBase {
     @DisplayName("Malformed provider reservations are rejected and released")
     void malformedReservationIsRejectedAndReleased() {
         StorageProviderRegistry registry = new StorageProviderRegistry();
-        BrokenProvider provider = new BrokenProvider();
+        BrokenProvider provider = new BrokenProvider(true);
         registry.register(provider);
 
         IllegalStateException failure = assertThrows(IllegalStateException.class,
@@ -56,6 +57,40 @@ class AddonApiInvariantRegressionTest extends MinecraftTestBase {
         assertTrue(failure.getMessage().contains("invalid reservation"));
         assertTrue(failure.getMessage().contains("providerId"));
         assertTrue(provider.releaseCalled, "registry must best-effort release malformed reservations");
+    }
+
+    @Test
+    @DisplayName("Malformed provider escrow is durably quarantined when release fails")
+    void malformedReservationReleaseFailureIsPersisted() {
+        EconomyOrderData data = new EconomyOrderData();
+        OrderManager manager = new OrderManager();
+        manager.loadFrom(data);
+        StorageProviderRegistry registry = new StorageProviderRegistry(() -> manager);
+        BrokenProvider provider = new BrokenProvider(false);
+        registry.register(provider);
+        UUID owner = UUID.randomUUID();
+
+        IllegalStateException failure = assertThrows(IllegalStateException.class,
+                () -> registry.reserve(null, owner, new FixtureCommodity(), 4));
+
+        assertTrue(provider.releaseCalled);
+        assertTrue(failure.getMessage().contains("invalid reservation"));
+        manager.saveAll();
+
+        assertEquals(1, data.getOrders().size(), "unreleased malformed escrow must have a durable recovery snapshot");
+        EconomyOrderData.OrderSnapshot snapshot = data.getOrders().values().iterator().next();
+        assertEquals(owner, snapshot.owner);
+        assertNotNull(snapshot.externalReservation);
+        assertEquals("malformed-reservation", snapshot.externalReservation.token());
+        assertEquals(WRONG_PROVIDER, snapshot.externalReservation.providerId());
+        assertTrue(snapshot.addonMetadata.containsKey("economy:quarantine_reason"));
+
+        OrderManager reloaded = new OrderManager();
+        reloaded.loadFrom(data);
+        reloaded.saveAll();
+        assertEquals("malformed-reservation",
+                data.getOrders().values().iterator().next().externalReservation.token(),
+                "recovery token must survive repeated save/reload cycles");
     }
 
     private static final class FixtureCommodity implements ICommodity {
@@ -72,7 +107,12 @@ class AddonApiInvariantRegressionTest extends MinecraftTestBase {
     }
 
     private static final class BrokenProvider implements IStorageProvider {
+        private final boolean releaseResult;
         private boolean releaseCalled;
+
+        private BrokenProvider(boolean releaseResult) {
+            this.releaseResult = releaseResult;
+        }
 
         @Override public EconomyId id() { return PROVIDER; }
         @Override public boolean supports(ICommodity commodity) { return commodity instanceof FixtureCommodity; }
@@ -93,7 +133,7 @@ class AddonApiInvariantRegressionTest extends MinecraftTestBase {
         @Override
         public boolean release(ServerLevel level, StorageReservation reservation) {
             releaseCalled = true;
-            return true;
+            return releaseResult;
         }
     }
 }
