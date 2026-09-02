@@ -98,6 +98,30 @@ This creates a server sell order for `16k mB` of water at 2 coins per mB.
 
 ---
 
+## Addon / Developer API
+
+Economy exposes a supported addon API under `com.nstut.economy.api`. Addons should enter through `EconomyApi` instead of depending on concrete managers, saved-data classes, blocks, menus, packets, or other implementation packages.
+
+The public API supports:
+
+- player, server, and tax accounts with atomic transfers;
+- namespaced transaction causes, metadata, and loader-neutral account events;
+- order creation/query/edit/cancel operations;
+- immutable market/trade analytics;
+- custom namespaced commodity types with versioned persistence codecs;
+- pluggable durable storage providers and reservations;
+- loader-neutral market events for order and trade integrations.
+
+Developer documentation:
+
+- [Getting Started](docs/GETTING_STARTED.md) — dependency setup, runtime lifecycle, orders, market reads, events, and addon verification.
+- [Extending Economy](docs/EXTENDING_ECONOMY.md) — custom transaction causes, commodities/codecs, storage providers, persistence rules, and compatibility guidance.
+- [API Reference](docs/API_REFERENCE.md) — practical catalog of the supported public classes and methods.
+
+Economy currently defines loader-specific Maven publications but does not configure a public Maven repository. The Getting Started guide documents composite-build and Maven Local development until a public repository is officially available.
+
+---
+
 ## Building and Testing
 
 ```bash
