@@ -17,7 +17,9 @@ jobs:
           ref: feat/addon-api-platform
           fetch-depth: 0
       - name: Apply patch
-        run: python3 tools/pr22_fix.py
+        run: |
+          python3 tools/pr22_fix.py
+          rm .github/workflows/pr22-one-shot-fix.yml tools/pr22_fix.py
       - name: Verify and commit
         shell: bash
         run: |
