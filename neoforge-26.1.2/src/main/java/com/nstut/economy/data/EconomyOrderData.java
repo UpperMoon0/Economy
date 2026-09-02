@@ -73,7 +73,13 @@ public class EconomyOrderData extends SavedData {
             this(orderId, owner, itemId, quantity, quantity, pricePerUnit, type, createdAt, expiresAt, hasExpiry,
                     reservedItems, new ArrayList<>(), isServerOrder, false, "ITEM");
         }
-        public boolean hasEscrow() { return !reservedItems.isEmpty() || !reservedFluids.isEmpty() || externalReservation != null; }
+        public boolean hasEscrow() {
+            return !reservedItems.isEmpty() || !reservedFluids.isEmpty() || externalReservation != null
+                    || requiresCodecRecovery();
+        }
+        private boolean requiresCodecRecovery() {
+            return !"economy:item".equals(commodityTypeId) && !"economy:fluid".equals(commodityTypeId);
+        }
         private static String legacyTypeId(String legacy) { return "FLUID".equalsIgnoreCase(legacy) ? "economy:fluid" : "economy:item"; }
     }
 
