@@ -17,6 +17,12 @@ on:
 permissions:
   contents: write
 
+# Only the latest head of a PR is useful. Cancel older matrices as soon as a
+# new commit arrives, while never cancelling main/tag/release validation.
+concurrency:
+  group: economy-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   release-gate:
     name: Check release trigger
