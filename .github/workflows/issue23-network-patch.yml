@@ -59,7 +59,7 @@ jobs:
         run: |
           set -euo pipefail
           git diff --check
-          git rm tools/issue23_network_patch.py .github/workflows/issue23-network-patch.yml
+          git rm -f tools/issue23_network_patch.py .github/workflows/issue23-network-patch.yml
           git status --short
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
