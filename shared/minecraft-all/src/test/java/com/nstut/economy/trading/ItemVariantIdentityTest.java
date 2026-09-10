@@ -28,6 +28,18 @@ class ItemVariantIdentityTest {
         assertEquals(first.fingerprint(), second.fingerprint());
         assertEquals(first.commodityId(base), second.commodityId(base));
         assertNotEquals(first.commodityId(base), other.commodityId(base));
+        assertEquals(base, ItemVariant.baseItemId(first.commodityId(base)));
+    }
+
+    @Test
+    void baseItemResolverOnlyStripsTheCanonicalSha256Suffix() {
+        EconomyId ordinary = EconomyId.of("example", "machine/variant/controller");
+        EconomyId malformed = EconomyId.of("example", "machine/variant/deadbeef");
+        EconomyId uppercase = EconomyId.of("example", "machine/variant/" + "A".repeat(64));
+
+        assertEquals(ordinary, ItemVariant.baseItemId(ordinary));
+        assertEquals(malformed, ItemVariant.baseItemId(malformed));
+        assertEquals(uppercase, ItemVariant.baseItemId(uppercase));
     }
 
     @Test
