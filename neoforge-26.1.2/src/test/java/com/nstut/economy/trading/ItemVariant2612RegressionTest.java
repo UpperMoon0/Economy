@@ -1,6 +1,6 @@
 package com.nstut.economy.trading;
 
-import com.nstut.economy.Economy;
+import com.nstut.Economy;
 import com.nstut.economy.api.CommodityPayload;
 import com.nstut.economy.api.EconomyApi;
 import com.nstut.economy.api.IOrder;
