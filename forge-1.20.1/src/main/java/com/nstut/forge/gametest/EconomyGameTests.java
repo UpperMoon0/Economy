@@ -3,13 +3,16 @@ package com.nstut.forge.gametest;
 import com.nstut.Economy;
 import com.nstut.economy.api.EconomyApi;
 import com.nstut.economy.api.ICommodity;
+import com.nstut.economy.api.IOrder;
 import com.nstut.economy.blocks.BlockRegistries;
 import com.nstut.economy.blocks.TankBlockEntity;
 import com.nstut.economy.blocks.VaultBlockEntity;
 import com.nstut.economy.blocks.VaultManager;
+import com.nstut.economy.data.TradeLedger;
 import com.nstut.economy.trading.EconomyFluidStack;
 import com.nstut.economy.trading.ItemCommodity;
 import com.nstut.economy.trading.ItemMatchPolicy;
+import com.nstut.economy.trading.Order;
 import com.nstut.economy.trading.OrderManager;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.NonNullList;
@@ -27,11 +30,7 @@ import net.minecraftforge.gametest.PrefixGameTestTemplate;
 import java.math.BigDecimal;
 import java.util.UUID;
 
-/**
- * Real-server world coverage for behavior that plain JVM tests cannot prove:
- * registry-backed block placement, block-entity creation, world attachment and
- * Economy's runtime lifecycle.
- */
+/** Real-server coverage for Economy storage, commodity identity and order behavior. */
 @GameTestHolder(Economy.MOD_ID)
 @PrefixGameTestTemplate(false)
 public final class EconomyGameTests {
@@ -77,7 +76,7 @@ public final class EconomyGameTests {
     }
 
     @GameTest(template = "economy_gametest_empty", timeoutTicks = 60)
-    public static void exactEnchantedBooksRemainDistinctThroughVaultCodecAndOrderBook(GameTestHelper helper) {
+    public static void exactEnchantedBooksRemainDistinctThroughVaultCodecOrdersAndHistory(GameTestHelper helper) {
         helper.assertTrue(EconomyApi.isReady(), "Economy API must be ready for variant integration coverage");
 
         ItemStack sharpness = EnchantedBookItem.createForEnchantment(
@@ -104,8 +103,8 @@ public final class EconomyGameTests {
         var blockEntity = helper.getLevel().getBlockEntity(helper.absolutePos(vaultPos));
         helper.assertTrue(blockEntity instanceof VaultBlockEntity, "variant test vault must exist");
         VaultBlockEntity vault = (VaultBlockEntity) blockEntity;
-        UUID owner = UUID.randomUUID();
-        vault.setOwner(owner);
+        UUID seller = UUID.randomUUID();
+        vault.setOwner(seller);
         vault.setMode(VaultBlockEntity.VaultMode.BOTH);
         vault.setItem(0, sharpness.copy());
         vault.setItem(1, sharpness.copy());
@@ -113,19 +112,19 @@ public final class EconomyGameTests {
         vault.setItem(3, mending.copy());
         vault.setItem(4, mending.copy());
 
-        helper.assertTrue(VaultManager.countItemInVaults(helper.getLevel(), owner, sharpnessCommodity) == 2,
+        helper.assertTrue(VaultManager.countItemInVaults(helper.getLevel(), seller, sharpnessCommodity) == 2,
                 "exact Vault count must include only Sharpness V books");
-        helper.assertTrue(VaultManager.countItemInVaults(helper.getLevel(), owner, mendingCommodity) == 3,
+        helper.assertTrue(VaultManager.countItemInVaults(helper.getLevel(), seller, mendingCommodity) == 3,
                 "exact Vault count must include only Mending books");
 
         NonNullList<ItemStack> extracted = NonNullList.create();
-        helper.assertTrue(VaultManager.extractItemFromVaults(helper.getLevel(), owner, sharpnessCommodity, 1, extracted),
+        helper.assertTrue(VaultManager.extractItemFromVaults(helper.getLevel(), seller, sharpnessCommodity, 1, extracted),
                 "exact Sharpness extraction must succeed");
         helper.assertTrue(extracted.size() == 1 && sharpnessCommodity.matches(helper.getLevel(), extracted.get(0)),
                 "exact extraction must return the requested Sharpness variant");
-        helper.assertTrue(VaultManager.countItemInVaults(helper.getLevel(), owner, sharpnessCommodity) == 1,
+        helper.assertTrue(VaultManager.countItemInVaults(helper.getLevel(), seller, sharpnessCommodity) == 1,
                 "Sharpness stock must decrement independently");
-        helper.assertTrue(VaultManager.countItemInVaults(helper.getLevel(), owner, mendingCommodity) == 3,
+        helper.assertTrue(VaultManager.countItemInVaults(helper.getLevel(), seller, mendingCommodity) == 3,
                 "Mending stock must remain untouched by Sharpness extraction");
 
         var payload = EconomyApi.commodityTypes().encode(sharpnessCommodity);
@@ -147,6 +146,21 @@ public final class EconomyGameTests {
                 "Sharpness order lookup must not include Mending orders");
         helper.assertTrue(orderBook.getBuyOrders(mendingCommodity).size() == 1,
                 "Mending order lookup must not include Sharpness orders");
+
+        Order serverBuy = new Order(UUID.randomUUID(), sharpnessCommodity, 1, BigDecimal.ONE,
+                IOrder.OrderType.BUY, null);
+        serverBuy.setServerOrder(true);
+        IOrder.TransactionResult result = serverBuy.execute(seller, helper.getLevel());
+        helper.assertTrue(result.success && result.quantityTransferred == 1,
+                "server BUY must execute one exact Sharpness commodity");
+        helper.assertTrue(VaultManager.countItemInVaults(helper.getLevel(), seller, sharpnessCommodity) == 0,
+                "variant-aware BUY execution must consume the remaining Sharpness book");
+        helper.assertTrue(VaultManager.countItemInVaults(helper.getLevel(), seller, mendingCommodity) == 3,
+                "variant-aware BUY execution must never consume Mending stock");
+        helper.assertTrue(!TradeLedger.getRecentTrades(sharpnessCommodity.getId().toString(), 10).isEmpty(),
+                "trade history must be keyed by the exact Sharpness commodity id");
+        helper.assertTrue(TradeLedger.getRecentTrades(mendingCommodity.getId().toString(), 10).isEmpty(),
+                "Sharpness execution must not pollute Mending trade history");
 
         helper.succeed();
     }
