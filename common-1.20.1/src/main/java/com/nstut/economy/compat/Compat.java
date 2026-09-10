@@ -1,8 +1,10 @@
 package com.nstut.economy.compat;
 
+import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
+import net.minecraft.nbt.TagParser;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.Item;
@@ -32,6 +34,24 @@ public final class Compat {
 
     public static int maxStackSize(Item item) {
         return item.getMaxStackSize();
+    }
+
+    public static String canonicalItemStack(HolderLookup.Provider registries, ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return "{}";
+        ItemStack copy = stack.copy();
+        copy.setCount(1);
+        CompoundTag tag = new CompoundTag();
+        copy.save(tag);
+        return tag.toString();
+    }
+
+    public static ItemStack deserializeCanonicalItemStack(HolderLookup.Provider registries, String canonical) {
+        if (canonical == null || canonical.isBlank()) return ItemStack.EMPTY;
+        try {
+            return ItemStack.of(TagParser.parseTag(canonical));
+        } catch (Exception failure) {
+            throw new IllegalArgumentException("Invalid canonical 1.20.1 item variant", failure);
+        }
     }
 
     public static CompoundTag serializeItemStackTag(ServerLevel level, ItemStack stack) {
