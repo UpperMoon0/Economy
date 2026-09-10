@@ -15,14 +15,18 @@ public class EconomyTradeData extends SavedData {
     private static final String NAME = "economy_trades";
 
     public static final class TradeSnapshot {
-        public final String itemId; public final String commodityType; public final String price;
+        public final String itemId; public final String commodityType; public final String variantData; public final String displayName; public final String price;
         public final int quantity; public final UUID buyer; public final UUID seller; public final long timestamp;
         public TradeSnapshot(String itemId, String price, int quantity, UUID buyer, UUID seller, long timestamp) {
-            this(itemId, null, price, quantity, buyer, seller, timestamp);
+            this(itemId, null, "", "", price, quantity, buyer, seller, timestamp);
         }
         public TradeSnapshot(String itemId, String commodityType, String price, int quantity, UUID buyer, UUID seller, long timestamp) {
-            this.itemId = itemId; this.commodityType = commodityType; this.price = price; this.quantity = quantity;
-            this.buyer = buyer; this.seller = seller; this.timestamp = timestamp;
+            this(itemId, commodityType, "", "", price, quantity, buyer, seller, timestamp);
+        }
+        public TradeSnapshot(String itemId, String commodityType, String variantData, String displayName,
+                             String price, int quantity, UUID buyer, UUID seller, long timestamp) {
+            this.itemId = itemId; this.commodityType = commodityType; this.variantData = variantData; this.displayName = displayName;
+            this.price = price; this.quantity = quantity; this.buyer = buyer; this.seller = seller; this.timestamp = timestamp;
         }
     }
 
@@ -33,7 +37,11 @@ public class EconomyTradeData extends SavedData {
         recordTrade(itemId, null, price, quantity, buyer, seller);
     }
     public void recordTrade(String itemId, String commodityType, BigDecimal price, int quantity, UUID buyer, UUID seller) {
-        trades.add(new TradeSnapshot(itemId, commodityType, price.toPlainString(), quantity, buyer, seller, System.currentTimeMillis()));
+        recordTrade(itemId, commodityType, "", "", price, quantity, buyer, seller);
+    }
+    public void recordTrade(String itemId, String commodityType, String variantData, String displayName,
+                            BigDecimal price, int quantity, UUID buyer, UUID seller) {
+        trades.add(new TradeSnapshot(itemId, commodityType, variantData, displayName, price.toPlainString(), quantity, buyer, seller, System.currentTimeMillis()));
         while (trades.size() > MAX_TRADES) trades.remove(0);
         setDirty();
     }
@@ -59,6 +67,7 @@ public class EconomyTradeData extends SavedData {
             CompoundTag t = list.getCompound(i);
             try {
                 data.trades.add(new TradeSnapshot(t.getString("ItemId"), t.contains("CommodityType") ? t.getString("CommodityType") : null,
+                        t.contains("VariantData") ? t.getString("VariantData") : "", t.contains("DisplayName") ? t.getString("DisplayName") : "",
                         t.getString("Price"), t.getInt("Quantity"), t.getUUID("Buyer"), t.getUUID("Seller"), t.getLong("Timestamp")));
             } catch (Exception ignored) { }
         }
@@ -72,6 +81,8 @@ public class EconomyTradeData extends SavedData {
             CompoundTag tTag = new CompoundTag();
             tTag.putString("ItemId", t.itemId); tTag.putString("Price", t.price); tTag.putInt("Quantity", t.quantity);
             if (t.commodityType != null) tTag.putString("CommodityType", t.commodityType);
+            if (t.variantData != null && !t.variantData.isBlank()) tTag.putString("VariantData", t.variantData);
+            if (t.displayName != null && !t.displayName.isBlank()) tTag.putString("DisplayName", t.displayName);
             tTag.putUUID("Buyer", t.buyer); tTag.putUUID("Seller", t.seller); tTag.putLong("Timestamp", t.timestamp); list.add(tTag);
         }
         tag.put("Trades", list); return tag;

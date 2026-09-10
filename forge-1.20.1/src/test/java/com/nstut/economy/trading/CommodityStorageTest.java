@@ -1,5 +1,9 @@
 package com.nstut.economy.trading;
 
+import com.nstut.Economy;
+import com.nstut.economy.api.CommodityPayload;
+import com.nstut.economy.api.EconomyId;
+import com.nstut.economy.api.ICommodity;
 import com.nstut.economy.test.MinecraftTestBase;
 import net.minecraft.core.NonNullList;
 import net.minecraft.resources.ResourceLocation;
@@ -11,6 +15,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -47,5 +52,29 @@ class CommodityStorageTest extends MinecraftTestBase {
         assertNotEquals(fluid, item);
         assertEquals(1000, fluid.createFluidStack(1000).getAmount());
         assertSame(Fluids.WATER, fluid.createFluidStack(1000).getFluid());
+    }
+
+    @Test
+    void schemaV1MatchNbtDataMigratesSafelyToLegacyItemOnlyIdentity() {
+        Economy.ensureApiRegistrations();
+        EconomyId id = EconomyId.of("minecraft", "diamond_sword");
+        CommodityPayload legacy = new CommodityPayload(1, Map.of(
+                "basePrice", "12.5",
+                "dynamic", "true",
+                "matchNbt", "true"));
+
+        ICommodity decoded = com.nstut.economy.api.EconomyApi.commodityTypes()
+                .decode(ICommodity.ITEM_TYPE, id, legacy.version(), legacy.values());
+
+        assertInstanceOf(ItemCommodity.class, decoded);
+        ItemCommodity item = (ItemCommodity) decoded;
+        assertEquals(id, item.getId());
+        assertEquals(ItemMatchPolicy.ITEM_ONLY, item.getMatchPolicy());
+        assertEquals(new BigDecimal("12.5"), item.getBasePrice());
+
+        CommodityPayload migrated = com.nstut.economy.api.EconomyApi.commodityTypes().encode(item);
+        assertEquals(2, migrated.version());
+        assertEquals("ITEM_ONLY", migrated.values().get("matchPolicy"));
+        assertEquals("minecraft:diamond_sword", migrated.values().get("baseItem"));
     }
 }

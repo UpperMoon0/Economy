@@ -2,6 +2,7 @@ package com.nstut.economy.blocks;
 
 import com.nstut.economy.data.EconomyAccountData;
 import com.nstut.economy.data.EconomyAccountData.VaultRecord;
+import com.nstut.economy.trading.ItemCommodity;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.NonNullList;
 import net.minecraft.core.registries.Registries;
@@ -115,6 +116,19 @@ public class VaultManager {
         return count;
     }
 
+    public static int countItemInVaults(Level level, UUID owner, ItemCommodity commodity) {
+        if (level == null || commodity == null) return 0;
+        int count = 0;
+        for (VaultBlockEntity vault : getVaults(level, owner)) {
+            if (!vault.getMode().canSupplyMarket()) continue;
+            for (int slot = 0; slot < vault.getContainerSize(); slot++) {
+                ItemStack stack = vault.getItem(slot);
+                if (commodity.matches(level, stack)) count += stack.getCount();
+            }
+        }
+        return count;
+    }
+
     public static boolean extractItemFromVaults(Level level, UUID owner, Item item, int amount, NonNullList<ItemStack> destination) {
         if (countItemInVaults(level, owner, item) < amount) return false;
         int remaining = amount;
@@ -128,6 +142,28 @@ public class VaultManager {
                 if (v.extractItem(item, take, temp)) {
                     destination.addAll(temp);
                     remaining -= take;
+                }
+            }
+        }
+        return remaining == 0;
+    }
+
+    public static boolean extractItemFromVaults(Level level, UUID owner, ItemCommodity commodity,
+                                                int amount, NonNullList<ItemStack> destination) {
+        if (level == null || commodity == null || amount < 0) return false;
+        if (countItemInVaults(level, owner, commodity) < amount) return false;
+        int remaining = amount;
+        for (VaultBlockEntity vault : getVaults(level, owner)) {
+            if (remaining <= 0) break;
+            if (!vault.getMode().canSupplyMarket()) continue;
+            for (int slot = 0; slot < vault.getContainerSize() && remaining > 0; slot++) {
+                ItemStack stack = vault.getItem(slot);
+                if (!commodity.matches(level, stack)) continue;
+                int take = Math.min(remaining, stack.getCount());
+                ItemStack extracted = vault.removeItem(slot, take);
+                if (!extracted.isEmpty()) {
+                    destination.add(extracted);
+                    remaining -= extracted.getCount();
                 }
             }
         }
