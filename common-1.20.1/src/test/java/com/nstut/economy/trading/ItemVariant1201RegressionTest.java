@@ -3,7 +3,7 @@ package com.nstut.economy.trading;
 import com.nstut.economy.Economy;
 import com.nstut.economy.api.CommodityPayload;
 import com.nstut.economy.api.EconomyApi;
-import com.nstut.economy.api.ICommodity;
+import com.nstut.economy.api.IOrder;
 import com.nstut.economy.test.MinecraftTestBase;
 import net.minecraft.core.NonNullList;
 import net.minecraft.core.RegistryAccess;
@@ -11,6 +11,7 @@ import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.item.EnchantedBookItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.enchantment.Enchantment;
 import net.minecraft.world.item.enchantment.EnchantmentInstance;
 import net.minecraft.world.item.enchantment.Enchantments;
 import org.junit.jupiter.api.BeforeEach;
@@ -100,7 +101,7 @@ class ItemVariant1201RegressionTest extends MinecraftTestBase {
         assertFalse(decoded.matches(registries, mending));
         assertTrue(ItemStack.isSameItemSameTags(sharpness, decoded.getRepresentativeStack(registries)));
 
-        Order order = new Order(UUID.randomUUID(), original, 3, new BigDecimal("12.5"), ICommodity.OrderType.SELL, null);
+        Order order = new Order(UUID.randomUUID(), original, 3, new BigDecimal("12.5"), IOrder.OrderType.SELL, null);
         Order restored = Order.fromSnapshot(order.toSnapshot());
         ItemCommodity restoredCommodity = (ItemCommodity) restored.getCommodity();
         assertEquals(original.getId(), restoredCommodity.getId());
@@ -120,7 +121,7 @@ class ItemVariant1201RegressionTest extends MinecraftTestBase {
                 original.getTypeId(), original.getId(), encoded.version(), corrupted));
     }
 
-    private static ItemStack enchantedBook(net.minecraft.world.item.enchantment.Enchantment enchantment, int level) {
+    private static ItemStack enchantedBook(Enchantment enchantment, int level) {
         ItemStack stack = new ItemStack(Items.ENCHANTED_BOOK);
         EnchantedBookItem.addEnchantment(stack, new EnchantmentInstance(enchantment, level));
         return stack;
