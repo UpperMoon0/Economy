@@ -7,6 +7,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -87,6 +88,21 @@ class MarketPacketTest extends MinecraftTestBase {
         assertEquals(variantId, decoded.itemId);
         assertEquals("Sharpness V", decoded.displayName);
         assertEquals(2, decoded.vaultCount);
+    }
+
+    @Test
+    @DisplayName("Exact item variant descriptors survive the client sync packet")
+    void exactVariantDescriptorRoundTrips() {
+        String variantId = "minecraft:enchanted_book/variant/" + "c".repeat(64);
+        String canonical = "{Count:1b,id:\"minecraft:enchanted_book\",tag:{StoredEnchantments:[{id:\"minecraft:sharpness\",lvl:5s}]}}";
+        MarketNetwork.SyncItemVariantDataPacket original =
+                new MarketNetwork.SyncItemVariantDataPacket(Map.of(variantId, canonical));
+        FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
+
+        MarketNetwork.SyncItemVariantDataPacket.encode(original, buffer);
+        MarketNetwork.SyncItemVariantDataPacket decoded = MarketNetwork.SyncItemVariantDataPacket.decode(buffer);
+
+        assertEquals(Map.of(variantId, canonical), decoded.variants);
     }
 
     @Test
