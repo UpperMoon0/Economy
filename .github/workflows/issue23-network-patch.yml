@@ -19,7 +19,21 @@ jobs:
           ref: feat/issue-23-variant-aware-commodities
           fetch-depth: 0
       - name: Apply asserted source patch
-        run: python3 tools/issue23_network_patch.py
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("tools/issue23_network_patch.py")
+          text = path.read_text(encoding="utf-8")
+          needle = r"net\.minecraft\.resources\.Identifier\.parse"
+          replacement = r"(?:net\.minecraft\.resources\.)?Identifier\.parse"
+          count = text.count(needle)
+          if count != 1:
+              raise RuntimeError(f"expected exactly one 26.1.2 Identifier.parse matcher, found {count}")
+          path.write_text(text.replace(needle, replacement), encoding="utf-8")
+          PY
+          python3 tools/issue23_network_patch.py
       - name: Verify exact patch and self-clean
         shell: bash
         run: |
