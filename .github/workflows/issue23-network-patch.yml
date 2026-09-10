@@ -36,15 +36,22 @@ jobs:
 
           source_path = Path("common-1.20.1/src/main/java/com/nstut/economy/data/EconomyTradeData.java")
           source = source_path.read_text(encoding="utf-8")
-          old = '''                data.trades.add(new TradeSnapshot(t.getString("ItemId"),
-                        t.contains("CommodityType") ? t.getString("CommodityType") : null,
-                        t.getString("Price"), t.getInt("Quantity"), t.getUUID("Buyer"), t.getUUID("Seller"), t.getLong("Timestamp")));'''
-          normalized = '''                data.trades.add(new TradeSnapshot(t.getString("ItemId"), t.contains("CommodityType") ? t.getString("CommodityType") : null,
-                        t.getString("Price"), t.getInt("Quantity"), t.getUUID("Buyer"), t.getUUID("Seller"), t.getLong("Timestamp")));'''
-          count = source.count(old)
-          if count != 1:
-              raise RuntimeError(f"expected exact 1.20.1 trade load source shape once, found {count}")
-          source_path.write_text(source.replace(old, normalized), encoding="utf-8")
+          start_token = 'data.trades.add(new TradeSnapshot(t.getString("ItemId"),'
+          end_token = 't.getLong("Timestamp")));'
+          start = source.find(start_token)
+          if start < 0 or source.find(start_token, start + 1) >= 0:
+              raise RuntimeError("expected exactly one 1.20.1 trade load constructor")
+          end = source.find(end_token, start)
+          if end < 0:
+              raise RuntimeError("1.20.1 trade load constructor has no expected timestamp tail")
+          end += len(end_token)
+          segment = source[start:end]
+          required = 't.contains("CommodityType") ? t.getString("CommodityType") : null'
+          price_tail = 't.getString("Price"), t.getInt("Quantity"), t.getUUID("Buyer"), t.getUUID("Seller"), t.getLong("Timestamp")))'
+          if required not in segment or price_tail not in segment:
+              raise RuntimeError("1.20.1 trade load constructor changed semantically")
+          normalized = 'data.trades.add(new TradeSnapshot(t.getString("ItemId"), t.contains("CommodityType") ? t.getString("CommodityType") : null,\n                        t.getString("Price"), t.getInt("Quantity"), t.getUUID("Buyer"), t.getUUID("Seller"), t.getLong("Timestamp")));'
+          source_path.write_text(source[:start] + normalized + source[end:], encoding="utf-8")
           PY
           python3 tools/issue23_network_patch.py
       - name: Verify exact patch and self-clean
