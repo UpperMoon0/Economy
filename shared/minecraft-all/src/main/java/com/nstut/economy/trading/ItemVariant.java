@@ -79,6 +79,10 @@ public final class ItemVariant {
         return fingerprint;
     }
 
+    public boolean hasCapturedRepresentative() {
+        return !capturedRepresentative.isEmpty();
+    }
+
     public EconomyId commodityId(EconomyId baseItemId) {
         Objects.requireNonNull(baseItemId, "baseItemId");
         if (policy == ItemMatchPolicy.ITEM_ONLY) return baseItemId;

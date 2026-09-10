@@ -59,6 +59,9 @@ public class ItemCommodity implements ICommodity {
     @Override public boolean insertInto(IStorage storage, int amount) { return false; }
 
     public boolean matches(ItemStack stack) {
+        if (variant.policy() != ItemMatchPolicy.ITEM_ONLY && !variant.hasCapturedRepresentative()) {
+            throw new UnsupportedOperationException("Persisted variant matching requires registry access; use matches(Level, ItemStack) or matches(HolderLookup.Provider, ItemStack)");
+        }
         return stack != null && !stack.isEmpty() && stack.is(item) && variant.matchesCaptured(stack);
     }
 

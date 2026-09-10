@@ -139,6 +139,19 @@ public final class EconomyGameTests {
         helper.assertTrue(restored.matches(helper.getLevel(), sharpness) && !restored.matches(helper.getLevel(), mending),
                 "restored exact matcher must remain variant-specific");
 
+        ItemCommodity bootstrapped = com.nstut.economy.network.MarketNetwork.resolveItemCommodityForOrder(
+                new OrderManager(), helper.getLevel(), seller, sharpnessCommodity.getId().toString());
+        helper.assertTrue(bootstrapped != null && bootstrapped.getId().equals(sharpnessCommodity.getId()),
+                "first exact sell order must bootstrap its commodity from matching Vault stock without an existing order");
+        boolean noContextFailedLoudly = false;
+        try {
+            restored.matches(sharpness);
+        } catch (UnsupportedOperationException expected) {
+            noContextFailedLoudly = true;
+        }
+        helper.assertTrue(noContextFailedLoudly,
+                "persisted exact commodities must reject registry-less matching instead of silently reporting no stock");
+
         OrderManager orderBook = new OrderManager();
         orderBook.createBuyOrder(UUID.randomUUID(), sharpnessCommodity, 1, new BigDecimal("10"), false, null);
         orderBook.createBuyOrder(UUID.randomUUID(), mendingCommodity, 1, new BigDecimal("20"), false, null);

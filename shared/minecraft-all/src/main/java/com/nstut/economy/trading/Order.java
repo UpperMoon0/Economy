@@ -469,7 +469,7 @@ public class Order implements IOrder {
     }
 
     private TransactionResult completeTrade(ServerLevel level, UUID buyer, UUID seller, int delivered, BigDecimal total) {
-        recordTrade(pricePerUnit, delivered, buyer, seller);
+        recordTrade(level, pricePerUnit, delivered, buyer, seller);
         boolean fluidLike = isFluidLike();
         notifyPlayerTrade(level, buyer, seller, true, commodity.getDisplayName().getString(), fluidLike, delivered, pricePerUnit, total);
         notifyPlayerTrade(level, seller, buyer, false, commodity.getDisplayName().getString(), fluidLike, delivered, pricePerUnit, total);
@@ -540,10 +540,17 @@ public class Order implements IOrder {
                 reservation.token(), orderId);
     }
 
-    private void recordTrade(BigDecimal price, int amount, UUID buyer, UUID seller) {
+    private void recordTrade(ServerLevel level, BigDecimal price, int amount, UUID buyer, UUID seller) {
         String typeValue = commodity.getType() == ICommodity.CommodityType.ITEM ? "ITEM"
                 : commodity.getType() == ICommodity.CommodityType.FLUID ? "FLUID" : commodity.getTypeId().toString();
-        TradeLedger.recordTrade(commodity.getId().toString(), typeValue, price, amount, buyer, seller);
+        String variantData = "";
+        String displayName = commodity.getDisplayName().getString();
+        if (commodity instanceof ItemCommodity item && item.getMatchPolicy() != ItemMatchPolicy.ITEM_ONLY) {
+            variantData = item.getCanonicalVariantData();
+            if (level != null) displayName = item.getDisplayName(level.registryAccess()).getString();
+        }
+        TradeLedger.recordTrade(commodity.getId().toString(), typeValue, variantData, displayName,
+                price, amount, buyer, seller);
     }
 
     private boolean isFluidLike() {

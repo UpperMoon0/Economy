@@ -27,6 +27,13 @@ import java.util.Map;
 public class CommodityIconComponent extends UIComponent {
     private String commodityId;
     private static final Map<String, ItemStack> ITEM_CACHE = new HashMap<>();
+    private static final Map<String, String> VARIANT_DATA = new HashMap<>();
+
+    public static void replaceVariantData(Map<String, String> variants) {
+        VARIANT_DATA.clear();
+        if (variants != null) VARIANT_DATA.putAll(variants);
+        ITEM_CACHE.clear();
+    }
 
     public CommodityIconComponent(String commodityId) {
         this.commodityId = commodityId;
@@ -75,6 +82,16 @@ public class CommodityIconComponent extends UIComponent {
             RenderSystem.setShaderColor(1f, 1f, 1f, 1f);
         } else {
             ItemStack icon = ITEM_CACHE.computeIfAbsent(commodityId, id -> {
+                String canonical = VARIANT_DATA.get(id);
+                if (canonical != null && !canonical.isBlank() && Minecraft.getInstance().level != null) {
+                    try {
+                        ItemStack exact = com.nstut.economy.compat.Compat.deserializeCanonicalItemStack(
+                                Minecraft.getInstance().level.registryAccess(), canonical);
+                        if (exact != null && !exact.isEmpty()) return exact;
+                    } catch (RuntimeException ignored) {
+                        // Fall through to the registered base item. Server remains authoritative.
+                    }
+                }
                 String baseId = com.nstut.economy.trading.ItemVariant.baseItemId(
                         com.nstut.economy.api.EconomyId.parse(id)).toString();
                 Item item = BuiltInRegistries.ITEM.get(new ResourceLocation(baseId));
