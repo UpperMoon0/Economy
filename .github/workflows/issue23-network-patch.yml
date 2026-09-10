@@ -1,0 +1,34 @@
+name: Issue 23 network patch
+
+on:
+  push:
+    branches:
+      - feat/issue-23-variant-aware-commodities
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/issue-23-variant-aware-commodities
+          fetch-depth: 0
+      - name: Apply asserted source patch
+        run: python3 tools/issue23_network_patch.py
+      - name: Verify exact patch and self-clean
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          git rm tools/issue23_network_patch.py .github/workflows/issue23-network-patch.yml
+          git status --short
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Make market networking variant-aware'
+          git push origin HEAD:feat/issue-23-variant-aware-commodities
