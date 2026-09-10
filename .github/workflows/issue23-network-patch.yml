@@ -24,14 +24,27 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
-          path = Path("tools/issue23_network_patch.py")
-          text = path.read_text(encoding="utf-8")
+
+          patch_path = Path("tools/issue23_network_patch.py")
+          patch_text = patch_path.read_text(encoding="utf-8")
           needle = r"net\.minecraft\.resources\.Identifier\.parse"
           replacement = r"(?:net\.minecraft\.resources\.)?Identifier\.parse"
-          count = text.count(needle)
+          count = patch_text.count(needle)
           if count != 1:
               raise RuntimeError(f"expected exactly one 26.1.2 Identifier.parse matcher, found {count}")
-          path.write_text(text.replace(needle, replacement), encoding="utf-8")
+          patch_path.write_text(patch_text.replace(needle, replacement), encoding="utf-8")
+
+          source_path = Path("common-1.20.1/src/main/java/com/nstut/economy/data/EconomyTradeData.java")
+          source = source_path.read_text(encoding="utf-8")
+          old = '''                data.trades.add(new TradeSnapshot(t.getString("ItemId"),
+                        t.contains("CommodityType") ? t.getString("CommodityType") : null,
+                        t.getString("Price"), t.getInt("Quantity"), t.getUUID("Buyer"), t.getUUID("Seller"), t.getLong("Timestamp")));'''
+          normalized = '''                data.trades.add(new TradeSnapshot(t.getString("ItemId"), t.contains("CommodityType") ? t.getString("CommodityType") : null,
+                        t.getString("Price"), t.getInt("Quantity"), t.getUUID("Buyer"), t.getUUID("Seller"), t.getLong("Timestamp")));'''
+          count = source.count(old)
+          if count != 1:
+              raise RuntimeError(f"expected exact 1.20.1 trade load source shape once, found {count}")
+          source_path.write_text(source.replace(old, normalized), encoding="utf-8")
           PY
           python3 tools/issue23_network_patch.py
       - name: Verify exact patch and self-clean
