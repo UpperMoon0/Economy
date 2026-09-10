@@ -20,6 +20,8 @@ import java.util.Objects;
  * shared market code. Counts are normalized before capture.
  */
 public final class ItemVariant {
+    private static final String VARIANT_SEGMENT = "/variant/";
+    private static final int SHA256_HEX_LENGTH = 64;
     private static final ItemVariant ITEM_ONLY = new ItemVariant(ItemMatchPolicy.ITEM_ONLY, "", "", ItemStack.EMPTY);
 
     private final ItemMatchPolicy policy;
@@ -80,7 +82,28 @@ public final class ItemVariant {
     public EconomyId commodityId(EconomyId baseItemId) {
         Objects.requireNonNull(baseItemId, "baseItemId");
         if (policy == ItemMatchPolicy.ITEM_ONLY) return baseItemId;
-        return EconomyId.of(baseItemId.namespace(), baseItemId.path() + "/variant/" + fingerprint);
+        return EconomyId.of(baseItemId.namespace(), baseItemId.path() + VARIANT_SEGMENT + fingerprint);
+    }
+
+    /**
+     * Returns the registered base item id embedded in an Economy canonical item
+     * commodity id. A normal item id is returned unchanged. Only the exact
+     * Economy suffix shape (/variant/ + 64 lowercase hex chars) is stripped,
+     * so ordinary mod item paths containing the word "variant" remain intact.
+     */
+    public static EconomyId baseItemId(EconomyId commodityId) {
+        Objects.requireNonNull(commodityId, "commodityId");
+        String path = commodityId.path();
+        int marker = path.lastIndexOf(VARIANT_SEGMENT);
+        if (marker < 0) return commodityId;
+        String digest = path.substring(marker + VARIANT_SEGMENT.length());
+        if (digest.length() != SHA256_HEX_LENGTH) return commodityId;
+        for (int i = 0; i < digest.length(); i++) {
+            char c = digest.charAt(i);
+            if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return commodityId;
+        }
+        if (marker == 0) return commodityId;
+        return EconomyId.of(commodityId.namespace(), path.substring(0, marker));
     }
 
     public boolean matches(HolderLookup.Provider registries, ItemStack candidate) {
