@@ -4,13 +4,11 @@ import com.nstut.Economy;
 import com.nstut.economy.api.CommodityPayload;
 import com.nstut.economy.api.EconomyApi;
 import com.nstut.economy.api.IOrder;
-import net.minecraft.SharedConstants;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.core.NonNullList;
 import net.minecraft.core.registries.Registries;
-import net.minecraft.data.registries.VanillaRegistries;
 import net.minecraft.resources.ResourceKey;
-import net.minecraft.server.Bootstrap;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -19,6 +17,8 @@ import net.minecraft.world.item.enchantment.EnchantmentHelper;
 import net.minecraft.world.item.enchantment.Enchantments;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import net.neoforged.testframework.junit.EphemeralTestServerProvider;
 
 import java.math.BigDecimal;
 import java.util.HashMap;
@@ -28,16 +28,13 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.*;
 
 /** Current component/codec regression coverage for issue #23. */
+@ExtendWith(EphemeralTestServerProvider.class)
 class ItemVariant2612RegressionTest {
-    static {
-        SharedConstants.tryDetectVersion();
-        Bootstrap.bootStrap();
-    }
-
-    private final HolderLookup.Provider registries = VanillaRegistries.createLookup();
+    private HolderLookup.Provider registries;
 
     @BeforeEach
-    void registerCommodityCodec() {
+    void registerCommodityCodec(MinecraftServer server) {
+        registries = server.registryAccess();
         Economy.ensureApiRegistrations();
     }
 

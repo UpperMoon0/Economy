@@ -40,9 +40,7 @@ public final class Compat {
         if (registries == null) throw new IllegalArgumentException("Registry access is required to serialize 1.21.1 item components");
         ItemStack copy = stack.copy();
         copy.setCount(1);
-        CompoundTag tag = new CompoundTag();
-        copy.save(registries, tag);
-        return tag.toString();
+        return copy.save(registries).toString();
     }
 
     public static ItemStack deserializeCanonicalItemStack(HolderLookup.Provider registries, String canonical) {

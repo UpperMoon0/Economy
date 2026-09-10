@@ -35,11 +35,11 @@ class ItemVariantIdentityTest {
     void baseItemResolverOnlyStripsTheCanonicalSha256Suffix() {
         EconomyId ordinary = EconomyId.of("example", "machine/variant/controller");
         EconomyId malformed = EconomyId.of("example", "machine/variant/deadbeef");
-        EconomyId uppercase = EconomyId.of("example", "machine/variant/" + "A".repeat(64));
+        EconomyId nonHex = EconomyId.of("example", "machine/variant/" + "g".repeat(64));
 
         assertEquals(ordinary, ItemVariant.baseItemId(ordinary));
         assertEquals(malformed, ItemVariant.baseItemId(malformed));
-        assertEquals(uppercase, ItemVariant.baseItemId(uppercase));
+        assertEquals(nonHex, ItemVariant.baseItemId(nonHex));
     }
 
     @Test

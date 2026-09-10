@@ -1,26 +1,23 @@
 package com.nstut.economy.trading;
 
 import com.nstut.economy.compat.Compat;
-import net.minecraft.SharedConstants;
 import net.minecraft.core.HolderLookup;
-import net.minecraft.data.registries.VanillaRegistries;
-import net.minecraft.server.Bootstrap;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import net.neoforged.testframework.junit.EphemeralTestServerProvider;
 
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+@ExtendWith(EphemeralTestServerProvider.class)
 class ItemVariantComponentTest {
-    static {
-        SharedConstants.tryDetectVersion();
-        Bootstrap.bootStrap();
-    }
 
     @Test
-    void exactVariantsUseAndRestore2612DataComponents() {
-        HolderLookup.Provider registries = VanillaRegistries.createLookup();
+    void exactVariantsUseAndRestore2612DataComponents(MinecraftServer server) {
+        HolderLookup.Provider registries = server.registryAccess();
         ItemStack damageOne = new ItemStack(Items.DIAMOND_SWORD);
         damageOne.setDamageValue(1);
         ItemStack damageTwo = new ItemStack(Items.DIAMOND_SWORD);

@@ -22,7 +22,7 @@ import java.util.Objects;
 public final class ItemVariant {
     private static final String VARIANT_SEGMENT = "/variant/";
     private static final int SHA256_HEX_LENGTH = 64;
-    private static final ItemVariant ITEM_ONLY = new ItemVariant(ItemMatchPolicy.ITEM_ONLY, "", "", ItemStack.EMPTY);
+    private static final ItemVariant ITEM_ONLY = new ItemVariant(ItemMatchPolicy.ITEM_ONLY, "", "", null);
 
     private final ItemMatchPolicy policy;
     private final String canonicalData;
@@ -33,7 +33,7 @@ public final class ItemVariant {
         this.policy = Objects.requireNonNull(policy, "policy");
         this.canonicalData = Objects.requireNonNull(canonicalData, "canonicalData");
         this.fingerprint = Objects.requireNonNull(fingerprint, "fingerprint");
-        this.capturedRepresentative = representative == null ? ItemStack.EMPTY : normalizedCopy(representative);
+        this.capturedRepresentative = representative == null ? null : normalizedCopy(representative);
     }
 
     public static ItemVariant itemOnly() {
@@ -64,7 +64,7 @@ public final class ItemVariant {
         if (expectedFingerprint != null && !expectedFingerprint.isBlank() && !actual.equals(expectedFingerprint)) {
             throw new IllegalArgumentException("Item variant fingerprint does not match canonical data");
         }
-        return new ItemVariant(policy, canonicalData, actual, ItemStack.EMPTY);
+        return new ItemVariant(policy, canonicalData, actual, null);
     }
 
     public ItemMatchPolicy policy() {
@@ -80,7 +80,7 @@ public final class ItemVariant {
     }
 
     public boolean hasCapturedRepresentative() {
-        return !capturedRepresentative.isEmpty();
+        return capturedRepresentative != null && !capturedRepresentative.isEmpty();
     }
 
     public EconomyId commodityId(EconomyId baseItemId) {
@@ -126,13 +126,14 @@ public final class ItemVariant {
     public boolean matchesCaptured(ItemStack candidate) {
         if (candidate == null || candidate.isEmpty()) return false;
         if (policy == ItemMatchPolicy.ITEM_ONLY) return true;
-        return !capturedRepresentative.isEmpty() && Compat.stacksEqual(capturedRepresentative, normalizedCopy(candidate));
+        return capturedRepresentative != null && !capturedRepresentative.isEmpty()
+                && Compat.stacksEqual(capturedRepresentative, normalizedCopy(candidate));
     }
 
     public ItemStack representative(Item baseItem, HolderLookup.Provider registries) {
         Objects.requireNonNull(baseItem, "baseItem");
         if (policy == ItemMatchPolicy.ITEM_ONLY) return new ItemStack(baseItem);
-        ItemStack result = capturedRepresentative.isEmpty()
+        ItemStack result = capturedRepresentative == null || capturedRepresentative.isEmpty()
                 ? Compat.deserializeCanonicalItemStack(registries, canonicalData)
                 : capturedRepresentative.copy();
         if (result == null || result.isEmpty() || !result.is(baseItem)) {
@@ -144,7 +145,7 @@ public final class ItemVariant {
 
     public ItemStack representativeOrBase(Item baseItem) {
         Objects.requireNonNull(baseItem, "baseItem");
-        if (!capturedRepresentative.isEmpty()) return capturedRepresentative.copy();
+        if (capturedRepresentative != null && !capturedRepresentative.isEmpty()) return capturedRepresentative.copy();
         return new ItemStack(baseItem);
     }
 
