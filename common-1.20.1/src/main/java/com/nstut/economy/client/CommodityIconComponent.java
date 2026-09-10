@@ -15,7 +15,6 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.material.Fluid;
-import com.nstut.economy.trading.EconomyFluidStack;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -76,7 +75,9 @@ public class CommodityIconComponent extends UIComponent {
             RenderSystem.setShaderColor(1f, 1f, 1f, 1f);
         } else {
             ItemStack icon = ITEM_CACHE.computeIfAbsent(commodityId, id -> {
-                Item item = BuiltInRegistries.ITEM.get(new ResourceLocation(id));
+                String baseId = com.nstut.economy.trading.ItemVariant.baseItemId(
+                        com.nstut.economy.api.EconomyId.parse(id)).toString();
+                Item item = BuiltInRegistries.ITEM.get(new ResourceLocation(baseId));
                 return new ItemStack(item);
             });
             float scale = Math.min(w, h) / 16.0F;
@@ -91,5 +92,3 @@ public class CommodityIconComponent extends UIComponent {
         }
     }
 }
-
-
