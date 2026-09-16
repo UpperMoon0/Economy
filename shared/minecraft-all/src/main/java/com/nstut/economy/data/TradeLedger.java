@@ -24,9 +24,14 @@ public final class TradeLedger {
 
     public static void recordTrade(String itemId, String commodityType, BigDecimal price,
                                    int quantity, UUID buyer, UUID seller) {
+        recordTrade(itemId, commodityType, "", "", price, quantity, buyer, seller);
+    }
+
+    public static void recordTrade(String itemId, String commodityType, String variantData, String displayName,
+                                   BigDecimal price, int quantity, UUID buyer, UUID seller) {
         EconomyTradeData current = data;
         if (current == null) return;
-        current.recordTrade(itemId, commodityType, price, quantity, buyer, seller);
+        current.recordTrade(itemId, commodityType, variantData, displayName, price, quantity, buyer, seller);
         TradeView view = new TradeView(EconomyId.parse(itemId), typeId(commodityType), price, quantity,
                 buyer, seller, Instant.now());
         EconomyEvents.post(new MarketEvents.TradeCompleted(view));

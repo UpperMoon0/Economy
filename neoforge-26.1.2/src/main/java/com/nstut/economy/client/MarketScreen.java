@@ -879,8 +879,11 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         if (query == null || query.isBlank()) return;
         Identifier id = Identifier.tryParse(query.trim());
         if (id == null) return;
-        boolean knownItem = BuiltInRegistries.ITEM.containsKey(id);
-        boolean knownFluid = BuiltInRegistries.FLUID.containsKey(id)
+        String base = com.nstut.economy.trading.ItemVariant.baseItemId(
+                com.nstut.economy.api.EconomyId.parse(id.toString())).toString();
+        var baseId = Identifier.parse(base);
+        boolean knownItem = BuiltInRegistries.ITEM.containsKey(baseId);
+        boolean knownFluid = base.equals(id.toString()) && BuiltInRegistries.FLUID.containsKey(id)
                 && CommodityUtil.isCanonicalFluid(BuiltInRegistries.FLUID.getValue(id));
         if (knownItem || knownFluid) {
             MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestItemDetailPacket(id.toString(),
@@ -1892,13 +1895,22 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         if (query == null || query.length() < 2) return List.of();
         String q = query.toLowerCase(Locale.ROOT);
         List<ItemSearchResult> results = new ArrayList<>();
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        for (var holding : MarketClientStore.assetHoldings.get()) {
+            String id = holding.itemId;
+            String name = holding.displayName;
+            if ((name.toLowerCase(Locale.ROOT).contains(q) || id.toLowerCase(Locale.ROOT).contains(q)) && seen.add(id)) {
+                results.add(new ItemSearchResult(id, name));
+                if (results.size() >= 50) return results;
+            }
+        }
         for (Identifier rl : BuiltInRegistries.ITEM.keySet()) {
             Item item = BuiltInRegistries.ITEM.getValue(rl);
             String name = new ItemStack(item).getHoverName().getString();
             String rlStr = rl.toString();
-            if (name.toLowerCase(Locale.ROOT).contains(q) || rlStr.contains(q)) {
+            if ((name.toLowerCase(Locale.ROOT).contains(q) || rlStr.contains(q)) && seen.add(rlStr)) {
                 results.add(new ItemSearchResult(rlStr, name));
-                if (results.size() >= 50) break;
+                if (results.size() >= 50) return results;
             }
         }
         for (Identifier rl : BuiltInRegistries.FLUID.keySet()) {
@@ -1906,9 +1918,9 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
             if (!CommodityUtil.isCanonicalFluid(fluid)) continue;
             String name = com.nstut.economy.platform.Services.FLUID.displayName(fluid).getString();
             String rlStr = rl.toString();
-            if (name.toLowerCase(Locale.ROOT).contains(q) || rlStr.contains(q)) {
+            if ((name.toLowerCase(Locale.ROOT).contains(q) || rlStr.contains(q)) && seen.add(rlStr)) {
                 results.add(new ItemSearchResult(rlStr, name));
-                if (results.size() >= 50) break;
+                if (results.size() >= 50) return results;
             }
         }
         return results;

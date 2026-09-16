@@ -321,15 +321,14 @@ public class OrderManager implements IOrderManager {
             if (order.getExternalReservation() != null && newQuantity != order.getQuantity()) return false;
 
             if (order.getExternalReservation() == null && order.getCommodity() instanceof ItemCommodity ic && level != null) {
-                net.minecraft.world.item.Item item = ic.getItem();
                 int currentQty = order.getQuantity();
                 if (newQuantity > currentQty) {
                     int needed = newQuantity - currentQty;
                     if (needed > com.nstut.economy.config.EconomyConfig.getInstance().getMaxOrderQuantity()) return false;
-                    int available = com.nstut.economy.blocks.VaultManager.countItemInVaults(level, requester, item);
+                    int available = com.nstut.economy.blocks.VaultManager.countItemInVaults(level, requester, ic);
                     if (available < needed) return false;
                     NonNullList<ItemStack> extracted = NonNullList.create();
-                    if (!com.nstut.economy.blocks.VaultManager.extractItemFromVaults(level, requester, item, needed, extracted)) {
+                    if (!com.nstut.economy.blocks.VaultManager.extractItemFromVaults(level, requester, ic, needed, extracted)) {
                         if (!extracted.isEmpty() && !AtomicStorageRestore.restoreEscrow(level, requester, extracted, List.of())) {
                             Economy.LOGGER.error("Could not atomically restore partial Vault extraction while editing order {}", orderId);
                         }

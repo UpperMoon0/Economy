@@ -257,13 +257,14 @@ public class Order implements IOrder {
                     amount = Math.min(amount, VaultInventoryOps.total(items));
                     if (amount <= 0) return TransactionResult.failure("Sell order has no reserved items");
                 }
-            } else items = generateItemStacks(item.getItem(), amount);
+            } else {
+                items = createItemStacks(item, amount, level);
+            }
             if (!serverBuyer && level != null) {
                 int space = VaultManager.hasVault(buyerId) ? VaultManager.countMaxAcceptableItems(level, buyerId, items) : 0;
                 amount = Math.min(amount, space);
                 if (amount <= 0) return TransactionResult.failure("Buyer has no compatible Vault space");
-                items = buildItemDelivery(item.getItem(), amount);
-                if (serverOrder && items.isEmpty()) items = generateItemStacks(item.getItem(), amount);
+                items = serverOrder ? createItemStacks(item, amount, level) : buildItemDelivery(item.getItem(), amount);
             }
         } else if (commodity instanceof FluidCommodity fluid) {
             if (!serverOrder) amount = Math.min(amount, getReservedFluidAmount());
@@ -357,9 +358,9 @@ public class Order implements IOrder {
         }
 
         if (level != null && commodity instanceof ItemCommodity item) {
-            amount = Math.min(amount, VaultManager.countItemInVaults(level, sellerId, item.getItem()));
+            amount = Math.min(amount, VaultManager.countItemInVaults(level, sellerId, item));
             if (!serverOrder) amount = Math.min(amount, VaultManager.hasVault(owner)
-                    ? VaultManager.countMaxAcceptableItems(level, owner, generateItemStacks(item.getItem(), amount)) : 0);
+                    ? VaultManager.countMaxAcceptableItems(level, owner, createItemStacks(item, amount, level)) : 0);
         } else if (level != null && commodity instanceof FluidCommodity fluid) {
             amount = Math.min(amount, TankManager.countFluidInTanks(level, sellerId, fluid.getFluid()));
             if (!serverOrder) amount = Math.min(amount, TankManager.hasTank(owner)
@@ -376,7 +377,7 @@ public class Order implements IOrder {
         int delivered = amount;
         if (level != null && commodity instanceof ItemCommodity item) {
             NonNullList<ItemStack> extracted = NonNullList.create();
-            if (!VaultManager.extractItemFromVaults(level, sellerId, item.getItem(), amount, extracted)) delivered = 0;
+            if (!VaultManager.extractItemFromVaults(level, sellerId, item, amount, extracted)) delivered = 0;
             else if (!serverOrder) {
                 NonNullList<ItemStack> leftover = VaultManager.insertItemStacksToVaults(level, owner, extracted);
                 delivered = VaultInventoryOps.total(extracted) - VaultInventoryOps.total(leftover);
@@ -468,7 +469,7 @@ public class Order implements IOrder {
     }
 
     private TransactionResult completeTrade(ServerLevel level, UUID buyer, UUID seller, int delivered, BigDecimal total) {
-        recordTrade(pricePerUnit, delivered, buyer, seller);
+        recordTrade(level, pricePerUnit, delivered, buyer, seller);
         boolean fluidLike = isFluidLike();
         notifyPlayerTrade(level, buyer, seller, true, commodity.getDisplayName().getString(), fluidLike, delivered, pricePerUnit, total);
         notifyPlayerTrade(level, seller, buyer, false, commodity.getDisplayName().getString(), fluidLike, delivered, pricePerUnit, total);
@@ -539,10 +540,17 @@ public class Order implements IOrder {
                 reservation.token(), orderId);
     }
 
-    private void recordTrade(BigDecimal price, int amount, UUID buyer, UUID seller) {
+    private void recordTrade(ServerLevel level, BigDecimal price, int amount, UUID buyer, UUID seller) {
         String typeValue = commodity.getType() == ICommodity.CommodityType.ITEM ? "ITEM"
                 : commodity.getType() == ICommodity.CommodityType.FLUID ? "FLUID" : commodity.getTypeId().toString();
-        TradeLedger.recordTrade(commodity.getId().toString(), typeValue, price, amount, buyer, seller);
+        String variantData = "";
+        String displayName = commodity.getDisplayName().getString();
+        if (commodity instanceof ItemCommodity item && item.getMatchPolicy() != ItemMatchPolicy.ITEM_ONLY) {
+            variantData = item.getCanonicalVariantData();
+            if (level != null) displayName = item.getDisplayName(level.registryAccess()).getString();
+        }
+        TradeLedger.recordTrade(commodity.getId().toString(), typeValue, variantData, displayName,
+                price, amount, buyer, seller);
     }
 
     private boolean isFluidLike() {
@@ -553,6 +561,7 @@ public class Order implements IOrder {
     private int getReservedFluidAmount() {
         int total = 0; for (EconomyFluidStack stack : reservedFluids) if (stack != null && !stack.isEmpty()) total += stack.getAmount(); return total;
     }
+
     private NonNullList<ItemStack> buildItemDelivery(Item item, int amount) {
         if (reservedItems.isEmpty()) return serverOrder ? generateItemStacks(item, amount) : NonNullList.create();
         NonNullList<ItemStack> result = NonNullList.create(); int remaining = amount;
@@ -562,6 +571,13 @@ public class Order implements IOrder {
         }
         return result;
     }
+
+    private static NonNullList<ItemStack> createItemStacks(ItemCommodity commodity, int amount, ServerLevel level) {
+        if (level != null) return commodity.createStacks(level.registryAccess(), amount);
+        if (commodity.getMatchPolicy() == ItemMatchPolicy.ITEM_ONLY) return generateItemStacks(commodity.getItem(), amount);
+        return NonNullList.create();
+    }
+
     private List<EconomyFluidStack> buildFluidDelivery(Fluid fluid, int amount) {
         List<EconomyFluidStack> result = new ArrayList<>(); int remaining = amount;
         if (!reservedFluids.isEmpty()) {

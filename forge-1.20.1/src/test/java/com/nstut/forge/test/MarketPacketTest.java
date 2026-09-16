@@ -7,6 +7,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -42,6 +43,66 @@ class MarketPacketTest extends MinecraftTestBase {
         assertEquals(original.itemId, decoded.itemId);
         assertEquals(original.offerCount, decoded.offerCount);
         assertEquals("FLUID", decoded.commodityType);
+    }
+
+    @Test
+    @DisplayName("Exact item variant ids survive browse and order packet round trips")
+    void exactVariantIdentityRoundTripsAcrossMarketPackets() {
+        String variantId = "minecraft:enchanted_book/variant/" + "a".repeat(64);
+
+        MarketNetwork.ItemCardData card = new MarketNetwork.ItemCardData(
+                variantId, "Enchanted Book", "15", 1, Double.NaN, "ITEM");
+        FriendlyByteBuf cardBuffer = new FriendlyByteBuf(Unpooled.buffer());
+        card.write(cardBuffer);
+        MarketNetwork.ItemCardData decodedCard = MarketNetwork.ItemCardData.read(cardBuffer);
+        assertEquals(variantId, decodedCard.itemId);
+        assertEquals("ITEM", decodedCard.commodityType);
+
+        MarketNetwork.RequestItemDetailPacket request = new MarketNetwork.RequestItemDetailPacket(variantId, "ITEM");
+        FriendlyByteBuf requestBuffer = new FriendlyByteBuf(Unpooled.buffer());
+        MarketNetwork.RequestItemDetailPacket.encode(request, requestBuffer);
+        MarketNetwork.RequestItemDetailPacket decodedRequest = MarketNetwork.RequestItemDetailPacket.decode(requestBuffer);
+        assertEquals(variantId, decodedRequest.itemId);
+        assertEquals("ITEM", decodedRequest.commodityType);
+
+        MarketNetwork.CreateOrderPacket create = new MarketNetwork.CreateOrderPacket(
+                variantId, 1, "15", true, false, "ITEM");
+        FriendlyByteBuf createBuffer = new FriendlyByteBuf(Unpooled.buffer());
+        MarketNetwork.CreateOrderPacket.encode(create, createBuffer);
+        MarketNetwork.CreateOrderPacket decodedCreate = MarketNetwork.CreateOrderPacket.decode(createBuffer);
+        assertEquals(variantId, decodedCreate.itemId);
+        assertEquals("ITEM", decodedCreate.commodityType);
+    }
+
+    @Test
+    @DisplayName("Exact item variant ids survive detail responses")
+    void exactVariantIdentityRoundTripsDetailResponse() {
+        String variantId = "minecraft:enchanted_book/variant/" + "b".repeat(64);
+        MarketNetwork.SyncItemDetailPacket original = new MarketNetwork.SyncItemDetailPacket(
+                variantId, "Sharpness V", 2, List.of(), List.of(), List.of());
+        FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
+
+        MarketNetwork.SyncItemDetailPacket.encode(original, buffer);
+        MarketNetwork.SyncItemDetailPacket decoded = MarketNetwork.SyncItemDetailPacket.decode(buffer);
+
+        assertEquals(variantId, decoded.itemId);
+        assertEquals("Sharpness V", decoded.displayName);
+        assertEquals(2, decoded.vaultCount);
+    }
+
+    @Test
+    @DisplayName("Exact item variant descriptors survive the client sync packet")
+    void exactVariantDescriptorRoundTrips() {
+        String variantId = "minecraft:enchanted_book/variant/" + "c".repeat(64);
+        String canonical = "{Count:1b,id:\"minecraft:enchanted_book\",tag:{StoredEnchantments:[{id:\"minecraft:sharpness\",lvl:5s}]}}";
+        MarketNetwork.SyncItemVariantDataPacket original =
+                new MarketNetwork.SyncItemVariantDataPacket(Map.of(variantId, canonical));
+        FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
+
+        MarketNetwork.SyncItemVariantDataPacket.encode(original, buffer);
+        MarketNetwork.SyncItemVariantDataPacket decoded = MarketNetwork.SyncItemVariantDataPacket.decode(buffer);
+
+        assertEquals(Map.of(variantId, canonical), decoded.variants);
     }
 
     @Test

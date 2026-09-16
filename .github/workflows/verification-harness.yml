@@ -1,0 +1,23 @@
+name: Verification harness
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: economy-verification-harness-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  harness:
+    name: Harness contracts
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Test CI policy, matrix and exact-head receipts
+        run: python -m unittest discover -s tools -p 'test_*.py' -v
+      - name: Compile Python verification tools
+        run: python -m py_compile tools/ci_policy.py tools/live_join_test.py tools/verify.py
