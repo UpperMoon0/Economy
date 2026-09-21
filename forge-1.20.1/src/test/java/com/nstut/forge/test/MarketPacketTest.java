@@ -170,9 +170,9 @@ class MarketPacketTest extends MinecraftTestBase {
                 "fixture must make the next valid higher-priority descriptor exceed the aggregate budget");
         assertFalse(reconstructed.containsKey(lowerPriorityHistory),
                 "later lower-priority history must not bypass an omitted higher-priority descriptor");
-        assertEquals(new ArrayList<>(variants.keySet()).subList(0, reconstructed.size()),
-                new ArrayList<>(reconstructed.keySet()),
-                "aggregate truncation must always produce a strict priority prefix");
+        List<String> expectedPrefix = new ArrayList<>(variants.keySet()).subList(0, reconstructed.size());
+        assertEquals(java.util.Set.copyOf(expectedPrefix), reconstructed.keySet(),
+                "aggregate truncation must select exactly the strict priority prefix");
     }
 
     @Test
