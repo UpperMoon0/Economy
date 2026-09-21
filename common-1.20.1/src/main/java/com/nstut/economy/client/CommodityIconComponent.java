@@ -30,7 +30,11 @@ public class CommodityIconComponent extends UIComponent {
     private static final Map<String, String> VARIANT_DATA = new HashMap<>();
 
     public static void replaceVariantData(Map<String, String> variants) {
-        VARIANT_DATA.clear();
+        applyVariantData(variants, true);
+    }
+
+    public static void applyVariantData(Map<String, String> variants, boolean reset) {
+        if (reset) VARIANT_DATA.clear();
         if (variants != null) VARIANT_DATA.putAll(variants);
         ITEM_CACHE.clear();
     }

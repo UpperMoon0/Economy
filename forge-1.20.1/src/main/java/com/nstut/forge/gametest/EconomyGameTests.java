@@ -175,6 +175,24 @@ public final class EconomyGameTests {
         helper.assertTrue(TradeLedger.getRecentTrades(mendingCommodity.getId().toString(), 10).isEmpty(),
                 "Sharpness execution must not pollute Mending trade history");
 
+        UUID ledgerOnlyBuyer = UUID.randomUUID();
+        ItemCommodity ledgerOnlyCommodity = com.nstut.economy.network.MarketNetwork.resolveItemCommodityForOrder(
+                new OrderManager(), helper.getLevel(), ledgerOnlyBuyer, sharpnessCommodity.getId().toString());
+        helper.assertTrue(ledgerOnlyCommodity != null
+                        && ledgerOnlyCommodity.getId().equals(sharpnessCommodity.getId()),
+                "a ledger-only exact variant must resolve without an active order or matching buyer Vault stock");
+        helper.assertTrue(ledgerOnlyCommodity.matches(helper.getLevel(), sharpness)
+                        && !ledgerOnlyCommodity.matches(helper.getLevel(), mending),
+                "ledger reconstruction must preserve the exact variant matcher");
+        helper.assertTrue(ledgerOnlyCommodity.getDisplayName(helper.getLevel().registryAccess()).getString()
+                        .equals(sharpness.getHoverName().getString()),
+                "ledger reconstruction must preserve the exact variant display stack");
+        OrderManager ledgerOnlyBook = new OrderManager();
+        var ledgerBuy = ledgerOnlyBook.createBuyOrder(
+                ledgerOnlyBuyer, ledgerOnlyCommodity, 1, BigDecimal.ONE, helper.getLevel());
+        helper.assertTrue(ledgerBuy.accepted(),
+                "another player must be able to create a BUY order from the ledger-only exact commodity");
+
         helper.succeed();
     }
 }

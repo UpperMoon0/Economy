@@ -29,8 +29,10 @@ import net.minecraft.world.level.material.Fluid;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -247,15 +249,30 @@ public class MarketNetwork {
     }
 
     public static class SyncItemVariantDataPacket {
-        private static final int MAX_VARIANTS = 4096;
+        public static final int MAX_VARIANTS = 4096;
+        public static final int MAX_PAYLOAD_BYTES = 768 * 1024;
+        private static final int MAX_UTF_CHARS = 32767;
+        private static final int HEADER_BYTES = 5;
+
         public final Map<String, String> variants;
+        public final boolean reset;
 
         public SyncItemVariantDataPacket(Map<String, String> variants) {
+            this(variants, true);
+        }
+
+        public SyncItemVariantDataPacket(Map<String, String> variants, boolean reset) {
             this.variants = Map.copyOf(variants);
+            this.reset = reset;
         }
 
         public static void encode(SyncItemVariantDataPacket pkt, FriendlyByteBuf buf) {
             if (pkt.variants.size() > MAX_VARIANTS) throw new IllegalArgumentException("Too many item variants");
+            int encodedSize = encodedSize(pkt.variants);
+            if (encodedSize > MAX_PAYLOAD_BYTES) {
+                throw new IllegalArgumentException("Item variant payload exceeds byte budget: " + encodedSize);
+            }
+            buf.writeBoolean(pkt.reset);
             buf.writeInt(pkt.variants.size());
             for (var entry : pkt.variants.entrySet()) {
                 buf.writeUtf(entry.getKey());
@@ -264,15 +281,82 @@ public class MarketNetwork {
         }
 
         public static SyncItemVariantDataPacket decode(FriendlyByteBuf buf) {
+            boolean reset = buf.readBoolean();
             int count = buf.readInt();
             if (count < 0 || count > MAX_VARIANTS) throw new io.netty.handler.codec.DecoderException("Invalid item variant count: " + count);
             Map<String, String> variants = new HashMap<>();
             for (int i = 0; i < count; i++) variants.put(buf.readUtf(), buf.readUtf());
-            return new SyncItemVariantDataPacket(variants);
+            int encodedSize;
+            try {
+                encodedSize = encodedSize(variants);
+            } catch (IllegalArgumentException ex) {
+                throw new io.netty.handler.codec.DecoderException("Invalid item variant payload", ex);
+            }
+            if (encodedSize > MAX_PAYLOAD_BYTES) {
+                throw new io.netty.handler.codec.DecoderException("Item variant payload exceeds byte budget: " + encodedSize);
+            }
+            return new SyncItemVariantDataPacket(variants, reset);
+        }
+
+        public static List<SyncItemVariantDataPacket> chunked(Map<String, String> variants) {
+            List<SyncItemVariantDataPacket> packets = new ArrayList<>();
+            Map<String, String> current = new LinkedHashMap<>();
+            int currentBytes = HEADER_BYTES;
+            boolean reset = true;
+
+            if (variants != null) {
+                for (var entry : variants.entrySet()) {
+                    int entryBytes = entryBytes(entry.getKey(), entry.getValue());
+                    if (entryBytes < 0 || HEADER_BYTES + entryBytes > MAX_PAYLOAD_BYTES) continue;
+                    if (!current.isEmpty()
+                            && (current.size() >= MAX_VARIANTS || currentBytes + entryBytes > MAX_PAYLOAD_BYTES)) {
+                        packets.add(new SyncItemVariantDataPacket(current, reset));
+                        reset = false;
+                        current = new LinkedHashMap<>();
+                        currentBytes = HEADER_BYTES;
+                    }
+                    current.put(entry.getKey(), entry.getValue());
+                    currentBytes += entryBytes;
+                }
+            }
+
+            if (!current.isEmpty() || packets.isEmpty()) {
+                packets.add(new SyncItemVariantDataPacket(current, reset));
+            }
+            return List.copyOf(packets);
+        }
+
+        private static int encodedSize(Map<String, String> variants) {
+            long size = HEADER_BYTES;
+            for (var entry : variants.entrySet()) {
+                int entryBytes = entryBytes(entry.getKey(), entry.getValue());
+                if (entryBytes < 0) throw new IllegalArgumentException("Variant descriptor exceeds UTF limit");
+                size += entryBytes;
+                if (size > Integer.MAX_VALUE) return Integer.MAX_VALUE;
+            }
+            return (int) size;
+        }
+
+        private static int entryBytes(String key, String value) {
+            if (key == null || value == null || key.length() > MAX_UTF_CHARS || value.length() > MAX_UTF_CHARS) {
+                return -1;
+            }
+            int keyBytes = key.getBytes(StandardCharsets.UTF_8).length;
+            int valueBytes = value.getBytes(StandardCharsets.UTF_8).length;
+            return varIntBytes(keyBytes) + keyBytes + varIntBytes(valueBytes) + valueBytes;
+        }
+
+        private static int varIntBytes(int value) {
+            int bytes = 1;
+            while ((value & ~0x7F) != 0) {
+                bytes++;
+                value >>>= 7;
+            }
+            return bytes;
         }
 
         public static void handle(SyncItemVariantDataPacket pkt, Supplier<NetworkManager.PacketContext> ctx) {
-            ctx.get().queue(() -> com.nstut.economy.client.CommodityIconComponent.replaceVariantData(pkt.variants));
+            ctx.get().queue(() -> com.nstut.economy.client.CommodityIconComponent.applyVariantData(pkt.variants, pkt.reset));
         }
     }
 
@@ -746,13 +830,29 @@ public class MarketNetwork {
         if (baseId.equals(commodityId)) {
             return new ItemCommodity(ResourceLocation.parse(baseId), item, BigDecimal.ZERO);
         }
-        if (level == null || ownerId == null) return null;
-        for (var vault : VaultManager.getVaults(level, ownerId)) {
-            for (int slot = 0; slot < vault.getContainerSize(); slot++) {
-                ItemStack stack = vault.getItem(slot);
-                if (stack.isEmpty() || !stack.is(item)) continue;
-                ItemCommodity candidate = ItemCommodity.exactFromItemStack(level.registryAccess(), stack, BigDecimal.ZERO);
-                if (candidate.getId().toString().equals(commodityId)) return candidate;
+        if (level != null && ownerId != null) {
+            for (var vault : VaultManager.getVaults(level, ownerId)) {
+                for (int slot = 0; slot < vault.getContainerSize(); slot++) {
+                    ItemStack stack = vault.getItem(slot);
+                    if (stack.isEmpty() || !stack.is(item)) continue;
+                    ItemCommodity candidate = ItemCommodity.exactFromItemStack(level.registryAccess(), stack, BigDecimal.ZERO);
+                    if (candidate.getId().toString().equals(commodityId)) return candidate;
+                }
+            }
+        }
+        if (level != null) {
+            for (var trade : TradeLedger.getRecentTrades(commodityId, 1000)) {
+                if (trade.variantData == null || trade.variantData.isBlank()) continue;
+                try {
+                    ItemStack stack = com.nstut.economy.compat.Compat.deserializeCanonicalItemStack(
+                            level.registryAccess(), trade.variantData);
+                    if (stack == null || stack.isEmpty() || !stack.is(item)) continue;
+                    ItemCommodity candidate = ItemCommodity.exactFromItemStack(
+                            level.registryAccess(), stack, BigDecimal.ZERO);
+                    if (candidate.getId().toString().equals(commodityId)) return candidate;
+                } catch (RuntimeException ignored) {
+                    // Ignore corrupt/stale ledger descriptors; the commodity id remains authoritative.
+                }
             }
         }
         return null;
@@ -773,7 +873,7 @@ public class MarketNetwork {
     }
 
     private static void sendItemVariantData(ServerPlayer player) {
-        Map<String, String> variants = new HashMap<>();
+        Map<String, String> variants = new LinkedHashMap<>();
         OrderManager orderManager = Economy.getOrderManager();
         for (Order order : orderManager.getAllOrders()) {
             if (order.getCommodity() instanceof ItemCommodity item) {
@@ -795,7 +895,9 @@ public class MarketNetwork {
         for (var trade : TradeLedger.getAllTrades()) {
             if (trade.variantData != null && !trade.variantData.isBlank()) variants.put(trade.itemId, trade.variantData);
         }
-        CHANNEL.sendToPlayer(player, new SyncItemVariantDataPacket(variants));
+        for (SyncItemVariantDataPacket packet : SyncItemVariantDataPacket.chunked(variants)) {
+            CHANNEL.sendToPlayer(player, packet);
+        }
     }
 
     public static BigDecimal getGlobalPrice(OrderManager orderManager, String itemId) {

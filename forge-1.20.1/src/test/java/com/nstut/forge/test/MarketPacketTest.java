@@ -6,6 +6,7 @@ import net.minecraft.network.FriendlyByteBuf;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -102,7 +103,35 @@ class MarketPacketTest extends MinecraftTestBase {
         MarketNetwork.SyncItemVariantDataPacket.encode(original, buffer);
         MarketNetwork.SyncItemVariantDataPacket decoded = MarketNetwork.SyncItemVariantDataPacket.decode(buffer);
 
+        assertTrue(decoded.reset);
         assertEquals(Map.of(variantId, canonical), decoded.variants);
+    }
+
+    @Test
+    @DisplayName("Exact item variant descriptor sync is chunked below the custom payload byte budget")
+    void exactVariantDescriptorSyncIsByteBounded() {
+        Map<String, String> variants = new LinkedHashMap<>();
+        String descriptor = "x".repeat(16_000);
+        for (int i = 0; i < 100; i++) {
+            variants.put("minecraft:enchanted_book/variant/" + String.format("%064x", i), descriptor + i);
+        }
+
+        List<MarketNetwork.SyncItemVariantDataPacket> packets =
+                MarketNetwork.SyncItemVariantDataPacket.chunked(variants);
+
+        assertTrue(packets.size() > 1, "fixture must require multiple packets");
+        assertTrue(packets.get(0).reset, "first packet must replace the client descriptor cache");
+        Map<String, String> reconstructed = new LinkedHashMap<>();
+        for (int i = 0; i < packets.size(); i++) {
+            MarketNetwork.SyncItemVariantDataPacket packet = packets.get(i);
+            if (i > 0) assertFalse(packet.reset, "continuation packets must append to the cache");
+            FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
+            MarketNetwork.SyncItemVariantDataPacket.encode(packet, buffer);
+            assertTrue(buffer.writerIndex() <= MarketNetwork.SyncItemVariantDataPacket.MAX_PAYLOAD_BYTES,
+                    "encoded descriptor packet exceeded its transport budget");
+            reconstructed.putAll(packet.variants);
+        }
+        assertEquals(variants, reconstructed);
     }
 
     @Test
