@@ -144,6 +144,37 @@ class MarketPacketTest extends MinecraftTestBase {
     }
 
     @Test
+    @DisplayName("Aggregate descriptor truncation never skips a higher-priority entry for smaller history")
+    void exactVariantDescriptorSyncStopsAtFirstValidEntryThatExceedsAggregateBudget() {
+        Map<String, String> variants = new LinkedHashMap<>();
+        String filler = "x".repeat(16_000);
+        for (int i = 0; i < 64; i++) {
+            variants.put("minecraft:stone/variant/" + String.format("%064x", i), filler + i);
+        }
+
+        String higherPriority = "minecraft:enchanted_book/variant/" + "a".repeat(64);
+        String lowerPriorityHistory = "minecraft:enchanted_book/variant/" + "b".repeat(64);
+        variants.put(higherPriority, "y".repeat(24_000));
+        variants.put(lowerPriorityHistory, "z");
+
+        List<MarketNetwork.SyncItemVariantDataPacket> packets =
+                MarketNetwork.SyncItemVariantDataPacket.chunked(variants);
+
+        Map<String, String> reconstructed = new LinkedHashMap<>();
+        for (MarketNetwork.SyncItemVariantDataPacket packet : packets) {
+            reconstructed.putAll(packet.variants);
+        }
+
+        assertFalse(reconstructed.containsKey(higherPriority),
+                "fixture must make the next valid higher-priority descriptor exceed the aggregate budget");
+        assertFalse(reconstructed.containsKey(lowerPriorityHistory),
+                "later lower-priority history must not bypass an omitted higher-priority descriptor");
+        assertEquals(new ArrayList<>(variants.keySet()).subList(0, reconstructed.size()),
+                new ArrayList<>(reconstructed.keySet()),
+                "aggregate truncation must always produce a strict priority prefix");
+    }
+
+    @Test
     @DisplayName("Chart packets preserve fractional bucket prices in protocol v2")
     void chartPointRoundTripsFractionalPrice() {
         MarketNetwork.ChartPoint original = new MarketNetwork.ChartPoint(0.00001, 1, 1234L);

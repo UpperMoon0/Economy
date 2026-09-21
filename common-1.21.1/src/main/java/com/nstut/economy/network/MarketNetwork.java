@@ -314,7 +314,7 @@ public class MarketNetwork {
                     boolean startsNewPacket = !current.isEmpty()
                             && (current.size() >= MAX_VARIANTS || currentBytes + entryBytes > MAX_PAYLOAD_BYTES);
                     int aggregateCost = entryBytes + (startsNewPacket ? HEADER_BYTES : 0);
-                    if (totalBytes + aggregateCost > MAX_SYNC_BYTES) continue;
+                    if (totalBytes + aggregateCost > MAX_SYNC_BYTES) break;
 
                     if (startsNewPacket) {
                         packets.add(new SyncItemVariantDataPacket(current, reset));
