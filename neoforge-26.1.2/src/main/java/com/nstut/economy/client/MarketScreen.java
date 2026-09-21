@@ -581,7 +581,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                 } else {
                     footer = orderText;
                 }
-                UiRender.text(g, f, fitText(f, footer, textWidth), textX, y + 28, colors.onSurfaceMuted());
+                drawMarqueeText(g, f, footer, textX, y + 28, textWidth, colors.onSurfaceMuted(), false);
             }
             @Override public boolean mouseClicked(double mx, double my, int button) {
                 if (mx >= x && mx < x + width && my >= y && my < y + height) {
