@@ -862,31 +862,33 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         modeRow.addChild(newOrderSellBtn); modeRow.addChild(newOrderBuyBtn);
         v.addChild(modeRow);
 
-        TextField idField = Ui.textField(createCommodityQuery);
-        idField.placeholder(t("ui.economy.new_order.search_placeholder"));
+        TextField idField = new TextField(createCommodityQuery) {
+            @Override public void onFocusGained() {
+                super.onFocusGained();
+                refreshItemSearchResults(createCommodityQuery.get(), true);
+            }
+        };
+        Runnable updateSearchPlaceholder = () -> idField.placeholder(t(createSellMode.get()
+                ? "ui.economy.new_order.search_sell_placeholder"
+                : "ui.economy.new_order.search_buy_placeholder"));
+        updateSearchPlaceholder.run();
         v.addChild(idField);
         setupItemSearchPopover(idField);
-
-        UIComponent storagePicker = Ui.switcher(createSellMode)
-                .when(true, () -> Ui.button(Component.translatable("ui.economy.new_order.choose_vault"),
-                        this::showVaultCommodityPicker).ghost())
-                .when(false, () -> Ui.text(Component.translatable("ui.economy.new_order.buy_variant_hint"))
-                        .style(TextStyle.CAPTION));
-        v.addChild(storagePicker);
-
-        v.addChild(new UIComponent() {
-            @Override public int preferredWidth(Font f) { return 0; }
-            @Override public int preferredHeight(Font f) { return createSellMode.get() ? 14 : 0; }
-            @Override public void render(GuiGraphics g, Font f, int mx, int my, float pt) {
-                if (!createSellMode.get()) return;
-                String id = selectedCreateCommodityId();
-                int stock = getVaultStockForItem(id);
-                boolean fluid = isFluidCommodity(id);
-                String msg = fluid ? Component.translatable("ui.economy.new_order.tank_stock", formatFluidAmountDetailed(stock)).getString()
-                        : Component.translatable("ui.economy.new_order.vault_stock", formatItemAmount(stock)).getString();
-                UiRender.text(g, f, msg, x + 2, y + 3, stock > 0 ? theme().colors().success() : theme().colors().danger());
+        subscriptions.add(createSellMode.subscribe(sell -> {
+            updateSearchPlaceholder.run();
+            if (sell) {
+                String selected = createCommodityId.get();
+                if (selected != null && getVaultStockForItem(selected) <= 0) {
+                    setCreateCommoditySelection(null);
+                }
             }
-        });
+            if (idField.isFocused()) refreshItemSearchResults(createCommodityQuery.get(), true);
+            else hideItemSearch();
+        }));
+
+        v.addChild(Ui.switcher(createSellMode)
+                .when(true, () -> buildSellSelectionSummary(idField))
+                .when(false, () -> Ui.spacer().height(0)));
 
         v.addChild(new OrderQuantityControl(createQty, createSellMode, createInfinite, () -> {
             String id = selectedCreateCommodityId();
@@ -925,101 +927,48 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         buy.setActive(!createSellMode.get());
     }
 
-    private void showVaultCommodityPicker() {
-        List<MarketNetwork.AssetHoldingData> holdings = new ArrayList<>();
-        for (MarketNetwork.AssetHoldingData holding : MarketClientStore.assetHoldings.get()) {
-            if (holding != null && holding.quantity > 0) holdings.add(holding);
-        }
-
-        if (holdings.isEmpty()) {
-            Toast.show(uiRuntime().overlays(), new Toast(Toast.Type.WARNING,
-                    Component.translatable("ui.economy.new_order.choose_vault"),
-                    Component.translatable("ui.economy.empty.no_holdings"), 3000, null));
-            return;
-        }
-
-        holdings.sort((a, b) -> getItemDisplayName(a.itemId, a.displayName)
-                .compareToIgnoreCase(getItemDisplayName(b.itemId, b.displayName)));
-        Signal<List<MarketNetwork.AssetHoldingData>> rows = Signals.of(List.copyOf(holdings));
-        Signal<String> vaultQuery = Signals.of("");
-        OverlayHandle[] holder = new OverlayHandle[1];
-        Subscription[] vaultSearchSubscription = new Subscription[1];
-
-        VirtualList<MarketNetwork.AssetHoldingData> list = Ui.list(rows, h -> buildVaultPickerRow(h, holder))
-                .key(h -> h.itemId)
-                .itemHeight(30)
-                .gap(2);
-        list.height(Math.min(150, Math.max(30, holdings.size() * 32)));
-
-        TextField vaultSearch = Ui.textField(vaultQuery);
-        vaultSearch.placeholder(t("ui.economy.new_order.choose_vault_search"));
-        vaultSearchSubscription[0] = vaultQuery.subscribe(value -> {
-            String query = value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
-            if (query.isEmpty()) {
-                rows.set(List.copyOf(holdings));
-                return;
-            }
-            List<MarketNetwork.AssetHoldingData> filtered = new ArrayList<>();
-            for (MarketNetwork.AssetHoldingData holding : holdings) {
-                if (commoditySearchText(holding.itemId, holding.displayName).contains(query)) {
-                    filtered.add(holding);
-                }
-            }
-            rows.set(List.copyOf(filtered));
-        });
-
-        VStack body = new VStack().gap(6);
-        body.addChild(Ui.heading(Component.translatable("ui.economy.new_order.choose_vault")));
-        body.addChild(Ui.text(Component.translatable("ui.economy.new_order.choose_vault_hint")).style(TextStyle.CAPTION).wrap());
-        body.addChild(vaultSearch);
-        body.addChild(list);
-        body.addChild(Ui.button(Component.translatable("gui.cancel"), () -> {
-            if (holder[0] != null) holder[0].close();
-        }).ghost());
-
-        Card card = new Card(body).elevated(true).outlined(true).padding(10);
-        card.width(270).minHeight(84);
-        holder[0] = Dialog.show(uiRuntime().overlays(), card, true, true, () -> {
-            if (vaultSearchSubscription[0] != null) {
-                vaultSearchSubscription[0].close();
-                vaultSearchSubscription[0] = null;
-            }
-        });
-    }
-
-    private UIComponent buildVaultPickerRow(MarketNetwork.AssetHoldingData holding, OverlayHandle[] holder) {
-        Component hover = commodityTooltip(holding.itemId, holding.displayName);
+    private UIComponent buildSellSelectionSummary(TextField searchField) {
         return new UIComponent() {
             {
                 height(30);
-                tooltip(hover);
             }
             @Override public int preferredWidth(Font f) { return 0; }
             @Override public int preferredHeight(Font f) { return 30; }
             @Override public void render(GuiGraphics g, Font f, int mx, int my, float pt) {
                 ColorScheme colors = uiRuntime().theme().colors();
-                boolean hovered = mx >= x && mx < x + width && my >= y && my < y + height;
-                if (hovered) UiRender.roundedRect(g, x, y, width, height, 3, colors.surfaceRaised());
-                CommodityIconComponent.drawIcon(g, holding.itemId, x + 4, y + 7, 16, 16);
+                String id = createCommodityId.get();
+                if (id == null || id.isBlank()) {
+                    String query = createCommodityQuery.get();
+                    boolean noMatch = query != null && !query.isBlank() && searchResults.get().isEmpty();
+                    String hint = t(noMatch
+                            ? "ui.economy.new_order.no_storage_match"
+                            : "ui.economy.new_order.sell_select_hint");
+                    UiRender.text(g, f, fitText(f, hint, Math.max(1, width - 4)),
+                            x + 2, y + 10, noMatch ? colors.danger() : colors.onSurfaceMuted());
+                    return;
+                }
+
+                boolean fluid = isFluidCommodity(id);
+                int stock = getVaultStockForItem(id);
+                UiRender.surface(g, x, y, width, height, 3,
+                        colors.surface(), colors.borderSubtle(), false, colors);
+                CommodityIconComponent.drawIcon(g, id, x + 4, y + 7, 16, 16);
+
                 int textX = x + 24;
-                int qtyWidth = Math.min(70, Math.max(24, width / 4));
-                int textWidth = Math.max(1, width - (textX - x) - qtyWidth - 4);
-                UiRender.text(g, f, fitText(f, getPrimaryItemDisplayName(holding.itemId, holding.displayName), textWidth),
-                        textX, y + 4, colors.onSurface());
-                String meta = isExactVariantId(holding.itemId)
-                        ? variantMetadataSummary(holding.itemId)
-                        : holding.itemId;
-                UiRender.text(g, f, fitText(f, meta, textWidth), textX, y + 16, colors.onSurfaceMuted());
-                String qty = formatQty(holding.quantity, isFluidCommodity(holding.itemId));
-                String fittedQty = fitText(f, qty, qtyWidth);
-                UiRender.text(g, f, fittedQty, x + width - f.width(fittedQty) - 4, y + 10, colors.primary());
+                String qty = formatQty(stock, fluid);
+                int qtyWidth = Math.min(Math.max(36, f.width(qty) + 4), Math.max(36, width / 3));
+                int textWidth = Math.max(1, width - (textX - x) - qtyWidth - 8);
+                String title = getPrimaryItemDisplayName(id, id);
+                String meta = isExactVariantId(id) ? variantMetadataSummary(id) : baseCommodityId(id);
+                drawMarqueeText(g, f, title, textX, y + 4, textWidth, colors.onSurface(), false);
+                drawMarqueeText(g, f, meta, textX, y + 16, textWidth, colors.onSurfaceMuted(), false);
+                UiRender.text(g, f, fitText(f, qty, qtyWidth),
+                        x + width - f.width(fitText(f, qty, qtyWidth)) - 4, y + 10, colors.primary());
             }
             @Override public boolean mouseClicked(double mx, double my, int button) {
                 if (mx >= x && mx < x + width && my >= y && my < y + height) {
-                    createSellMode.set(true);
-                    selectCommodity(holding.itemId);
-                    selectedCommodityType.set(isFluidCommodity(holding.itemId) ? "FLUID" : "ITEM");
-                    if (holder[0] != null) holder[0].close();
+                    searchField.requestFocus();
+                    refreshItemSearchResults(createCommodityQuery.get(), true);
                     return true;
                 }
                 return false;
@@ -1033,55 +982,80 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
             itemSearchSubscription = null;
         }
         hideItemSearch();
-        VirtualList<ItemSearchResult> list = Ui.list(searchResults, this::buildSearchResultRow).itemHeight(24);
+        VirtualList<ItemSearchResult> list = Ui.list(searchResults, this::buildSearchResultRow)
+                .itemHeight(30)
+                .gap(2);
+        list.height(150);
         itemSearchPopover = Ui.popover(anchor, list).matchAnchorWidth();
         itemSearchSubscription = createCommodityQuery.subscribe(q -> {
             String selected = createCommodityId.get();
-            if (selected != null && java.util.Objects.equals(q, getItemDisplayName(selected, selected))) {
+            if (selected != null && java.util.Objects.equals(q, getPrimaryItemDisplayName(selected, selected))) {
                 searchResults.set(List.of());
                 hideItemSearch();
                 return;
             }
             createCommodityId.set(null);
-            requestCommodityDetailIfExact(q);
-            if (q != null && q.length() >= 2) {
-                List<ItemSearchResult> results = getItemSearchResults(q);
-                searchResults.set(results);
-                if (results.isEmpty()) {
-                    hideItemSearch();
-                } else if (!isItemSearchOpen() && uiRuntime() != null) {
-                    itemSearchHandle = itemSearchPopover.show(uiRuntime().overlays());
-                }
-            } else {
+            if (!createSellMode.get()) requestCommodityDetailIfExact(q);
+            refreshItemSearchResults(q, true);
+        });
+    }
+
+    private void refreshItemSearchResults(String query, boolean openWhenAvailable) {
+        List<ItemSearchResult> results;
+        if (createSellMode.get()) {
+            results = getStoredItemSearchResults(query);
+        } else {
+            if (query == null || query.length() < 2) {
                 searchResults.set(List.of());
                 hideItemSearch();
+                return;
             }
-        });
+            results = getItemSearchResults(query);
+        }
+
+        searchResults.set(results);
+        if (results.isEmpty()) {
+            hideItemSearch();
+        } else if (openWhenAvailable && !isItemSearchOpen() && uiRuntime() != null) {
+            itemSearchHandle = itemSearchPopover.show(uiRuntime().overlays());
+        }
     }
 
     private UIComponent buildSearchResultRow(ItemSearchResult r) {
         Component hover = commodityTooltip(r.itemId, r.displayName);
         return new UIComponent() {
             {
-                height(24);
+                height(30);
                 tooltip(hover);
             }
             @Override public int preferredWidth(Font f) { return 0; }
-            @Override public int preferredHeight(Font f) { return 24; }
+            @Override public int preferredHeight(Font f) { return 30; }
             @Override public void render(GuiGraphics g, Font f, int mx, int my, float pt) {
                 ColorScheme colors = uiRuntime().theme().colors();
                 if (mx >= x && mx < x + width && my >= y && my < y + height) {
-                    UiRender.roundedRect(g, x, y, width, 24, 2, colors.surfaceRaised());
+                    UiRender.roundedRect(g, x, y, width, 30, 2, colors.surfaceRaised());
                 }
-                CommodityIconComponent.drawIcon(g, r.itemId, x + 2, y + 4, 16, 16);
-                String display = getItemDisplayName(r.itemId, r.displayName);
-                UiRender.text(g, f, f.plainSubstrByWidth(display, Math.max(1, width - 22)),
-                        x + 22, y + 3, colors.onSurface());
+                CommodityIconComponent.drawIcon(g, r.itemId, x + 2, y + 7, 16, 16);
+
+                int textX = x + 22;
+                String quantity = r.owned ? formatQty(r.quantity, isFluidCommodity(r.itemId)) : "";
+                int rightWidth = r.owned ? Math.min(72, Math.max(36, width / 4)) : 0;
+                int textWidth = Math.max(1, width - (textX - x) - rightWidth - 4);
+                String display = r.owned
+                        ? getPrimaryItemDisplayName(r.itemId, r.displayName)
+                        : getItemDisplayName(r.itemId, r.displayName);
                 String secondary = isExactVariantId(r.itemId)
-                        ? t("ui.economy.variant.exact")
+                        ? variantMetadataSummary(r.itemId)
                         : r.itemId;
-                UiRender.text(g, f, f.plainSubstrByWidth(secondary, Math.max(1, width - 22)),
-                        x + 22, y + 14, colors.onSurfaceMuted());
+
+                drawMarqueeText(g, f, display, textX, y + 4, textWidth, colors.onSurface(), false);
+                drawMarqueeText(g, f, secondary, textX, y + 16, textWidth, colors.onSurfaceMuted(), false);
+
+                if (r.owned) {
+                    String fitted = fitText(f, quantity, rightWidth);
+                    UiRender.text(g, f, fitted,
+                            x + width - f.width(fitted) - 4, y + 10, colors.primary());
+                }
             }
             @Override public boolean mouseClicked(double mx, double my, int button) {
                 if (mx >= x && mx < x + width && my >= y && my < y + height) {
@@ -1118,7 +1092,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
             return;
         }
         createCommodityId.set(id);
-        createCommodityQuery.set(getItemDisplayName(id, id));
+        createCommodityQuery.set(getPrimaryItemDisplayName(id, id));
     }
 
     private void selectCommodity(String id) {
@@ -1188,7 +1162,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         }
         if (createSellMode.get()) {
             int stock = getVaultStockForItem(id);
-            if (stock > 0 && qty > stock) {
+            if (stock <= 0 || qty > stock) {
                 createError.set(isFluidCommodity(id) ? t("ui.economy.error.insufficient_fluid") : t("ui.economy.error.insufficient_vault"));
                 return;
             }
@@ -2291,19 +2265,28 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         return 0;
     }
 
+    private List<ItemSearchResult> getStoredItemSearchResults(String query) {
+        String q = query == null ? "" : query.trim().toLowerCase(Locale.ROOT);
+        List<ItemSearchResult> results = new ArrayList<>();
+        for (MarketNetwork.AssetHoldingData holding : MarketClientStore.assetHoldings.get()) {
+            if (holding == null || holding.quantity <= 0) continue;
+            if (!q.isEmpty() && !commoditySearchText(holding.itemId, holding.displayName).contains(q)) continue;
+            results.add(new ItemSearchResult(holding.itemId, holding.displayName, holding.quantity, true));
+        }
+        results.sort((a, b) -> {
+            int byName = getPrimaryItemDisplayName(a.itemId, a.displayName)
+                    .compareToIgnoreCase(getPrimaryItemDisplayName(b.itemId, b.displayName));
+            if (byName != 0) return byName;
+            return variantMetadataSummary(a.itemId).compareToIgnoreCase(variantMetadataSummary(b.itemId));
+        });
+        return results.size() > 100 ? List.copyOf(results.subList(0, 100)) : List.copyOf(results);
+    }
+
     private List<ItemSearchResult> getItemSearchResults(String query) {
         if (query == null || query.length() < 2) return List.of();
         String q = query.toLowerCase(Locale.ROOT);
         List<ItemSearchResult> results = new ArrayList<>();
         java.util.Set<String> seen = new java.util.HashSet<>();
-        for (var holding : MarketClientStore.assetHoldings.get()) {
-            String id = holding.itemId;
-            String name = holding.displayName;
-            if (commoditySearchText(id, name).contains(q) && seen.add(id)) {
-                results.add(new ItemSearchResult(id, name));
-                if (results.size() >= 50) return results;
-            }
-        }
         for (MarketNetwork.ItemCardData card : MarketClientStore.cards.get()) {
             String id = card.itemId;
             String name = getItemDisplayName(id, card.displayName);
@@ -2337,7 +2320,19 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
     private static class ItemSearchResult {
         final String itemId;
         final String displayName;
-        ItemSearchResult(String itemId, String displayName) { this.itemId = itemId; this.displayName = displayName; }
+        final int quantity;
+        final boolean owned;
+
+        ItemSearchResult(String itemId, String displayName) {
+            this(itemId, displayName, 0, false);
+        }
+
+        ItemSearchResult(String itemId, String displayName, int quantity, boolean owned) {
+            this.itemId = itemId;
+            this.displayName = displayName;
+            this.quantity = quantity;
+            this.owned = owned;
+        }
     }
 }
 
