@@ -108,7 +108,7 @@ class MarketPacketTest extends MinecraftTestBase {
     }
 
     @Test
-    @DisplayName("Exact item variant descriptor sync is chunked below the custom payload byte budget")
+    @DisplayName("Exact item variant descriptor sync is bounded per packet and per Browse refresh")
     void exactVariantDescriptorSyncIsByteBounded() {
         Map<String, String> variants = new LinkedHashMap<>();
         String descriptor = "x".repeat(16_000);
@@ -119,8 +119,9 @@ class MarketPacketTest extends MinecraftTestBase {
         List<MarketNetwork.SyncItemVariantDataPacket> packets =
                 MarketNetwork.SyncItemVariantDataPacket.chunked(variants);
 
-        assertTrue(packets.size() > 1, "fixture must require multiple packets");
+        assertFalse(packets.isEmpty());
         assertTrue(packets.get(0).reset, "first packet must replace the client descriptor cache");
+        int aggregateBytes = 0;
         Map<String, String> reconstructed = new LinkedHashMap<>();
         for (int i = 0; i < packets.size(); i++) {
             MarketNetwork.SyncItemVariantDataPacket packet = packets.get(i);
@@ -129,9 +130,17 @@ class MarketPacketTest extends MinecraftTestBase {
             MarketNetwork.SyncItemVariantDataPacket.encode(packet, buffer);
             assertTrue(buffer.writerIndex() <= MarketNetwork.SyncItemVariantDataPacket.MAX_PAYLOAD_BYTES,
                     "encoded descriptor packet exceeded its transport budget");
+            aggregateBytes += buffer.writerIndex();
             reconstructed.putAll(packet.variants);
         }
-        assertEquals(variants, reconstructed);
+        assertTrue(aggregateBytes <= MarketNetwork.SyncItemVariantDataPacket.MAX_SYNC_BYTES,
+                "aggregate descriptor sync exceeded the Browse refresh budget");
+        assertTrue(reconstructed.size() < variants.size(),
+                "oversized fixture must be truncated by the aggregate Browse refresh budget");
+        assertEquals(variants.entrySet().stream().limit(reconstructed.size()).collect(
+                java.util.stream.Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue,
+                        (a, b) -> a, LinkedHashMap::new)), reconstructed,
+                "budgeting must preserve source priority/order rather than selecting arbitrary descriptors");
     }
 
     @Test

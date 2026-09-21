@@ -251,6 +251,7 @@ public class MarketNetwork {
     public static class SyncItemVariantDataPacket {
         public static final int MAX_VARIANTS = 4096;
         public static final int MAX_PAYLOAD_BYTES = 768 * 1024;
+        public static final int MAX_SYNC_BYTES = 1024 * 1024;
         private static final int MAX_UTF_CHARS = 32767;
         private static final int HEADER_BYTES = 5;
 
@@ -302,21 +303,29 @@ public class MarketNetwork {
             List<SyncItemVariantDataPacket> packets = new ArrayList<>();
             Map<String, String> current = new LinkedHashMap<>();
             int currentBytes = HEADER_BYTES;
+            int totalBytes = HEADER_BYTES;
             boolean reset = true;
 
             if (variants != null) {
                 for (var entry : variants.entrySet()) {
                     int entryBytes = entryBytes(entry.getKey(), entry.getValue());
                     if (entryBytes < 0 || HEADER_BYTES + entryBytes > MAX_PAYLOAD_BYTES) continue;
-                    if (!current.isEmpty()
-                            && (current.size() >= MAX_VARIANTS || currentBytes + entryBytes > MAX_PAYLOAD_BYTES)) {
+
+                    boolean startsNewPacket = !current.isEmpty()
+                            && (current.size() >= MAX_VARIANTS || currentBytes + entryBytes > MAX_PAYLOAD_BYTES);
+                    int aggregateCost = entryBytes + (startsNewPacket ? HEADER_BYTES : 0);
+                    if (totalBytes + aggregateCost > MAX_SYNC_BYTES) continue;
+
+                    if (startsNewPacket) {
                         packets.add(new SyncItemVariantDataPacket(current, reset));
                         reset = false;
                         current = new LinkedHashMap<>();
                         currentBytes = HEADER_BYTES;
+                        totalBytes += HEADER_BYTES;
                     }
                     current.put(entry.getKey(), entry.getValue());
                     currentBytes += entryBytes;
+                    totalBytes += entryBytes;
                 }
             }
 
