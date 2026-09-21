@@ -633,7 +633,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
 
         VStack body = new VStack().gap(6);
         body.addChild(Ui.heading(Component.literal(group.displayName())));
-        body.addChild(Ui.text(Component.translatable("ui.economy.variant.choose_hint")).style(TextStyle.CAPTION));
+        body.addChild(Ui.text(Component.translatable("ui.economy.variant.choose_hint")).style(TextStyle.CAPTION).wrap());
         body.addChild(list);
         body.addChild(Ui.button(Component.translatable("gui.cancel"), () -> {
             if (holder[0] != null) holder[0].close();
@@ -662,7 +662,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                 int textX = x + 24;
                 int rightWidth = Math.min(76, Math.max(0, width / 3));
                 int textWidth = Math.max(1, width - textX + x - rightWidth - 4);
-                UiRender.text(g, f, fitText(f, getItemDisplayName(card.itemId, card.displayName), textWidth),
+                UiRender.text(g, f, fitText(f, getPrimaryItemDisplayName(card.itemId, card.displayName), textWidth),
                         textX, y + 4, colors.onSurface());
                 String meta = variantMetadataSummary(card.itemId);
                 UiRender.text(g, f, fitText(f, meta, textWidth), textX, y + 17, colors.onSurfaceMuted());
@@ -988,7 +988,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
 
         VStack body = new VStack().gap(6);
         body.addChild(Ui.heading(Component.translatable("ui.economy.new_order.choose_vault")));
-        body.addChild(Ui.text(Component.translatable("ui.economy.new_order.choose_vault_hint")).style(TextStyle.CAPTION));
+        body.addChild(Ui.text(Component.translatable("ui.economy.new_order.choose_vault_hint")).style(TextStyle.CAPTION).wrap());
         body.addChild(vaultSearch);
         body.addChild(list);
         body.addChild(Ui.button(Component.translatable("gui.cancel"), () -> {
@@ -1022,7 +1022,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                 int textX = x + 24;
                 int qtyWidth = Math.min(70, Math.max(24, width / 4));
                 int textWidth = Math.max(1, width - (textX - x) - qtyWidth - 4);
-                UiRender.text(g, f, fitText(f, getItemDisplayName(holding.itemId, holding.displayName), textWidth),
+                UiRender.text(g, f, fitText(f, getPrimaryItemDisplayName(holding.itemId, holding.displayName), textWidth),
                         textX, y + 4, colors.onSurface());
                 String meta = isExactVariantId(holding.itemId)
                         ? variantMetadataSummary(holding.itemId)
@@ -2053,6 +2053,17 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
             return baseName + " · " + t("ui.economy.variant.exact");
         }
         return resolveRegisteredDisplayName(itemId, rawName);
+    }
+
+    private static String getPrimaryItemDisplayName(String itemId, String rawName) {
+        if (!isExactVariantId(itemId)) return resolveRegisteredDisplayName(itemId, rawName);
+        String baseName = resolveRegisteredDisplayName(baseCommodityId(itemId), rawName);
+        List<Component> tooltip = commodityTooltipLines(itemId);
+        if (!tooltip.isEmpty()) {
+            String first = tooltip.get(0).getString().trim();
+            if (!first.isEmpty()) return first;
+        }
+        return baseName;
     }
 
     private static String resolveRegisteredDisplayName(String itemId, String rawName) {
