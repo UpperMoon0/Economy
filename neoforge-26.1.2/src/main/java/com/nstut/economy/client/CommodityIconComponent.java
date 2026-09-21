@@ -71,36 +71,39 @@ public class CommodityIconComponent extends UIComponent {
     public static ItemStack stackForCommodity(String commodityId) {
         if (commodityId == null || commodityId.isBlank()) return ItemStack.EMPTY;
         return ITEM_CACHE.computeIfAbsent(commodityId, id -> {
-                String canonical = VARIANT_DATA.get(id);
-                if (canonical != null && !canonical.isBlank() && Minecraft.getInstance().level != null) {
-                    try {
-                        ItemStack exact = com.nstut.economy.compat.Compat.deserializeCanonicalItemStack(
-                                Minecraft.getInstance().level.registryAccess(), canonical);
-                        if (exact != null && !exact.isEmpty()) return exact;
-                    } catch (RuntimeException ignored) {
-                        // Fall through to the registered base item. Server remains authoritative.
-                    }
+            String canonical = VARIANT_DATA.get(id);
+            if (canonical != null && !canonical.isBlank() && Minecraft.getInstance().level != null) {
+                try {
+                    ItemStack exact = com.nstut.economy.compat.Compat.deserializeCanonicalItemStack(
+                            Minecraft.getInstance().level.registryAccess(), canonical);
+                    if (exact != null && !exact.isEmpty()) return exact;
+                } catch (RuntimeException ignored) {
+                    // Fall through to the registered base item. Server remains authoritative.
                 }
-                   ItemStack icon = stackForCommodity(commodityId);
-            if (icon.isEmpty()) return;
-            float scale = Math.min(w, h) / 16.0F;       g.blitSprite(RenderPipelines.GUI_TEXTURED, sprite, x, y, w, h, color);
+            }
+            String baseId = com.nstut.economy.trading.ItemVariant.baseItemId(
+                    com.nstut.economy.api.EconomyId.parse(id)).toString();
+            Item item = BuiltInRegistries.ITEM.getValue(Identifier.parse(baseId));
+            return new ItemStack(item);
+        });
+    }
+
+    public static void drawIcon(GuiGraphicsExtractor g, String commodityId, int x, int y, int w, int h) {
+        if (commodityId == null || commodityId.isEmpty()) return;
+        Fluid fluid = BuiltInRegistries.FLUID.getValue(Identifier.parse(commodityId));
+        if (fluid != net.minecraft.world.level.material.Fluids.EMPTY && !com.nstut.economy.platform.Services.FLUID.isAir(fluid)) {
+            Identifier still = Services.FLUID.stillTexture(fluid);
+            TextureAtlasSprite sprite = Minecraft.getInstance()
+                    .getAtlasManager()
+                    .get(new SpriteId(TextureAtlas.LOCATION_BLOCKS, still));
+            int color = Services.FLUID.tint(fluid);
+            if ((color >>> 24) == 0) {
+                color |= 0xFF000000;
+            }
+            g.blitSprite(RenderPipelines.GUI_TEXTURED, sprite, x, y, w, h, color);
         } else {
-            ItemStack icon = ITEM_CACHE.computeIfAbsent(commodityId, id -> {
-                String canonical = VARIANT_DATA.get(id);
-                if (canonical != null && !canonical.isBlank() && Minecraft.getInstance().level != null) {
-                    try {
-                        ItemStack exact = com.nstut.economy.compat.Compat.deserializeCanonicalItemStack(
-                                Minecraft.getInstance().level.registryAccess(), canonical);
-                        if (exact != null && !exact.isEmpty()) return exact;
-                    } catch (RuntimeException ignored) {
-                        // Fall through to the registered base item. Server remains authoritative.
-                    }
-                }
-                String baseId = com.nstut.economy.trading.ItemVariant.baseItemId(
-                        com.nstut.economy.api.EconomyId.parse(id)).toString();
-                Item item = BuiltInRegistries.ITEM.getValue(Identifier.parse(baseId));
-                return new ItemStack(item);
-            });
+            ItemStack icon = stackForCommodity(commodityId);
+            if (icon.isEmpty()) return;
             float scale = Math.min(w, h) / 16.0F;
             if (scale <= 0.0F) return;
             float drawWidth = 16.0F * scale;
