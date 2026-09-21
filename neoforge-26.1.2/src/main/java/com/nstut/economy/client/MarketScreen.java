@@ -717,11 +717,12 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                     int stockX = x + width - f.width(stock);
                     int leftWidth = Math.max(0, stockX - x - 6);
                     changeStr = fitText(f, changeStr, Math.max(0, leftWidth / 3));
-                    String title = fitText(f, getItemDisplayName(d.itemId, d.displayName),
-                            Math.max(0, leftWidth - f.width(changeStr) - 8));
-                    int changeGap = title.isEmpty() || changeStr.isEmpty() ? 0 : 8;
-                    UiRender.text(g, f, title, x, y + 4, c.onSurface());
-                    UiRender.text(g, f, changeStr, x + f.width(title) + changeGap, y + 4, changeColor(change));
+                    String title = getItemDisplayName(d.itemId, d.displayName);
+                    int titleMaxWidth = Math.max(0, leftWidth - f.width(changeStr) - 8);
+                    int titleAreaWidth = Math.min(f.width(title), titleMaxWidth);
+                    int changeGap = titleAreaWidth <= 0 || changeStr.isEmpty() ? 0 : 8;
+                    drawMarqueeText(g, f, title, x, y + 4, titleAreaWidth, c.onSurface(), false);
+                    UiRender.text(g, f, changeStr, x + titleAreaWidth + changeGap, y + 4, changeColor(change));
                     UiRender.text(g, f, stock, stockX, y + 4, c.primary());
                 } else if (selectedItemId.get() != null) {
                     UiRender.text(g, f, fitText(f, selectedItemId.get(), width), x, y + 4, c.onSurfaceMuted());
@@ -879,17 +880,17 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         modeRow.addChild(newOrderSellBtn); modeRow.addChild(newOrderBuyBtn);
         v.addChild(modeRow);
 
+        TextField idField = Ui.textField(createCommodityQuery);
+        idField.placeholder(t("ui.economy.new_order.search_placeholder"));
+        v.addChild(idField);
+        setupItemSearchPopover(idField);
+
         UIComponent storagePicker = Ui.switcher(createSellMode)
                 .when(true, () -> Ui.button(Component.translatable("ui.economy.new_order.choose_vault"),
                         this::showVaultCommodityPicker).ghost())
                 .when(false, () -> Ui.text(Component.translatable("ui.economy.new_order.buy_variant_hint"))
                         .style(TextStyle.CAPTION));
         v.addChild(storagePicker);
-
-        TextField idField = Ui.textField(createCommodityQuery);
-        idField.placeholder(t("ui.economy.new_order.search_placeholder"));
-        v.addChild(idField);
-        setupItemSearchPopover(idField);
 
         v.addChild(new UIComponent() {
             @Override public int preferredWidth(Font f) { return 0; }
@@ -958,7 +959,9 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         holdings.sort((a, b) -> getItemDisplayName(a.itemId, a.displayName)
                 .compareToIgnoreCase(getItemDisplayName(b.itemId, b.displayName)));
         Signal<List<MarketNetwork.AssetHoldingData>> rows = Signals.of(List.copyOf(holdings));
+        Signal<String> vaultQuery = Signals.of("");
         OverlayHandle[] holder = new OverlayHandle[1];
+        Subscription[] vaultSearchSubscription = new Subscription[1];
 
         VirtualList<MarketNetwork.AssetHoldingData> list = Ui.list(rows, h -> buildVaultPickerRow(h, holder))
                 .key(h -> h.itemId)
@@ -966,9 +969,27 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                 .gap(2);
         list.height(Math.min(150, Math.max(30, holdings.size() * 32)));
 
+        TextField vaultSearch = Ui.textField(vaultQuery);
+        vaultSearch.placeholder(t("ui.economy.new_order.choose_vault_search"));
+        vaultSearchSubscription[0] = vaultQuery.subscribe(value -> {
+            String query = value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
+            if (query.isEmpty()) {
+                rows.set(List.copyOf(holdings));
+                return;
+            }
+            List<MarketNetwork.AssetHoldingData> filtered = new ArrayList<>();
+            for (MarketNetwork.AssetHoldingData holding : holdings) {
+                if (commoditySearchText(holding.itemId, holding.displayName).contains(query)) {
+                    filtered.add(holding);
+                }
+            }
+            rows.set(List.copyOf(filtered));
+        });
+
         VStack body = new VStack().gap(6);
         body.addChild(Ui.heading(Component.translatable("ui.economy.new_order.choose_vault")));
         body.addChild(Ui.text(Component.translatable("ui.economy.new_order.choose_vault_hint")).style(TextStyle.CAPTION));
+        body.addChild(vaultSearch);
         body.addChild(list);
         body.addChild(Ui.button(Component.translatable("gui.cancel"), () -> {
             if (holder[0] != null) holder[0].close();
@@ -976,7 +997,12 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
 
         Card card = new Card(body).elevated(true).outlined(true).padding(10);
         card.width(270).minHeight(84);
-        holder[0] = Dialog.show(uiRuntime().overlays(), card, true, true, null);
+        holder[0] = Dialog.show(uiRuntime().overlays(), card, true, true, () -> {
+            if (vaultSearchSubscription[0] != null) {
+                vaultSearchSubscription[0].close();
+                vaultSearchSubscription[0] = null;
+            }
+        });
     }
 
     private UIComponent buildVaultPickerRow(MarketNetwork.AssetHoldingData holding, OverlayHandle[] holder) {
