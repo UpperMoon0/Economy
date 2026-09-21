@@ -33,6 +33,7 @@ import com.nstut.openui.theme.ColorScheme;
 import com.nstut.openui.theme.TextStyle;
 import net.minecraft.Util;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -54,6 +55,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.UUID;
 import java.util.function.Supplier;
 
@@ -83,6 +85,12 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                                String commodityType) {}
 
     record ChartSample(double value, String tooltip) {}
+
+    record BrowseGroup(String baseId, String commodityType, String displayName,
+                       List<MarketNetwork.ItemCardData> variants,
+                       int offerCount, String globalPrice, double priceChangePercent) {
+        String key() { return commodityType + "|" + baseId; }
+    }
 
     // ── View & filter state ───────────────────────────────────────────────
     private final Signal<MarketView> view = Signals.of(MarketView.BROWSE);
@@ -131,6 +139,8 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
 
     private final Computed<List<MarketNetwork.ItemCardData>> visibleBrowseCards = computed(() ->
             filterCards(browseQuery.get(), browseActivity.get(), browseType.get(), browseSort.get(), MarketClientStore.cards.get()));
+    private final Computed<List<BrowseGroup>> visibleBrowseGroups = computed(() ->
+            groupBrowseCards(visibleBrowseCards.get(), browseSort.get()));
     private final Computed<List<HistoryEntry>> visibleHistory = computed(() ->
             filterHistory(historyQuery.get(), historyFilter.get(), historyType.get(), historySort.get(), MarketClientStore.history.get()));
     private final Computed<List<MarketNetwork.ActiveOrderEntry>> visibleActiveOrders = computed(() ->
@@ -170,7 +180,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
             computed(() -> new ArrayList<>(MarketClientStore.assetHoldings.get()));
     private final Computed<List<MarketNetwork.VaultDetailEntry>> visibleContainers =
             computed(() -> new ArrayList<>(MarketClientStore.containerEntries.get()));
-    private final Computed<Boolean> browseEmpty = computed(() -> visibleBrowseCards.get().isEmpty());
+    private final Computed<Boolean> browseEmpty = computed(() -> visibleBrowseGroups.get().isEmpty());
     private final Computed<Boolean> activeEmpty = computed(() -> visibleActiveOrders.get().isEmpty());
     private final Computed<Boolean> historyEmpty = computed(() -> visibleHistory.get().isEmpty());
     private final Computed<Boolean> containersEmpty = computed(() -> visibleContainers.get().isEmpty());
@@ -441,7 +451,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
             @Override public int preferredHeight(Font f) { return 15; }
             @Override public void render(GuiGraphics g, Font f, int mx, int my, float pt) {
                 ColorScheme c = uiRuntime().theme().colors();
-                String listingCount = Component.translatable("ui.economy.browse.live_listings", visibleBrowseCards.get().size()).getString();
+                String listingCount = Component.translatable("ui.economy.browse.product_groups", visibleBrowseGroups.get().size()).getString();
                 listingCount = fitText(f, listingCount, Math.max(0, width));
                 int listingX = x + width - f.width(listingCount);
                 UiRender.text(g, f, listingCount, listingX, y + 2, c.onSurfaceMuted());
@@ -475,14 +485,14 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
 
         UIComponent listings = Ui.switcher(browseEmpty)
                 .when(false, () -> Ui.switcher(browseLayout)
-                        .when(BrowseLayout.GRID, () -> Ui.virtualGrid(visibleBrowseCards, this::buildCommodityCard)
-                                .key(c -> c.itemId)
+                        .when(BrowseLayout.GRID, () -> Ui.virtualGrid(visibleBrowseGroups, this::buildCommodityGroupCard)
+                                .key(BrowseGroup::key)
                                 .minCellWidth(120)
                                 .cellHeight(44)
                                 .gap(4)
                                 .flex())
-                        .when(BrowseLayout.LIST, () -> Ui.list(visibleBrowseCards, this::buildCommodityRow)
-                                .key(c -> c.itemId)
+                        .when(BrowseLayout.LIST, () -> Ui.list(visibleBrowseGroups, this::buildCommodityGroupRow)
+                                .key(BrowseGroup::key)
                                 .itemHeight(44)
                                 .flex()))
                 .when(true, () -> Ui.emptyState(Component.translatable("ui.economy.empty.no_listings")));
@@ -504,37 +514,66 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         return group;
     }
 
-    private UIComponent buildCommodityCard(MarketNetwork.ItemCardData card) {
+    private UIComponent buildCommodityGroupCard(BrowseGroup group) {
+        MarketNetwork.ItemCardData first = group.variants().get(0);
+        String iconId = group.variants().size() == 1 ? first.itemId : group.baseId();
+        Component hover = browseGroupTooltip(group);
         return new UIComponent() {
             {
                 height(44);
+                tooltip(hover);
             }
             @Override public int preferredWidth(Font f) { return 0; }
             @Override public int preferredHeight(Font f) { return 44; }
             @Override public void render(GuiGraphics g, Font f, int mx, int my, float pt) {
-                ColorScheme c = uiRuntime().theme().colors();
+                ColorScheme colors = uiRuntime().theme().colors();
                 boolean hovered = mx >= x && mx < x + width && my >= y && my < y + height;
-                UiRender.surface(g, x, y, width, height, 4, hovered ? c.surfaceRaised() : c.surface(), hovered ? c.primary() : c.borderSubtle(), false, c);
-                CommodityIconComponent.drawIcon(g, card.itemId, x + 6, y + 12, 16, 16);
+                UiRender.surface(g, x, y, width, height, 4,
+                        hovered ? colors.surfaceRaised() : colors.surface(),
+                        hovered ? colors.primary() : colors.borderSubtle(), false, colors);
+                CommodityIconComponent.drawIcon(g, iconId, x + 6, y + 12, 16, 16);
                 int textX = x + 28;
                 int textWidth = Math.max(1, width - 34);
-                drawMarqueeText(g, f, getItemDisplayName(card.itemId, card.displayName),
-                        textX, y + 4, textWidth, c.onSurface(), false);
-                String countText = card.offerCount > 0
-                        ? EconomyFormatUtil.formatCount(card.offerCount, "order", "orders")
-                        : t("ui.economy.card.no_orders");
-                if (card.globalPrice != null && !card.globalPrice.isEmpty() && !card.globalPrice.equals("--")) {
-                    String change = formatPriceChange(card.priceChangePercent);
-                    drawPriceChangeRowMarquee(g, f, formatMoneyCompact(parsePrice(card.globalPrice)), change,
-                            textX, y + 16, textWidth, c.primary(), changeColor(card.priceChangePercent));
+
+                String title = group.variants().size() == 1
+                        ? getItemDisplayName(first.itemId, first.displayName)
+                        : group.displayName();
+                drawMarqueeText(g, f, title, textX, y + 4, textWidth, colors.onSurface(), false);
+
+                if (group.globalPrice() != null && !group.globalPrice().isEmpty() && !group.globalPrice().equals("--")) {
+                    String price = formatMoneyCompact(parsePrice(group.globalPrice()));
+                    if (group.variants().size() > 1) {
+                        price = Component.translatable("ui.economy.card.from_price", price).getString();
+                    }
+                    String change = formatPriceChange(group.priceChangePercent());
+                    drawPriceChangeRowMarquee(g, f, price, change,
+                            textX, y + 16, textWidth, colors.primary(), changeColor(group.priceChangePercent()));
                 } else {
-                    UiRender.text(g, f, "--", textX, y + 16, c.onSurfaceMuted());
+                    UiRender.text(g, f, "--", textX, y + 16, colors.onSurfaceMuted());
                 }
-                UiRender.text(g, f, fitText(f, countText, textWidth), textX, y + 28, c.onSurfaceMuted());
+
+                String orderText = group.offerCount() > 0
+                        ? EconomyFormatUtil.formatCount(group.offerCount(), "order", "orders")
+                        : t("ui.economy.card.no_orders");
+                String footer;
+                if (group.variants().size() > 1) {
+                    footer = Component.translatable("ui.economy.card.variants", group.variants().size()).getString()
+                            + " · " + orderText;
+                } else if (isExactVariantId(first.itemId)) {
+                    footer = t("ui.economy.variant.exact") + " · " + orderText;
+                } else {
+                    footer = orderText;
+                }
+                UiRender.text(g, f, fitText(f, footer, textWidth), textX, y + 28, colors.onSurfaceMuted());
             }
             @Override public boolean mouseClicked(double mx, double my, int button) {
                 if (mx >= x && mx < x + width && my >= y && my < y + height) {
-                    openDetail(card.itemId, card.commodityType);
+                    if (group.variants().size() == 1) {
+                        MarketNetwork.ItemCardData card = group.variants().get(0);
+                        openDetail(card.itemId, card.commodityType);
+                    } else {
+                        showVariantPicker(group);
+                    }
                     return true;
                 }
                 return false;
@@ -542,8 +581,94 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         };
     }
 
-    private UIComponent buildCommodityRow(MarketNetwork.ItemCardData card) {
-        return buildCommodityCard(card);
+    private UIComponent buildCommodityGroupRow(BrowseGroup group) {
+        return buildCommodityGroupCard(group);
+    }
+
+    private Component browseGroupTooltip(BrowseGroup group) {
+        if (group.variants().size() == 1) {
+            MarketNetwork.ItemCardData card = group.variants().get(0);
+            return commodityTooltip(card.itemId, card.displayName);
+        }
+        StringBuilder text = new StringBuilder(group.displayName());
+        text.append("\n").append(Component.translatable("ui.economy.variant.choose_hint").getString());
+        int limit = Math.min(6, group.variants().size());
+        for (int i = 0; i < limit; i++) {
+            MarketNetwork.ItemCardData card = group.variants().get(i);
+            text.append("\n• ").append(getItemDisplayName(card.itemId, card.displayName));
+        }
+        if (group.variants().size() > limit) {
+            text.append("\n… +").append(group.variants().size() - limit);
+        }
+        return Component.literal(text.toString());
+    }
+
+    private void showVariantPicker(BrowseGroup group) {
+        List<MarketNetwork.ItemCardData> variants = List.copyOf(group.variants());
+        Signal<List<MarketNetwork.ItemCardData>> rows = Signals.of(variants);
+        OverlayHandle[] holder = new OverlayHandle[1];
+
+        VirtualList<MarketNetwork.ItemCardData> list = Ui.list(rows, card -> buildVariantPickerRow(card, holder))
+                .key(card -> card.itemId)
+                .itemHeight(34)
+                .gap(2);
+        list.height(Math.min(154, Math.max(34, variants.size() * 36)));
+
+        VStack body = new VStack().gap(6);
+        body.addChild(Ui.heading(Component.literal(group.displayName())));
+        body.addChild(Ui.text(Component.translatable("ui.economy.variant.choose_hint")).style(TextStyle.CAPTION));
+        body.addChild(list);
+        body.addChild(Ui.button(Component.translatable("gui.cancel"), () -> {
+            if (holder[0] != null) holder[0].close();
+        }).ghost());
+
+        Card card = new Card(body).elevated(true).outlined(true).padding(10);
+        card.width(270).minHeight(84);
+        holder[0] = Dialog.show(uiRuntime().overlays(), card, true, true, null);
+    }
+
+    private UIComponent buildVariantPickerRow(MarketNetwork.ItemCardData card, OverlayHandle[] holder) {
+        Component hover = commodityTooltip(card.itemId, card.displayName);
+        return new UIComponent() {
+            {
+                height(34);
+                tooltip(hover);
+            }
+            @Override public int preferredWidth(Font f) { return 0; }
+            @Override public int preferredHeight(Font f) { return 34; }
+            @Override public void render(GuiGraphics g, Font f, int mx, int my, float pt) {
+                ColorScheme colors = uiRuntime().theme().colors();
+                boolean hovered = mx >= x && mx < x + width && my >= y && my < y + height;
+                if (hovered) UiRender.roundedRect(g, x, y, width, height, 3, colors.surfaceRaised());
+                CommodityIconComponent.drawIcon(g, card.itemId, x + 4, y + 9, 16, 16);
+
+                int textX = x + 24;
+                int rightWidth = Math.min(76, Math.max(0, width / 3));
+                int textWidth = Math.max(1, width - textX + x - rightWidth - 4);
+                UiRender.text(g, f, fitText(f, getItemDisplayName(card.itemId, card.displayName), textWidth),
+                        textX, y + 4, colors.onSurface());
+                String meta = variantMetadataSummary(card.itemId);
+                UiRender.text(g, f, fitText(f, meta, textWidth), textX, y + 17, colors.onSurfaceMuted());
+
+                String price = card.globalPrice == null || card.globalPrice.isEmpty() || card.globalPrice.equals("--")
+                        ? "--" : formatMoneyCompact(parsePrice(card.globalPrice));
+                UiRender.text(g, f, fitText(f, price, rightWidth),
+                        x + width - f.width(fitText(f, price, rightWidth)) - 4, y + 4, colors.primary());
+                String orders = card.offerCount > 0
+                        ? EconomyFormatUtil.formatCount(card.offerCount, "order", "orders")
+                        : t("ui.economy.card.no_orders");
+                String fittedOrders = fitText(f, orders, rightWidth);
+                UiRender.text(g, f, fittedOrders, x + width - f.width(fittedOrders) - 4, y + 17, colors.onSurfaceMuted());
+            }
+            @Override public boolean mouseClicked(double mx, double my, int button) {
+                if (mx >= x && mx < x + width && my >= y && my < y + height) {
+                    if (holder[0] != null) holder[0].close();
+                    openDetail(card.itemId, card.commodityType);
+                    return true;
+                }
+                return false;
+            }
+        };
     }
 
     private void openDetail(String id, String commodityType) {
@@ -737,6 +862,13 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         modeRow.addChild(newOrderSellBtn); modeRow.addChild(newOrderBuyBtn);
         v.addChild(modeRow);
 
+        UIComponent storagePicker = Ui.switcher(createSellMode)
+                .when(true, () -> Ui.button(Component.translatable("ui.economy.new_order.choose_vault"),
+                        this::showVaultCommodityPicker).ghost())
+                .when(false, () -> Ui.text(Component.translatable("ui.economy.new_order.buy_variant_hint"))
+                        .style(TextStyle.CAPTION));
+        v.addChild(storagePicker);
+
         TextField idField = Ui.textField(createCommodityQuery);
         idField.placeholder(t("ui.economy.new_order.search_placeholder"));
         v.addChild(idField);
@@ -792,13 +924,90 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         buy.setActive(!createSellMode.get());
     }
 
+    private void showVaultCommodityPicker() {
+        List<MarketNetwork.AssetHoldingData> holdings = new ArrayList<>();
+        for (MarketNetwork.AssetHoldingData holding : MarketClientStore.assetHoldings.get()) {
+            if (holding != null && holding.quantity > 0) holdings.add(holding);
+        }
+
+        if (holdings.isEmpty()) {
+            Toast.show(uiRuntime().overlays(), new Toast(Toast.Type.WARNING,
+                    Component.translatable("ui.economy.new_order.choose_vault"),
+                    Component.translatable("ui.economy.empty.no_holdings"), 3000, null));
+            return;
+        }
+
+        holdings.sort((a, b) -> getItemDisplayName(a.itemId, a.displayName)
+                .compareToIgnoreCase(getItemDisplayName(b.itemId, b.displayName)));
+        Signal<List<MarketNetwork.AssetHoldingData>> rows = Signals.of(List.copyOf(holdings));
+        OverlayHandle[] holder = new OverlayHandle[1];
+
+        VirtualList<MarketNetwork.AssetHoldingData> list = Ui.list(rows, h -> buildVaultPickerRow(h, holder))
+                .key(h -> h.itemId)
+                .itemHeight(30)
+                .gap(2);
+        list.height(Math.min(150, Math.max(30, holdings.size() * 32)));
+
+        VStack body = new VStack().gap(6);
+        body.addChild(Ui.heading(Component.translatable("ui.economy.new_order.choose_vault")));
+        body.addChild(Ui.text(Component.translatable("ui.economy.new_order.choose_vault_hint")).style(TextStyle.CAPTION));
+        body.addChild(list);
+        body.addChild(Ui.button(Component.translatable("gui.cancel"), () -> {
+            if (holder[0] != null) holder[0].close();
+        }).ghost());
+
+        Card card = new Card(body).elevated(true).outlined(true).padding(10);
+        card.width(270).minHeight(84);
+        holder[0] = Dialog.show(uiRuntime().overlays(), card, true, true, null);
+    }
+
+    private UIComponent buildVaultPickerRow(MarketNetwork.AssetHoldingData holding, OverlayHandle[] holder) {
+        Component hover = commodityTooltip(holding.itemId, holding.displayName);
+        return new UIComponent() {
+            {
+                height(30);
+                tooltip(hover);
+            }
+            @Override public int preferredWidth(Font f) { return 0; }
+            @Override public int preferredHeight(Font f) { return 30; }
+            @Override public void render(GuiGraphics g, Font f, int mx, int my, float pt) {
+                ColorScheme colors = uiRuntime().theme().colors();
+                boolean hovered = mx >= x && mx < x + width && my >= y && my < y + height;
+                if (hovered) UiRender.roundedRect(g, x, y, width, height, 3, colors.surfaceRaised());
+                CommodityIconComponent.drawIcon(g, holding.itemId, x + 4, y + 7, 16, 16);
+                int textX = x + 24;
+                int qtyWidth = Math.min(70, Math.max(24, width / 4));
+                int textWidth = Math.max(1, width - (textX - x) - qtyWidth - 4);
+                UiRender.text(g, f, fitText(f, getItemDisplayName(holding.itemId, holding.displayName), textWidth),
+                        textX, y + 4, colors.onSurface());
+                String meta = isExactVariantId(holding.itemId)
+                        ? variantMetadataSummary(holding.itemId)
+                        : holding.itemId;
+                UiRender.text(g, f, fitText(f, meta, textWidth), textX, y + 16, colors.onSurfaceMuted());
+                String qty = formatQty(holding.quantity, isFluidCommodity(holding.itemId));
+                String fittedQty = fitText(f, qty, qtyWidth);
+                UiRender.text(g, f, fittedQty, x + width - f.width(fittedQty) - 4, y + 10, colors.primary());
+            }
+            @Override public boolean mouseClicked(double mx, double my, int button) {
+                if (mx >= x && mx < x + width && my >= y && my < y + height) {
+                    createSellMode.set(true);
+                    selectCommodity(holding.itemId);
+                    selectedCommodityType.set(isFluidCommodity(holding.itemId) ? "FLUID" : "ITEM");
+                    if (holder[0] != null) holder[0].close();
+                    return true;
+                }
+                return false;
+            }
+        };
+    }
+
     private void setupItemSearchPopover(TextField anchor) {
         if (itemSearchSubscription != null) {
             itemSearchSubscription.close();
             itemSearchSubscription = null;
         }
         hideItemSearch();
-        VirtualList<ItemSearchResult> list = Ui.list(searchResults, this::buildSearchResultRow).itemHeight(16);
+        VirtualList<ItemSearchResult> list = Ui.list(searchResults, this::buildSearchResultRow).itemHeight(24);
         itemSearchPopover = Ui.popover(anchor, list).matchAnchorWidth();
         itemSearchSubscription = createCommodityQuery.subscribe(q -> {
             requestCommodityDetailIfExact(q);
@@ -818,20 +1027,28 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
     }
 
     private UIComponent buildSearchResultRow(ItemSearchResult r) {
+        Component hover = commodityTooltip(r.itemId, r.displayName);
         return new UIComponent() {
             {
-                height(16);
+                height(24);
+                tooltip(hover);
             }
             @Override public int preferredWidth(Font f) { return 0; }
-            @Override public int preferredHeight(Font f) { return 16; }
+            @Override public int preferredHeight(Font f) { return 24; }
             @Override public void render(GuiGraphics g, Font f, int mx, int my, float pt) {
-                ColorScheme c = uiRuntime().theme().colors();
+                ColorScheme colors = uiRuntime().theme().colors();
                 if (mx >= x && mx < x + width && my >= y && my < y + height) {
-                    UiRender.roundedRect(g, x, y, width, 16, 2, c.surfaceRaised());
+                    UiRender.roundedRect(g, x, y, width, 24, 2, colors.surfaceRaised());
                 }
-                CommodityIconComponent.drawIcon(g, r.itemId, x, y, 16, 16);
-                UiRender.text(g, f, f.plainSubstrByWidth(getItemDisplayName(r.itemId, r.displayName), width - 20),
-                        x + 20, y + 4, c.onSurface());
+                CommodityIconComponent.drawIcon(g, r.itemId, x + 2, y + 4, 16, 16);
+                String display = getItemDisplayName(r.itemId, r.displayName);
+                UiRender.text(g, f, f.plainSubstrByWidth(display, Math.max(1, width - 22)),
+                        x + 22, y + 3, colors.onSurface());
+                String secondary = isExactVariantId(r.itemId)
+                        ? t("ui.economy.variant.exact")
+                        : r.itemId;
+                UiRender.text(g, f, f.plainSubstrByWidth(secondary, Math.max(1, width - 22)),
+                        x + 22, y + 14, colors.onSurfaceMuted());
             }
             @Override public boolean mouseClicked(double mx, double my, int button) {
                 if (mx >= x && mx < x + width && my >= y && my < y + height) {
@@ -1745,6 +1962,29 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
     }
 
     static String getItemDisplayName(String itemId, String rawName) {
+        if (isExactVariantId(itemId)) {
+            String baseId = baseCommodityId(itemId);
+            String baseName = resolveRegisteredDisplayName(baseId, rawName);
+            ItemStack stack = CommodityIconComponent.stackForCommodity(itemId);
+            List<Component> tooltip = commodityTooltipLines(itemId);
+
+            if (!tooltip.isEmpty()) {
+                String first = tooltip.get(0).getString().trim();
+                if (!first.isEmpty() && !first.equalsIgnoreCase(baseName)) return first;
+                String detail = firstMeaningfulTooltipDetail(tooltip, first);
+                if (detail != null) return baseName + " · " + detail;
+            }
+
+            if (stack != null && !stack.isEmpty() && stack.isDamageableItem() && stack.getDamageValue() > 0) {
+                int remaining = Math.max(0, stack.getMaxDamage() - stack.getDamageValue());
+                return baseName + " · " + remaining + "/" + stack.getMaxDamage();
+            }
+            return baseName + " · " + t("ui.economy.variant.exact");
+        }
+        return resolveRegisteredDisplayName(itemId, rawName);
+    }
+
+    private static String resolveRegisteredDisplayName(String itemId, String rawName) {
         if (itemId != null && !itemId.isEmpty()) {
             try {
                 ResourceLocation rl = new ResourceLocation(itemId);
@@ -1775,6 +2015,81 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         return itemId != null ? itemId : "";
     }
 
+
+    static String baseCommodityId(String itemId) {
+        if (itemId == null || itemId.isBlank()) return itemId;
+        try {
+            return com.nstut.economy.trading.ItemVariant.baseItemId(
+                    com.nstut.economy.api.EconomyId.parse(itemId)).toString();
+        } catch (RuntimeException ignored) {
+            return itemId;
+        }
+    }
+
+    static boolean isExactVariantId(String itemId) {
+        if (itemId == null || itemId.isBlank()) return false;
+        String base = baseCommodityId(itemId);
+        return base != null && !itemId.equals(base);
+    }
+
+    private static List<Component> commodityTooltipLines(String itemId) {
+        if (!isExactVariantId(itemId)) return List.of();
+        try {
+            ItemStack stack = CommodityIconComponent.stackForCommodity(itemId);
+            if (stack == null || stack.isEmpty()) return List.of();
+            return Screen.getTooltipFromItem(Minecraft.getInstance(), stack);
+        } catch (RuntimeException ignored) {
+            return List.of();
+        }
+    }
+
+    private static String firstMeaningfulTooltipDetail(List<Component> lines, String firstLine) {
+        for (int i = 1; i < lines.size(); i++) {
+            String line = lines.get(i).getString().trim();
+            if (line.isEmpty() || line.equalsIgnoreCase(firstLine)) continue;
+            if (line.endsWith(":") || line.startsWith("When in ")) continue;
+            return line;
+        }
+        return null;
+    }
+
+    private static String variantMetadataSummary(String itemId) {
+        List<Component> lines = commodityTooltipLines(itemId);
+        String first = lines.isEmpty() ? "" : lines.get(0).getString().trim();
+        String detail = firstMeaningfulTooltipDetail(lines, first);
+        if (detail != null) return detail;
+        ItemStack stack = CommodityIconComponent.stackForCommodity(itemId);
+        if (stack != null && !stack.isEmpty() && stack.isDamageableItem() && stack.getDamageValue() > 0) {
+            int remaining = Math.max(0, stack.getMaxDamage() - stack.getDamageValue());
+            return Component.translatable("ui.economy.variant.durability", remaining, stack.getMaxDamage()).getString();
+        }
+        return t("ui.economy.variant.exact");
+    }
+
+    private static Component commodityTooltip(String itemId, String rawName) {
+        List<Component> lines = commodityTooltipLines(itemId);
+        if (lines.isEmpty()) return Component.literal(getItemDisplayName(itemId, rawName));
+        StringBuilder text = new StringBuilder();
+        for (Component line : lines) {
+            String value = line.getString().trim();
+            if (value.isEmpty()) continue;
+            if (!text.isEmpty()) text.append("\n");
+            text.append(value);
+        }
+        if (text.isEmpty()) text.append(getItemDisplayName(itemId, rawName));
+        return Component.literal(text.toString());
+    }
+
+    private static String commoditySearchText(String itemId, String rawName) {
+        StringBuilder text = new StringBuilder();
+        if (itemId != null) text.append(itemId).append(' ');
+        text.append(getItemDisplayName(itemId, rawName)).append(' ');
+        for (Component line : commodityTooltipLines(itemId)) {
+            text.append(line.getString()).append(' ');
+        }
+        return text.toString().toLowerCase(Locale.ROOT);
+    }
+
     private static boolean isResolvedDisplayName(String name, String resourceId) {
         return name != null && !name.isBlank() && !name.equals(resourceId)
                 && !name.startsWith("fluid.") && !name.startsWith("block.");
@@ -1801,7 +2116,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         List<MarketNetwork.ItemCardData> f = new ArrayList<>();
         String query = q.toLowerCase().trim();
         for (MarketNetwork.ItemCardData c : cards) {
-            if (!query.isEmpty() && !c.displayName.toLowerCase().contains(query) && !c.itemId.toLowerCase().contains(query)) continue;
+            if (!query.isEmpty() && !commoditySearchText(c.itemId, c.displayName).contains(query)) continue;
             if (act == BrowseActivityFilter.ACTIVE && c.offerCount <= 0) continue;
             if (!matchesCommodityTypeFilter(c.itemId, c.commodityType, type)) continue;
             f.add(c);
@@ -1817,6 +2132,42 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         return f;
     }
 
+    private List<BrowseGroup> groupBrowseCards(List<MarketNetwork.ItemCardData> cards, BrowseSort sort) {
+        Map<String, List<MarketNetwork.ItemCardData>> grouped = new LinkedHashMap<>();
+        for (MarketNetwork.ItemCardData card : cards) {
+            boolean item = "ITEM".equalsIgnoreCase(card.commodityType);
+            String base = item ? baseCommodityId(card.itemId) : card.itemId;
+            String key = card.commodityType + "|" + base;
+            grouped.computeIfAbsent(key, ignored -> new ArrayList<>()).add(card);
+        }
+
+        List<BrowseGroup> groups = new ArrayList<>();
+        for (List<MarketNetwork.ItemCardData> variants : grouped.values()) {
+            MarketNetwork.ItemCardData first = variants.get(0);
+            boolean item = "ITEM".equalsIgnoreCase(first.commodityType);
+            String base = item ? baseCommodityId(first.itemId) : first.itemId;
+            String displayName = resolveRegisteredDisplayName(base, first.displayName);
+            int offers = 0;
+            MarketNetwork.ItemCardData bestPrice = first;
+            for (MarketNetwork.ItemCardData variant : variants) {
+                offers += Math.max(0, variant.offerCount);
+                if (parsePrice(variant.globalPrice).compareTo(parsePrice(bestPrice.globalPrice)) < 0) {
+                    bestPrice = variant;
+                }
+            }
+            groups.add(new BrowseGroup(base, first.commodityType, displayName, List.copyOf(variants),
+                    offers, bestPrice.globalPrice, bestPrice.priceChangePercent));
+        }
+
+        groups.sort((a, b) -> switch (sort) {
+            case PRICE_ASC -> parsePrice(a.globalPrice()).compareTo(parsePrice(b.globalPrice()));
+            case PRICE_DESC -> parsePrice(b.globalPrice()).compareTo(parsePrice(a.globalPrice()));
+            case NAME_ASC -> a.displayName().compareToIgnoreCase(b.displayName());
+            case MOST_ACTIVE -> Integer.compare(b.offerCount(), a.offerCount());
+        });
+        return groups;
+    }
+
     private List<HistoryEntry> filterHistory(String q, HistoryFilter filt, CommodityTypeFilter type, HistorySort sort, List<HistoryEntry> entries) {
         List<HistoryEntry> f = new ArrayList<>();
         if (entries == null) return f;
@@ -1826,7 +2177,8 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
             if (filt == HistoryFilter.SALES && !e.wasSell) continue;
             if (filt == HistoryFilter.PURCHASES && e.wasSell) continue;
             if (!matchesCommodityTypeFilter(e.itemId, null, type)) continue;
-            if (!query.isEmpty() && !e.displayName.toLowerCase().contains(query) && !e.itemId.toLowerCase().contains(query) && !e.counterparty.toLowerCase().contains(query)) continue;
+            if (!query.isEmpty() && !commoditySearchText(e.itemId, e.displayName).contains(query)
+                    && !e.counterparty.toLowerCase(Locale.ROOT).contains(query)) continue;
             f.add(e);
         }
         f.sort((a, b) -> {
@@ -1846,7 +2198,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         String query = q.toLowerCase().trim();
         for (MarketNetwork.ActiveOrderEntry e : entries) {
             if (e == null) continue;
-            if (!query.isEmpty() && !e.displayName.toLowerCase().contains(query) && !e.itemId.toLowerCase().contains(query)) continue;
+            if (!query.isEmpty() && !commoditySearchText(e.itemId, e.displayName).contains(query)) continue;
             if (filt == ActiveOrderFilter.SELL && !e.isSell) continue;
             if (filt == ActiveOrderFilter.BUY && e.isSell) continue;
             if (filt == ActiveOrderFilter.INFINITE && (!e.isInfinite || e.isSell)) continue;
@@ -1883,7 +2235,15 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         for (var holding : MarketClientStore.assetHoldings.get()) {
             String id = holding.itemId;
             String name = holding.displayName;
-            if ((name.toLowerCase(Locale.ROOT).contains(q) || id.toLowerCase(Locale.ROOT).contains(q)) && seen.add(id)) {
+            if (commoditySearchText(id, name).contains(q) && seen.add(id)) {
+                results.add(new ItemSearchResult(id, name));
+                if (results.size() >= 50) return results;
+            }
+        }
+        for (MarketNetwork.ItemCardData card : MarketClientStore.cards.get()) {
+            String id = card.itemId;
+            String name = getItemDisplayName(id, card.displayName);
+            if (commoditySearchText(id, card.displayName).contains(q) && seen.add(id)) {
                 results.add(new ItemSearchResult(id, name));
                 if (results.size() >= 50) return results;
             }
