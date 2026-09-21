@@ -130,6 +130,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
     private final Signal<String> selectedCommodityType = Signals.of(null);
 
     private final Signal<String> createCommodityQuery = Signals.of("");
+    private final Signal<String> createCommodityId = Signals.of(null);
     private final Signal<String> createQty = Signals.of("");
     private final Signal<String> createPrice = Signals.of("");
     private final Signal<Boolean> createSellMode = Signals.of(true);
@@ -449,7 +450,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
             }
             case NEW_ORDER -> {
                 MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestPortfolioPacket());
-                String id = createCommodityQuery.get();
+                String id = selectedCreateCommodityId();
                 if (id != null && !id.isEmpty()) MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestItemDetailPacket(id, selectedCommodityType.get()));
             }
         }
@@ -745,7 +746,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         myOrders.flex();
         v.addChild(myOrders);
         v.addChild(Ui.button(Component.translatable("ui.economy.action.create_order"), () -> {
-            createCommodityQuery.set(selectedItemId.get());
+            setCreateCommoditySelection(selectedItemId.get());
             switchView(MarketView.NEW_ORDER);
         }).primary());
         return v;
@@ -895,7 +896,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
             @Override public int preferredHeight(Font f) { return createSellMode.get() ? 14 : 0; }
             @Override public void render(GuiGraphicsExtractor g, Font f, int mx, int my, float pt) {
                 if (!createSellMode.get()) return;
-                String id = createCommodityQuery.get();
+                String id = selectedCreateCommodityId();
                 int stock = getVaultStockForItem(id);
                 boolean fluid = isFluidCommodity(id);
                 String msg = fluid ? Component.translatable("ui.economy.new_order.tank_stock", formatFluidAmountDetailed(stock)).getString()
@@ -905,18 +906,19 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         });
 
         v.addChild(new OrderQuantityControl(createQty, createSellMode, createInfinite, () -> {
-            String id = createCommodityQuery.get();
+            String id = selectedCreateCommodityId();
             int stock = getVaultStockForItem(id);
             if (stock > 0) createQty.set(String.valueOf(stock));
         }, t("ui.economy.new_order.qty_placeholder"), t("ui.economy.new_order.unlimited"),
                 t("ui.economy.action.max"), t("ui.economy.action.infinite")));
 
         TextField priceField = Ui.textField(createPrice);
-        Runnable updatePricePlaceholder = () -> priceField.placeholder(t(isFluidCommodity(createCommodityQuery.get())
+        Runnable updatePricePlaceholder = () -> priceField.placeholder(t(isFluidCommodity(selectedCreateCommodityId())
                 ? "ui.economy.new_order.price_placeholder_fluid"
                 : "ui.economy.new_order.price_placeholder_item"));
         updatePricePlaceholder.run();
         subscriptions.add(createCommodityQuery.subscribe(q -> updatePricePlaceholder.run()));
+        subscriptions.add(createCommodityId.subscribe(id -> updatePricePlaceholder.run()));
         v.addChild(priceField);
 
         ButtonWidget submit = Ui.button(Component.translatable("ui.economy.action.submit"), this::submitOffer).primary();
@@ -1026,6 +1028,13 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         VirtualList<ItemSearchResult> list = Ui.list(searchResults, this::buildSearchResultRow).itemHeight(24);
         itemSearchPopover = Ui.popover(anchor, list).matchAnchorWidth();
         itemSearchSubscription = createCommodityQuery.subscribe(q -> {
+            String selected = createCommodityId.get();
+            if (selected != null && java.util.Objects.equals(q, getItemDisplayName(selected, selected))) {
+                searchResults.set(List.of());
+                hideItemSearch();
+                return;
+            }
+            createCommodityId.set(null);
             requestCommodityDetailIfExact(q);
             if (q != null && q.length() >= 2) {
                 List<ItemSearchResult> results = getItemSearchResults(q);
@@ -1087,9 +1096,29 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         return itemSearchHandle != null && itemSearchHandle.isOpen();
     }
 
+    private String selectedCreateCommodityId() {
+        String selected = createCommodityId.get();
+        if (selected != null && !selected.isBlank()) return selected;
+        String query = createCommodityQuery.get();
+        return query == null ? null : query.trim();
+    }
+
+    private void setCreateCommoditySelection(String id) {
+        if (id == null || id.isBlank()) {
+            createCommodityId.set(null);
+            createCommodityQuery.set("");
+            return;
+        }
+        createCommodityId.set(id);
+        createCommodityQuery.set(getItemDisplayName(id, id));
+    }
+
     private void selectCommodity(String id) {
-        createCommodityQuery.set(id);
+        setCreateCommoditySelection(id);
         hideItemSearch();
+        String type = isFluidCommodity(id) ? "FLUID" : "ITEM";
+        selectedCommodityType.set(type);
+        MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestItemDetailPacket(id, type));
     }
 
     private void requestCommodityDetailIfExact(String query) {
@@ -1115,7 +1144,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         if ((target == null || target.isEmpty()) && MarketClientStore.detail.get() != null) {
             target = MarketClientStore.detail.get().itemId;
         }
-        if (target != null) createCommodityQuery.set(target);
+        if (target != null) setCreateCommoditySelection(target);
         String clean = rawPrice == null ? "" : rawPrice.replaceAll("[^0-9.]", "").trim();
         try {
             if (!clean.isEmpty()) clean = String.format(Locale.ROOT, "%.2f", Double.parseDouble(clean));
@@ -1130,7 +1159,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
 
     private void submitOffer() {
         createError.set(null);
-        String id = createCommodityQuery.get();
+        String id = selectedCreateCommodityId();
         if (id == null || id.isEmpty()) { createError.set(t("ui.economy.error.item_required")); return; }
         String priceStr = createPrice.get().trim();
         if (priceStr.isEmpty()) { createError.set(t("ui.economy.error.price_required")); return; }
