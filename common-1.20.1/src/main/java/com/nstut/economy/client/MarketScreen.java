@@ -79,6 +79,8 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
     enum ActiveOrderFilter { ALL, SELL, BUY, INFINITE }
     enum ActiveOrderSort { NEWEST, OLDEST, PRICE_ASC, PRICE_DESC }
     enum BrowseLayout { GRID, LIST }
+    enum VariantFilter { ALL, ENCHANTED, DAMAGED, NAMED, OTHER_METADATA }
+    enum VariantSort { PRICE_ASC, PRICE_DESC, MOST_ORDERS, NAME_ASC, DURABILITY_DESC }
 
     record PendingConfirmation(String itemId, int quantity, String priceStr, boolean isSell,
                                boolean isInfinite, String action, String itemName, String totalPrice,
@@ -92,6 +94,9 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         String key() { return commodityType + "|" + baseId; }
     }
 
+    record VariantTraits(boolean enchanted, boolean damaged, boolean named,
+                         boolean otherMetadata, boolean damageable, int durabilityRemaining) {}
+
     // ── View & filter state ───────────────────────────────────────────────
     private final Signal<MarketView> view = Signals.of(MarketView.BROWSE);
     private final Signal<OrdersTab> ordersTab = Signals.of(OrdersTab.ACTIVE);
@@ -101,6 +106,9 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
     private final Signal<BrowseSort> browseSort = Signals.of(BrowseSort.PRICE_ASC);
     private final Signal<BrowseLayout> browseLayout = Signals.of(
             MarketClientPreferences.isBrowseGridView() ? BrowseLayout.GRID : BrowseLayout.LIST);
+    private final Signal<String> variantQuery = Signals.of("");
+    private final Signal<VariantFilter> variantFilter = Signals.of(VariantFilter.ALL);
+    private final Signal<VariantSort> variantSort = Signals.of(VariantSort.PRICE_ASC);
     private final Signal<String> historyQuery = Signals.of("");
     private final Signal<HistoryFilter> historyFilter = Signals.of(HistoryFilter.ALL);
     private final Signal<CommodityTypeFilter> historyType = Signals.of(CommodityTypeFilter.ALL);
@@ -632,30 +640,221 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
 
     private void showVariantPicker(BrowseGroup group) {
         List<MarketNetwork.ItemCardData> variants = List.copyOf(group.variants());
-        Signal<List<MarketNetwork.ItemCardData>> rows = Signals.of(variants);
+        Map<String, VariantPresentation> presentationCache = new HashMap<>();
+        Map<String, VariantTraits> traitsCache = new HashMap<>();
+        Map<String, String> searchCache = new HashMap<>();
+
+        Map<VariantFilter, String> filterLabels = availableVariantFilters(variants, traitsCache);
+        if (!filterLabels.containsKey(variantFilter.get())) variantFilter.set(VariantFilter.ALL);
+        Map<VariantSort, String> sortLabels = availableVariantSorts(variants, traitsCache);
+        if (!sortLabels.containsKey(variantSort.get())) variantSort.set(VariantSort.PRICE_ASC);
+
+        Computed<List<MarketNetwork.ItemCardData>> rows = Signals.computed(() ->
+                filterVariantRows(variants, presentationCache, traitsCache, searchCache));
+        Computed<Boolean> rowsEmpty = Signals.computed(() -> rows.get().isEmpty());
         OverlayHandle[] holder = new OverlayHandle[1];
 
-        VirtualList<MarketNetwork.ItemCardData> list = Ui.list(rows, card -> buildVariantPickerRow(card, holder))
+        VirtualList<MarketNetwork.ItemCardData> list = Ui.list(rows, card ->
+                        buildVariantPickerRow(card, holder,
+                                presentationCache.computeIfAbsent(card.itemId,
+                                        ignored -> variantPresentation(card.itemId, card.displayName))))
                 .key(card -> card.itemId)
                 .itemHeight(34)
                 .gap(2);
-        list.height(Math.min(154, Math.max(34, variants.size() * 36)));
-
-        VStack body = new VStack().gap(6);
+        VStack body = new VStack().gap(4);
         body.addChild(Ui.heading(Component.literal(group.displayName())));
-        body.addChild(Ui.text(Component.translatable("ui.economy.variant.choose_hint")).style(TextStyle.CAPTION).wrap());
-        body.addChild(list);
+        body.addChild(Ui.text(Component.translatable("ui.economy.variant.choose_hint"))
+                .style(TextStyle.CAPTION).wrap());
+
+        TextField search = Ui.textField(variantQuery);
+        search.placeholder(t("ui.economy.variant.search_placeholder"));
+        search.fillWidth();
+        body.addChild(search);
+
+        HStack controls = new HStack().gap(4);
+        controls.addChild(filterSelect(t("ui.economy.variant.filter"), variantFilter, filterLabels));
+        controls.addChild(filterSelect(t("ui.economy.filter.sort"), variantSort, sortLabels));
+        body.addChild(controls);
+
+        body.addChild(new UIComponent() {
+            @Override public int preferredWidth(Font f) { return 0; }
+            @Override public int preferredHeight(Font f) { return 11; }
+            @Override public void render(GuiGraphics g, Font f, int mx, int my, float pt) {
+                ColorScheme colors = uiRuntime().theme().colors();
+                String count = Component.translatable("ui.economy.variant.result_count",
+                        rows.get().size(), variants.size()).getString();
+                UiRender.text(g, f, fitText(f, count, width), x, y + 1, colors.onSurfaceMuted());
+            }
+        });
+
+        UIComponent results = Ui.switcher(rowsEmpty)
+                .when(false, () -> list)
+                .when(true, () -> Ui.emptyState(Component.translatable("ui.economy.variant.no_results")));
+        results.flex();
+        body.addChild(results);
+
         body.addChild(Ui.button(Component.translatable("gui.cancel"), () -> {
             if (holder[0] != null) holder[0].close();
-        }).ghost());
+        }).secondary());
 
         Card card = new Card(body).elevated(true).outlined(true).padding(10);
-        card.width(270).minHeight(84);
-        holder[0] = Dialog.show(uiRuntime().overlays(), card, true, true, null);
+        // Reserve a fixed modal viewport: controls/header/footer stay fixed while
+        // the variant list takes only the remaining height and scrolls internally.
+        card.width(310).height(270);
+        holder[0] = Dialog.show(uiRuntime().overlays(), card, true, true, () -> {
+            rowsEmpty.close();
+            rows.close();
+        });
     }
 
-    private UIComponent buildVariantPickerRow(MarketNetwork.ItemCardData card, OverlayHandle[] holder) {
-        Component hover = commodityTooltip(card.itemId, card.displayName);
+    private Map<VariantFilter, String> availableVariantFilters(
+            List<MarketNetwork.ItemCardData> variants, Map<String, VariantTraits> traitsCache) {
+        LinkedHashMap<VariantFilter, String> labels = new LinkedHashMap<>();
+        labels.put(VariantFilter.ALL, t("ui.economy.opt.all"));
+        for (VariantFilter candidate : List.of(
+                VariantFilter.ENCHANTED, VariantFilter.DAMAGED,
+                VariantFilter.NAMED, VariantFilter.OTHER_METADATA)) {
+            boolean present = false;
+            for (MarketNetwork.ItemCardData card : variants) {
+                VariantTraits traits = traitsCache.computeIfAbsent(card.itemId, this::variantTraits);
+                if (matchesVariantFilter(traits, candidate)) {
+                    present = true;
+                    break;
+                }
+            }
+            if (!present) continue;
+            labels.put(candidate, switch (candidate) {
+                case ENCHANTED -> t("ui.economy.variant.filter.enchanted");
+                case DAMAGED -> t("ui.economy.variant.filter.damaged");
+                case NAMED -> t("ui.economy.variant.filter.named");
+                case OTHER_METADATA -> t("ui.economy.variant.filter.other_metadata");
+                case ALL -> t("ui.economy.opt.all");
+            });
+        }
+        return labels;
+    }
+
+    private Map<VariantSort, String> availableVariantSorts(
+            List<MarketNetwork.ItemCardData> variants, Map<String, VariantTraits> traitsCache) {
+        LinkedHashMap<VariantSort, String> labels = new LinkedHashMap<>();
+        labels.put(VariantSort.PRICE_ASC, t("ui.economy.opt.price_asc"));
+        labels.put(VariantSort.PRICE_DESC, t("ui.economy.opt.price_desc"));
+        labels.put(VariantSort.MOST_ORDERS, t("ui.economy.variant.sort.most_orders"));
+        labels.put(VariantSort.NAME_ASC, t("ui.economy.opt.name_asc"));
+        boolean hasDamageable = false;
+        for (MarketNetwork.ItemCardData card : variants) {
+            VariantTraits traits = traitsCache.computeIfAbsent(card.itemId, this::variantTraits);
+            if (traits.damageable()) {
+                hasDamageable = true;
+                break;
+            }
+        }
+        if (hasDamageable) labels.put(VariantSort.DURABILITY_DESC, t("ui.economy.variant.sort.durability"));
+        return labels;
+    }
+
+    private List<MarketNetwork.ItemCardData> filterVariantRows(
+            List<MarketNetwork.ItemCardData> variants,
+            Map<String, VariantPresentation> presentationCache,
+            Map<String, VariantTraits> traitsCache,
+            Map<String, String> searchCache) {
+        String query = variantQuery.get() == null ? "" : variantQuery.get().trim().toLowerCase(Locale.ROOT);
+        String[] terms = query.isEmpty() ? new String[0] : query.split("\s+");
+        VariantFilter filter = variantFilter.get();
+        List<MarketNetwork.ItemCardData> result = new ArrayList<>();
+
+        for (MarketNetwork.ItemCardData card : variants) {
+            VariantTraits traits = traitsCache.computeIfAbsent(card.itemId, this::variantTraits);
+            if (!matchesVariantFilter(traits, filter)) continue;
+            if (terms.length > 0) {
+                String haystack = searchCache.computeIfAbsent(card.itemId, ignored -> {
+                    VariantPresentation presentation = presentationCache.computeIfAbsent(card.itemId,
+                            ignoredPresentation -> variantPresentation(card.itemId, card.displayName));
+                    StringBuilder searchable = new StringBuilder();
+                    searchable.append(card.itemId).append(' ')
+                            .append(presentation.displayName()).append(' ');
+                    for (String facet : presentation.facets()) searchable.append(facet).append(' ');
+                    searchable.append(presentation.tooltip().getString());
+                    return searchable.toString().toLowerCase(Locale.ROOT);
+                });
+                boolean matches = true;
+                for (String term : terms) {
+                    if (!term.isEmpty() && !haystack.contains(term)) {
+                        matches = false;
+                        break;
+                    }
+                }
+                if (!matches) continue;
+            }
+            result.add(card);
+        }
+
+        VariantSort sort = variantSort.get();
+        switch (sort) {
+            case PRICE_ASC -> result.sort((a, b) -> {
+                int cmp = parsePrice(a.globalPrice).compareTo(parsePrice(b.globalPrice));
+                return cmp != 0 ? cmp : a.itemId.compareToIgnoreCase(b.itemId);
+            });
+            case PRICE_DESC -> result.sort((a, b) -> {
+                int cmp = parsePrice(b.globalPrice).compareTo(parsePrice(a.globalPrice));
+                return cmp != 0 ? cmp : a.itemId.compareToIgnoreCase(b.itemId);
+            });
+            case MOST_ORDERS -> result.sort((a, b) -> {
+                int cmp = Integer.compare(b.offerCount, a.offerCount);
+                return cmp != 0 ? cmp : a.itemId.compareToIgnoreCase(b.itemId);
+            });
+            case NAME_ASC -> result.sort((a, b) -> {
+                String an = presentationCache.computeIfAbsent(a.itemId,
+                        ignored -> variantPresentation(a.itemId, a.displayName)).displayName();
+                String bn = presentationCache.computeIfAbsent(b.itemId,
+                        ignored -> variantPresentation(b.itemId, b.displayName)).displayName();
+                int cmp = an.compareToIgnoreCase(bn);
+                return cmp != 0 ? cmp : a.itemId.compareToIgnoreCase(b.itemId);
+            });
+            case DURABILITY_DESC -> result.sort((a, b) -> {
+                VariantTraits at = traitsCache.computeIfAbsent(a.itemId, this::variantTraits);
+                VariantTraits bt = traitsCache.computeIfAbsent(b.itemId, this::variantTraits);
+                int cmp = Integer.compare(bt.durabilityRemaining(), at.durabilityRemaining());
+                return cmp != 0 ? cmp : a.itemId.compareToIgnoreCase(b.itemId);
+            });
+        }
+        return List.copyOf(result);
+    }
+
+    private VariantTraits variantTraits(String itemId) {
+        ItemStack stack = CommodityIconComponent.stackForCommodity(itemId);
+        if (stack == null || stack.isEmpty()) {
+            return new VariantTraits(false, false, false, false, false, Integer.MIN_VALUE);
+        }
+        boolean damageable = stack.isDamageableItem();
+        boolean damaged = damageable && stack.getDamageValue() > 0;
+        boolean enchanted = stack.isEnchanted();
+        ItemStack baseline = new ItemStack(stack.getItem());
+        boolean named = !stack.getHoverName().getString().equalsIgnoreCase(baseline.getHoverName().getString());
+        boolean metadataDiffers = hasCanonicalMetadataDifference(stack);
+        boolean otherMetadata = metadataDiffers && !enchanted && !damaged && !named;
+        int durabilityRemaining = damageable
+                ? Math.max(0, stack.getMaxDamage() - stack.getDamageValue())
+                : Integer.MIN_VALUE;
+        return new VariantTraits(enchanted, damaged, named, otherMetadata, damageable, durabilityRemaining);
+    }
+
+    private static boolean matchesVariantFilter(VariantTraits traits, VariantFilter filter) {
+        if (filter == null || filter == VariantFilter.ALL) return true;
+        return switch (filter) {
+            case ALL -> true;
+            case ENCHANTED -> traits.enchanted();
+            case DAMAGED -> traits.damaged();
+            case NAMED -> traits.named();
+            case OTHER_METADATA -> traits.otherMetadata();
+        };
+    }
+
+    private UIComponent buildVariantPickerRow(MarketNetwork.ItemCardData card, OverlayHandle[] holder,
+                                              VariantPresentation presentation) {
+        Component hover = presentation.tooltip();
+        String displayName = presentation.displayName();
+        String meta = compactVariantFacetSummary(presentation, 2);
         return new UIComponent() {
             {
                 height(34);
@@ -670,24 +869,31 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                 CommodityIconComponent.drawIcon(g, card.itemId, x + 4, y + 9, 16, 16);
 
                 int textX = x + 24;
-                int rightWidth = Math.min(76, Math.max(0, width / 3));
+                int rightWidth = Math.min(88, Math.max(0, width / 3));
                 int textWidth = Math.max(1, width - textX + x - rightWidth - 4);
-                UiRender.text(g, f, fitText(f, getPrimaryItemDisplayName(card.itemId, card.displayName), textWidth),
+                UiRender.text(g, f, fitText(f, displayName, textWidth),
                         textX, y + 4, colors.onSurface());
-                String meta = variantMetadataSummary(card.itemId);
                 if (!meta.isBlank()) {
                     drawMarqueeText(g, f, meta, textX, y + 17, textWidth, colors.onSurfaceMuted(), false);
                 }
 
                 String price = card.globalPrice == null || card.globalPrice.isEmpty() || card.globalPrice.equals("--")
                         ? "--" : formatMoneyCompact(parsePrice(card.globalPrice));
-                UiRender.text(g, f, fitText(f, price, rightWidth),
-                        x + width - f.width(fitText(f, price, rightWidth)) - 4, y + 4, colors.primary());
+                String fittedPrice = fitText(f, price, Math.max(1, rightWidth - (price.equals("--") ? 0 : 10)));
+                int priceGroupWidth = f.width(fittedPrice) + (price.equals("--") ? 0 : 10);
+                int priceX = x + width - priceGroupWidth - 4;
+                if (!price.equals("--")) {
+                    EconomyUiComponents.drawCoin(g, priceX, y + 3);
+                    priceX += 10;
+                }
+                UiRender.text(g, f, fittedPrice, priceX, y + 4, colors.primary());
+
                 String orders = card.offerCount > 0
                         ? EconomyFormatUtil.formatCount(card.offerCount, "order", "orders")
                         : t("ui.economy.card.no_orders");
                 String fittedOrders = fitText(f, orders, rightWidth);
-                UiRender.text(g, f, fittedOrders, x + width - f.width(fittedOrders) - 4, y + 17, colors.onSurfaceMuted());
+                UiRender.text(g, f, fittedOrders,
+                        x + width - f.width(fittedOrders) - 4, y + 17, colors.onSurfaceMuted());
             }
             @Override public boolean mouseClicked(double mx, double my, int button) {
                 if (mx >= x && mx < x + width && my >= y && my < y + height) {
