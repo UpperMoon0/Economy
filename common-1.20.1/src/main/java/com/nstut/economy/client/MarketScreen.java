@@ -106,9 +106,6 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
     private final Signal<BrowseSort> browseSort = Signals.of(BrowseSort.PRICE_ASC);
     private final Signal<BrowseLayout> browseLayout = Signals.of(
             MarketClientPreferences.isBrowseGridView() ? BrowseLayout.GRID : BrowseLayout.LIST);
-    private final Signal<String> variantQuery = Signals.of("");
-    private final Signal<VariantFilter> variantFilter = Signals.of(VariantFilter.ALL);
-    private final Signal<VariantSort> variantSort = Signals.of(VariantSort.PRICE_ASC);
     private final Signal<String> historyQuery = Signals.of("");
     private final Signal<HistoryFilter> historyFilter = Signals.of(HistoryFilter.ALL);
     private final Signal<CommodityTypeFilter> historyType = Signals.of(CommodityTypeFilter.ALL);
@@ -644,13 +641,18 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         Map<String, VariantTraits> traitsCache = new HashMap<>();
         Map<String, String> searchCache = new HashMap<>();
 
+        // Picker controls are modal-local. Opening a different product must start
+        // from a clean query/filter/sort state rather than inheriting transient UI.
+        Signal<String> variantQuery = Signals.of("");
+        Signal<VariantFilter> variantFilter = Signals.of(VariantFilter.ALL);
+        Signal<VariantSort> variantSort = Signals.of(VariantSort.PRICE_ASC);
+
         Map<VariantFilter, String> filterLabels = availableVariantFilters(variants, traitsCache);
-        if (!filterLabels.containsKey(variantFilter.get())) variantFilter.set(VariantFilter.ALL);
         Map<VariantSort, String> sortLabels = availableVariantSorts(variants, traitsCache);
-        if (!sortLabels.containsKey(variantSort.get())) variantSort.set(VariantSort.PRICE_ASC);
 
         Computed<List<MarketNetwork.ItemCardData>> rows = Signals.computed(() ->
-                filterVariantRows(variants, presentationCache, traitsCache, searchCache));
+                filterVariantRows(variants, variantQuery, variantFilter, variantSort,
+                        presentationCache, traitsCache, searchCache));
         Computed<Boolean> rowsEmpty = Signals.computed(() -> rows.get().isEmpty());
         OverlayHandle[] holder = new OverlayHandle[1];
 
@@ -755,12 +757,16 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
 
     private List<MarketNetwork.ItemCardData> filterVariantRows(
             List<MarketNetwork.ItemCardData> variants,
+            Signal<String> querySignal,
+            Signal<VariantFilter> filterSignal,
+            Signal<VariantSort> sortSignal,
             Map<String, VariantPresentation> presentationCache,
             Map<String, VariantTraits> traitsCache,
             Map<String, String> searchCache) {
-        String query = variantQuery.get() == null ? "" : variantQuery.get().trim().toLowerCase(Locale.ROOT);
-        String[] terms = query.isEmpty() ? new String[0] : query.split("\s+");
-        VariantFilter filter = variantFilter.get();
+        String rawQuery = querySignal.get();
+        String query = rawQuery == null ? "" : rawQuery.trim().toLowerCase(Locale.ROOT);
+        String[] terms = query.isEmpty() ? new String[0] : query.split("\\s+");
+        VariantFilter filter = filterSignal.get();
         List<MarketNetwork.ItemCardData> result = new ArrayList<>();
 
         for (MarketNetwork.ItemCardData card : variants) {
@@ -789,7 +795,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
             result.add(card);
         }
 
-        VariantSort sort = variantSort.get();
+        VariantSort sort = sortSignal.get();
         switch (sort) {
             case PRICE_ASC -> result.sort((a, b) -> {
                 int cmp = parsePrice(a.globalPrice).compareTo(parsePrice(b.globalPrice));
