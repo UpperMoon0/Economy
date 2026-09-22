@@ -956,10 +956,10 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
     private UIComponent buildSellSelectionSummary(TextField searchField) {
         return new UIComponent() {
             {
-                height(30);
+                height(42);
             }
             @Override public int preferredWidth(Font f) { return 0; }
-            @Override public int preferredHeight(Font f) { return 30; }
+            @Override public int preferredHeight(Font f) { return 42; }
             @Override public void render(GuiGraphics g, Font f, int mx, int my, float pt) {
                 ColorScheme colors = uiRuntime().theme().colors();
                 String id = createCommodityId.get();
@@ -978,18 +978,28 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                 int stock = getVaultStockForItem(id);
                 UiRender.surface(g, x, y, width, height, 3,
                         colors.surface(), colors.borderSubtle(), false, colors);
-                CommodityIconComponent.drawIcon(g, id, x + 4, y + 7, 16, 16);
+                CommodityIconComponent.drawIcon(g, id, x + 4, y + (height - 16) / 2, 16, 16);
 
                 int textX = x + 24;
                 String qty = formatQty(stock, fluid);
                 int qtyWidth = Math.min(Math.max(36, f.width(qty) + 4), Math.max(36, width / 3));
                 int textWidth = Math.max(1, width - (textX - x) - qtyWidth - 8);
-                String title = getPrimaryItemDisplayName(id, id);
-                String meta = isExactVariantId(id) ? variantMetadataSummary(id) : baseCommodityId(id);
-                drawMarqueeText(g, f, title, textX, y + 4, textWidth, colors.onSurface(), false);
-                drawMarqueeText(g, f, meta, textX, y + 16, textWidth, colors.onSurfaceMuted(), false);
-                UiRender.text(g, f, fitText(f, qty, qtyWidth),
-                        x + width - f.width(fitText(f, qty, qtyWidth)) - 4, y + 10, colors.primary());
+                VariantPresentation presentation = variantPresentation(id, id);
+                List<String> metadataLines = isExactVariantId(id)
+                        ? compactVariantFacetLines(presentation, 2)
+                        : List.of(baseCommodityId(id));
+                drawMarqueeText(g, f, presentation.displayName(), textX, y + 3,
+                        textWidth, colors.onSurface(), false);
+                drawVariantFacetLines(g, f, metadataLines, textX, y + 16,
+                        textWidth, colors.onSurfaceMuted());
+                String fittedQty = fitText(f, qty, qtyWidth);
+                UiRender.text(g, f, fittedQty,
+                        x + width - f.width(fittedQty) - 4,
+                        y + Math.max(0, (height - f.lineHeight) / 2), colors.primary());
+
+                if (mx >= x && mx < x + width && my >= y && my < y + height) {
+                    deferredTooltip = presentation.tooltip();
+                }
             }
             @Override public boolean mouseClicked(double mx, double my, int button) {
                 if (mx >= x && mx < x + width && my >= y && my < y + height) {
@@ -1048,39 +1058,42 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
     }
 
     private UIComponent buildSearchResultRow(ItemSearchResult r) {
+        boolean exactVariant = isExactVariantId(r.itemId);
+        int rowHeight = exactVariant ? 42 : 30;
         Component hover = commodityTooltip(r.itemId, r.displayName);
         return new UIComponent() {
             {
-                height(30);
+                height(rowHeight);
                 tooltip(hover);
             }
             @Override public int preferredWidth(Font f) { return 0; }
-            @Override public int preferredHeight(Font f) { return 30; }
+            @Override public int preferredHeight(Font f) { return rowHeight; }
             @Override public void render(GuiGraphics g, Font f, int mx, int my, float pt) {
                 ColorScheme colors = uiRuntime().theme().colors();
                 if (mx >= x && mx < x + width && my >= y && my < y + height) {
-                    UiRender.roundedRect(g, x, y, width, 30, 2, colors.surfaceRaised());
+                    UiRender.roundedRect(g, x, y, width, rowHeight, 2, colors.surfaceRaised());
                 }
-                CommodityIconComponent.drawIcon(g, r.itemId, x + 2, y + 7, 16, 16);
+                CommodityIconComponent.drawIcon(g, r.itemId, x + 2, y + (rowHeight - 16) / 2, 16, 16);
 
                 int textX = x + 22;
                 String quantity = r.owned ? formatQty(r.quantity, isFluidCommodity(r.itemId)) : "";
                 int rightWidth = r.owned ? Math.min(72, Math.max(36, width / 4)) : 0;
                 int textWidth = Math.max(1, width - (textX - x) - rightWidth - 4);
-                String display = r.owned
-                        ? getPrimaryItemDisplayName(r.itemId, r.displayName)
-                        : getItemDisplayName(r.itemId, r.displayName);
-                String secondary = isExactVariantId(r.itemId)
-                        ? variantMetadataSummary(r.itemId)
-                        : r.itemId;
+                VariantPresentation presentation = variantPresentation(r.itemId, r.displayName);
+                List<String> metadataLines = exactVariant
+                        ? compactVariantFacetLines(presentation, 2)
+                        : List.of(r.itemId);
 
-                drawMarqueeText(g, f, display, textX, y + 4, textWidth, colors.onSurface(), false);
-                drawMarqueeText(g, f, secondary, textX, y + 16, textWidth, colors.onSurfaceMuted(), false);
+                drawMarqueeText(g, f, presentation.displayName(), textX, y + 4,
+                        textWidth, colors.onSurface(), false);
+                drawVariantFacetLines(g, f, metadataLines, textX, y + 16,
+                        textWidth, colors.onSurfaceMuted());
 
                 if (r.owned) {
                     String fitted = fitText(f, quantity, rightWidth);
                     UiRender.text(g, f, fitted,
-                            x + width - f.width(fitted) - 4, y + 10, colors.primary());
+                            x + width - f.width(fitted) - 4,
+                            y + Math.max(0, (rowHeight - f.lineHeight) / 2), colors.primary());
                 }
             }
             @Override public boolean mouseClicked(double mx, double my, int button) {
@@ -2015,25 +2028,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
     }
 
     static String getItemDisplayName(String itemId, String rawName) {
-        if (isExactVariantId(itemId)) {
-            String baseId = baseCommodityId(itemId);
-            String baseName = resolveRegisteredDisplayName(baseId, rawName);
-            ItemStack stack = CommodityIconComponent.stackForCommodity(itemId);
-            List<Component> tooltip = commodityTooltipLines(itemId);
-
-            if (!tooltip.isEmpty()) {
-                String first = tooltip.get(0).getString().trim();
-                if (!first.isEmpty() && !first.equalsIgnoreCase(baseName)) return first;
-                String detail = firstMeaningfulTooltipDetail(tooltip, first);
-                if (detail != null) return baseName + " · " + detail;
-            }
-
-            if (stack != null && !stack.isEmpty() && stack.isDamageableItem() && stack.getDamageValue() > 0) {
-                int remaining = Math.max(0, stack.getMaxDamage() - stack.getDamageValue());
-                return baseName + " · " + remaining + "/" + stack.getMaxDamage();
-            }
-            return baseName + " · " + t("ui.economy.variant.exact");
-        }
+        if (isExactVariantId(itemId)) return getPrimaryItemDisplayName(itemId, rawName);
         return resolveRegisteredDisplayName(itemId, rawName);
     }
 
@@ -2096,58 +2091,184 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         return base != null && !itemId.equals(base);
     }
 
+
+    private record VariantPresentation(String displayName, List<String> facets, Component tooltip) {}
+
     private static List<Component> commodityTooltipLines(String itemId) {
         if (!isExactVariantId(itemId)) return List.of();
         try {
             ItemStack stack = CommodityIconComponent.stackForCommodity(itemId);
-            if (stack == null || stack.isEmpty()) return List.of();
+            return tooltipLinesForStack(stack);
+        } catch (RuntimeException ignored) {
+            return List.of();
+        }
+    }
+
+    private static List<Component> tooltipLinesForStack(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return List.of();
+        try {
             return Screen.getTooltipFromItem(Minecraft.getInstance(), stack);
         } catch (RuntimeException ignored) {
             return List.of();
         }
     }
 
-    private static String firstMeaningfulTooltipDetail(List<Component> lines, String firstLine) {
+    private static List<String> meaningfulTooltipDetails(List<Component> lines) {
+        if (lines == null || lines.isEmpty()) return new ArrayList<>();
+        String first = lines.get(0).getString().trim();
+        List<String> details = new ArrayList<>();
         for (int i = 1; i < lines.size(); i++) {
             String line = lines.get(i).getString().trim();
-            if (line.isEmpty() || line.equalsIgnoreCase(firstLine)) continue;
+            if (line.isEmpty() || line.equalsIgnoreCase(first)) continue;
             if (line.endsWith(":") || line.startsWith("When in ")) continue;
-            return line;
+            details.add(line);
         }
-        return null;
+        return details;
+    }
+
+    private static boolean removeFirstIgnoreCase(List<String> values, String target) {
+        for (int i = 0; i < values.size(); i++) {
+            if (values.get(i).equalsIgnoreCase(target)) {
+                values.remove(i);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean containsIgnoreCase(List<String> values, String target) {
+        for (String value : values) {
+            if (value.equalsIgnoreCase(target)) return true;
+        }
+        return false;
+    }
+
+    private static boolean hasCanonicalMetadataDifference(ItemStack stack) {
+        if (stack == null || stack.isEmpty() || Minecraft.getInstance().level == null) return false;
+        try {
+            var registries = Minecraft.getInstance().level.registryAccess();
+            String exact = com.nstut.economy.compat.Compat.canonicalItemStack(registries, stack);
+            String baseline = com.nstut.economy.compat.Compat.canonicalItemStack(
+                    registries, new ItemStack(stack.getItem()));
+            return !exact.equals(baseline);
+        } catch (RuntimeException ignored) {
+            return false;
+        }
+    }
+
+    private static VariantPresentation variantPresentation(String itemId, String rawName) {
+        String displayName = getPrimaryItemDisplayName(itemId, rawName);
+        if (!isExactVariantId(itemId)) {
+            return new VariantPresentation(displayName, List.of(), Component.literal(displayName));
+        }
+
+        ItemStack stack = CommodityIconComponent.stackForCommodity(itemId);
+        if (stack == null || stack.isEmpty()) {
+            String exact = t("ui.economy.variant.exact");
+            return new VariantPresentation(displayName, List.of(exact),
+                    Component.literal(displayName + "\n" + t("ui.economy.variant.exact_market")));
+        }
+
+        List<Component> exactTooltip = tooltipLinesForStack(stack);
+        ItemStack baselineStack = new ItemStack(stack.getItem());
+        List<Component> baselineTooltip = tooltipLinesForStack(baselineStack);
+        List<String> baselineDetails = meaningfulTooltipDetails(baselineTooltip);
+        List<String> facets = new ArrayList<>();
+
+        for (String detail : meaningfulTooltipDetails(exactTooltip)) {
+            if (removeFirstIgnoreCase(baselineDetails, detail)) continue;
+            if (!containsIgnoreCase(facets, detail)) facets.add(detail);
+        }
+
+        String durability = null;
+        if (stack.isDamageableItem() && stack.getDamageValue() > 0) {
+            int remaining = Math.max(0, stack.getMaxDamage() - stack.getDamageValue());
+            durability = Component.translatable(
+                    "ui.economy.variant.durability", remaining, stack.getMaxDamage()).getString();
+            if (!containsIgnoreCase(facets, durability)) facets.add(durability);
+        }
+
+        String baselineName = baselineStack.getHoverName().getString();
+        boolean nameRepresentsMetadata = displayName != null
+                && baselineName != null
+                && !displayName.equalsIgnoreCase(baselineName);
+        boolean metadataDiffers = hasCanonicalMetadataDifference(stack);
+        boolean genericMetadataFacet = false;
+        if (facets.isEmpty()) {
+            if (metadataDiffers && !nameRepresentsMetadata) {
+                facets.add(t("ui.economy.variant.additional_metadata"));
+                genericMetadataFacet = true;
+            } else {
+                facets.add(t("ui.economy.variant.exact"));
+            }
+        }
+
+        StringBuilder tooltipText = new StringBuilder();
+        for (Component line : exactTooltip) {
+            String value = line.getString().trim();
+            if (value.isEmpty()) continue;
+            if (!tooltipText.isEmpty()) tooltipText.append("\n");
+            tooltipText.append(value);
+        }
+        if (tooltipText.isEmpty()) tooltipText.append(displayName);
+
+        if (durability != null) {
+            boolean alreadyShown = false;
+            for (Component line : exactTooltip) {
+                String value = line.getString().toLowerCase(Locale.ROOT);
+                if (value.contains("durability")) {
+                    alreadyShown = true;
+                    break;
+                }
+            }
+            if (!alreadyShown) tooltipText.append("\n").append(durability);
+        }
+        if (genericMetadataFacet
+                && !tooltipText.toString().toLowerCase(Locale.ROOT)
+                .contains(t("ui.economy.variant.additional_metadata").toLowerCase(Locale.ROOT))) {
+            tooltipText.append("\n").append(t("ui.economy.variant.additional_metadata"));
+        }
+        tooltipText.append("\n").append(t("ui.economy.variant.exact_market"));
+
+        return new VariantPresentation(displayName, List.copyOf(facets),
+                Component.literal(tooltipText.toString()));
+    }
+
+    private static List<String> compactVariantFacetLines(VariantPresentation presentation, int maxLines) {
+        if (presentation == null || presentation.facets().isEmpty() || maxLines <= 0) return List.of();
+        List<String> facets = presentation.facets();
+        if (facets.size() <= maxLines) return facets;
+        if (maxLines == 1) return List.of(facets.get(0));
+        List<String> result = new ArrayList<>(facets.subList(0, maxLines - 1));
+        result.add(Component.translatable(
+                "ui.economy.variant.more", facets.size() - (maxLines - 1)).getString());
+        return List.copyOf(result);
     }
 
     private static String variantMetadataSummary(String itemId) {
-        List<Component> lines = commodityTooltipLines(itemId);
-        String first = lines.isEmpty() ? "" : lines.get(0).getString().trim();
-        String detail = firstMeaningfulTooltipDetail(lines, first);
-        if (detail != null) return detail;
-        ItemStack stack = CommodityIconComponent.stackForCommodity(itemId);
-        if (stack != null && !stack.isEmpty() && stack.isDamageableItem() && stack.getDamageValue() > 0) {
-            int remaining = Math.max(0, stack.getMaxDamage() - stack.getDamageValue());
-            return Component.translatable("ui.economy.variant.durability", remaining, stack.getMaxDamage()).getString();
-        }
-        return t("ui.economy.variant.exact");
+        VariantPresentation presentation = variantPresentation(itemId, itemId);
+        return presentation.facets().isEmpty()
+                ? t("ui.economy.variant.exact")
+                : presentation.facets().get(0);
     }
 
     private static Component commodityTooltip(String itemId, String rawName) {
-        List<Component> lines = commodityTooltipLines(itemId);
-        if (lines.isEmpty()) return Component.literal(getItemDisplayName(itemId, rawName));
-        StringBuilder text = new StringBuilder();
-        for (Component line : lines) {
-            String value = line.getString().trim();
-            if (value.isEmpty()) continue;
-            if (!text.isEmpty()) text.append("\n");
-            text.append(value);
+        return variantPresentation(itemId, rawName).tooltip();
+    }
+
+    private static void drawVariantFacetLines(GuiGraphics g, Font font, List<String> lines,
+                                              int x, int y, int width, int color) {
+        for (int i = 0; i < lines.size(); i++) {
+            drawMarqueeText(g, font, lines.get(i), x, y + i * 12, width, color, false);
         }
-        if (text.isEmpty()) text.append(getItemDisplayName(itemId, rawName));
-        return Component.literal(text.toString());
     }
 
     private static String commoditySearchText(String itemId, String rawName) {
         StringBuilder text = new StringBuilder();
         if (itemId != null) text.append(itemId).append(' ');
-        text.append(getItemDisplayName(itemId, rawName)).append(' ');
+        VariantPresentation presentation = variantPresentation(itemId, rawName);
+        text.append(presentation.displayName()).append(' ');
+        for (String facet : presentation.facets()) text.append(facet).append(' ');
         for (Component line : commodityTooltipLines(itemId)) {
             text.append(line.getString()).append(' ');
         }
