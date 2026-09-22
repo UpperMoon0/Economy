@@ -585,9 +585,11 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                 String footer;
                 if (group.variants().size() > 1) {
                     footer = Component.translatable("ui.economy.card.variants", group.variants().size()).getString()
-                            + " · " + orderText;
+                            + " \u00B7 " + orderText;
                 } else if (isExactVariantId(first.itemId)) {
-                    footer = t("ui.economy.variant.exact") + " · " + orderText;
+                    String metadata = compactVariantFacetSummary(
+                            variantPresentation(first.itemId, first.displayName), 2);
+                    footer = metadata.isBlank() ? orderText : metadata + " \u00B7 " + orderText;
                 } else {
                     footer = orderText;
                 }
@@ -675,7 +677,9 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                 UiRender.text(g, f, fitText(f, getPrimaryItemDisplayName(card.itemId, card.displayName), textWidth),
                         textX, y + 4, colors.onSurface());
                 String meta = variantMetadataSummary(card.itemId);
-                UiRender.text(g, f, fitText(f, meta, textWidth), textX, y + 17, colors.onSurfaceMuted());
+                if (!meta.isBlank()) {
+                    drawMarqueeText(g, f, meta, textX, y + 17, textWidth, colors.onSurfaceMuted(), false);
+                }
 
                 String price = card.globalPrice == null || card.globalPrice.isEmpty() || card.globalPrice.equals("--")
                         ? "--" : formatMoneyCompact(parsePrice(card.globalPrice));
@@ -1061,7 +1065,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
 
     private UIComponent buildSearchResultRow(ItemSearchResult r) {
         boolean exactVariant = isExactVariantId(r.itemId);
-        int rowHeight = exactVariant ? 42 : 30;
+        int rowHeight = 30;
         Component hover = commodityTooltip(r.itemId, r.displayName);
         return new UIComponent() {
             {
@@ -1082,14 +1086,16 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                 int rightWidth = r.owned ? Math.min(72, Math.max(36, width / 4)) : 0;
                 int textWidth = Math.max(1, width - (textX - x) - rightWidth - 4);
                 VariantPresentation presentation = variantPresentation(r.itemId, r.displayName);
-                List<String> metadataLines = exactVariant
-                        ? compactVariantFacetLines(presentation, 2)
-                        : List.of(r.itemId);
+                String metadata = exactVariant
+                        ? compactVariantFacetSummary(presentation, 2)
+                        : r.itemId;
 
                 drawMarqueeText(g, f, presentation.displayName(), textX, y + 4,
                         textWidth, colors.onSurface(), false);
-                drawVariantFacetLines(g, f, metadataLines, textX, y + 16,
-                        textWidth, colors.onSurfaceMuted());
+                if (metadata != null && !metadata.isBlank()) {
+                    drawMarqueeText(g, f, metadata, textX, y + 16,
+                            textWidth, colors.onSurfaceMuted(), false);
+                }
 
                 if (r.owned) {
                     String fitted = fitText(f, quantity, rightWidth);
@@ -2166,9 +2172,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
 
         ItemStack stack = CommodityIconComponent.stackForCommodity(itemId);
         if (stack == null || stack.isEmpty()) {
-            String exact = t("ui.economy.variant.exact");
-            return new VariantPresentation(displayName, List.of(exact),
-                    Component.literal(displayName + "\n" + t("ui.economy.variant.exact_market")));
+            return new VariantPresentation(displayName, List.of(), Component.literal(displayName));
         }
 
         List<Component> exactTooltip = tooltipLinesForStack(stack);
@@ -2196,13 +2200,9 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                 && !displayName.equalsIgnoreCase(baselineName);
         boolean metadataDiffers = hasCanonicalMetadataDifference(stack);
         boolean genericMetadataFacet = false;
-        if (facets.isEmpty()) {
-            if (metadataDiffers && !nameRepresentsMetadata) {
-                facets.add(t("ui.economy.variant.additional_metadata"));
-                genericMetadataFacet = true;
-            } else {
-                facets.add(t("ui.economy.variant.exact"));
-            }
+        if (facets.isEmpty() && metadataDiffers && !nameRepresentsMetadata) {
+            facets.add(t("ui.economy.variant.additional_metadata"));
+            genericMetadataFacet = true;
         }
 
         StringBuilder tooltipText = new StringBuilder();
@@ -2230,8 +2230,6 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                 .contains(t("ui.economy.variant.additional_metadata").toLowerCase(Locale.ROOT))) {
             tooltipText.append("\n").append(t("ui.economy.variant.additional_metadata"));
         }
-        tooltipText.append("\n").append(t("ui.economy.variant.exact_market"));
-
         return new VariantPresentation(displayName, List.copyOf(facets),
                 Component.literal(tooltipText.toString()));
     }
@@ -2247,11 +2245,25 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         return List.copyOf(result);
     }
 
+    private static String compactVariantFacetSummary(VariantPresentation presentation, int maxFacets) {
+        if (presentation == null || presentation.facets().isEmpty() || maxFacets <= 0) return "";
+        List<String> facets = presentation.facets();
+        int shown = Math.min(maxFacets, facets.size());
+        StringBuilder text = new StringBuilder();
+        for (int i = 0; i < shown; i++) {
+            if (!text.isEmpty()) text.append(" \u00B7 ");
+            text.append(facets.get(i));
+        }
+        if (facets.size() > shown) {
+            if (!text.isEmpty()) text.append(" \u00B7 ");
+            text.append(Component.translatable(
+                    "ui.economy.variant.more", facets.size() - shown).getString());
+        }
+        return text.toString();
+    }
+
     private static String variantMetadataSummary(String itemId) {
-        VariantPresentation presentation = variantPresentation(itemId, itemId);
-        return presentation.facets().isEmpty()
-                ? t("ui.economy.variant.exact")
-                : presentation.facets().get(0);
+        return compactVariantFacetSummary(variantPresentation(itemId, itemId), 2);
     }
 
     private static Component commodityTooltip(String itemId, String rawName) {
