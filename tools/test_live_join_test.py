@@ -81,6 +81,16 @@ class LiveHarnessContractTest(unittest.TestCase):
                 self.assertTrue(live.is_fatal_line(line))
         self.assertFalse(live.is_fatal_line("Economy data loaded for dimension minecraft:overworld"))
 
+    def test_only_asset_download_failures_are_retryable_client_setup_failures(self):
+        self.assertTrue(live.is_transient_client_setup_failure([
+            "> Task :forge-1.20.1:downloadAssets FAILED\n",
+            "net.fabricmc.loom.util.download.DownloadException: Failed to download\n",
+        ]))
+        self.assertFalse(live.is_transient_client_setup_failure([
+            "MixinApplyError: broken\n",
+            "ECONOMY_LIVE_JOIN_TEST_PASS\n",
+        ]))
+
 
 if __name__ == "__main__":
     unittest.main()

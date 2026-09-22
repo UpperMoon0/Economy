@@ -44,6 +44,11 @@ CRITICAL_RUNTIME_MARKERS = (
     "Failed to encode packet",
     "Failed to decode packet",
 )
+TRANSIENT_CLIENT_SETUP_MARKERS = (
+    ":downloadAssets FAILED",
+    "net.fabricmc.loom.util.download.DownloadException: Failed to download",
+)
+CLIENT_SETUP_ATTEMPTS = 3
 TARGETS = (
     "fabric-1.20.1",
     "forge-1.20.1",
@@ -55,6 +60,14 @@ TARGETS = (
 
 def is_fatal_line(line: str) -> bool:
     return any(marker in line for marker in CRITICAL_RUNTIME_MARKERS)
+
+
+def is_transient_client_setup_failure(lines: list[str]) -> bool:
+    return any(
+        marker in line
+        for line in lines
+        for marker in TRANSIENT_CLIENT_SETUP_MARKERS
+    )
 
 
 def matrix_json() -> str:
@@ -301,10 +314,32 @@ def run_target(root: Path, target: str, timeout: int, setup_timeout: int) -> Non
                 raise RuntimeError("DISPLAY is unset and xvfb-run is not installed")
             client_command = [xvfb, "-a", *client_command]
 
-        client = start(client_command, root)
-        client_output = OutputPump(client, f"{target}/client", client_log)
-        if client_output.wait_for((PASS_MARKER,), timeout) is None:
-            raise RuntimeError(f"{target}: client did not report a successful Economy live join")
+        client_output: OutputPump | None = None
+        for attempt in range(1, CLIENT_SETUP_ATTEMPTS + 1):
+            client = start(client_command, root)
+            client_output = OutputPump(client, f"{target}/client", client_log)
+            if client_output.wait_for((PASS_MARKER,), timeout) is not None:
+                break
+
+            client_exit = client.poll()
+            retryable_setup_failure = (
+                client_exit is not None
+                and is_transient_client_setup_failure(client_output.history)
+            )
+            if not retryable_setup_failure or attempt == CLIENT_SETUP_ATTEMPTS:
+                raise RuntimeError(f"{target}: client did not report a successful Economy live join")
+
+            print(
+                f"{target}: transient client asset download failure "
+                f"(attempt {attempt}/{CLIENT_SETUP_ATTEMPTS}); retrying",
+                flush=True,
+            )
+            stop_tree(client)
+            client = None
+            time.sleep(attempt * 2)
+
+        assert client is not None
+        assert client_output is not None
         try:
             client_exit = client.wait(timeout=60)
         except subprocess.TimeoutExpired as exc:
