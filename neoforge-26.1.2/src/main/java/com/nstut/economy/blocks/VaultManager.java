@@ -2,12 +2,12 @@ package com.nstut.economy.blocks;
 
 import com.nstut.economy.data.EconomyAccountData;
 import com.nstut.economy.data.EconomyAccountData.VaultRecord;
+import com.nstut.economy.trading.ItemCommodity;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.NonNullList;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.Identifier;
-import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
@@ -108,8 +108,19 @@ public class VaultManager {
     public static int countItemInVaults(Level level, UUID owner, Item item) {
         int count = 0;
         for (VaultBlockEntity v : getVaults(level, owner)) {
-            if (v.getMode().canSupplyMarket()) {
-                count += v.countItem(item);
+            if (v.getMode().canSupplyMarket()) count += v.countItem(item);
+        }
+        return count;
+    }
+
+    public static int countItemInVaults(Level level, UUID owner, ItemCommodity commodity) {
+        if (level == null || commodity == null) return 0;
+        int count = 0;
+        for (VaultBlockEntity vault : getVaults(level, owner)) {
+            if (!vault.getMode().canSupplyMarket()) continue;
+            for (int slot = 0; slot < vault.getContainerSize(); slot++) {
+                ItemStack stack = vault.getItem(slot);
+                if (commodity.matches(level, stack)) count += stack.getCount();
             }
         }
         return count;
@@ -134,40 +145,45 @@ public class VaultManager {
         return remaining == 0;
     }
 
-    /**
-     * Simulates distributing the payload across all receiving vaults without
-     * mutating any vault. Returns exactly what would not fit; an empty result
-     * means a subsequent {@link #insertItemStacksToVaults} of the same payload
-     * is expected to fully succeed.
-     */
+    public static boolean extractItemFromVaults(Level level, UUID owner, ItemCommodity commodity,
+                                                int amount, NonNullList<ItemStack> destination) {
+        if (level == null || commodity == null || amount < 0) return false;
+        if (countItemInVaults(level, owner, commodity) < amount) return false;
+        int remaining = amount;
+        for (VaultBlockEntity vault : getVaults(level, owner)) {
+            if (remaining <= 0) break;
+            if (!vault.getMode().canSupplyMarket()) continue;
+            for (int slot = 0; slot < vault.getContainerSize() && remaining > 0; slot++) {
+                ItemStack stack = vault.getItem(slot);
+                if (!commodity.matches(level, stack)) continue;
+                int take = Math.min(remaining, stack.getCount());
+                ItemStack extracted = vault.removeItem(slot, take);
+                if (!extracted.isEmpty()) {
+                    destination.add(extracted);
+                    remaining -= extracted.getCount();
+                }
+            }
+        }
+        return remaining == 0;
+    }
+
     public static NonNullList<ItemStack> simulateInsertItemStacksToVaults(Level level, UUID owner, List<ItemStack> stacks) {
         List<List<ItemStack>> snapshots = new ArrayList<>();
         for (VaultBlockEntity v : getVaults(level, owner)) {
             if (!v.getMode().canReceiveMarket()) continue;
             List<ItemStack> snapshot = new ArrayList<>(v.getContainerSize());
-            for (int i = 0; i < v.getContainerSize(); i++) {
-                snapshot.add(v.getItem(i));
-            }
+            for (int i = 0; i < v.getContainerSize(); i++) snapshot.add(v.getItem(i));
             snapshots.add(snapshot);
         }
         return VaultInventoryOps.simulateDistribute(snapshots, stacks);
     }
 
-    /**
-     * Returns how many items of the given payload the receiving vaults can
-     * currently accept, honoring per-stack NBT matching.
-     */
     public static int countMaxAcceptableItems(Level level, UUID owner, List<ItemStack> payload) {
         int payloadTotal = VaultInventoryOps.total(payload);
         NonNullList<ItemStack> leftover = simulateInsertItemStacksToVaults(level, owner, payload);
         return payloadTotal - VaultInventoryOps.total(leftover);
     }
 
-    /**
-     * Inserts the payload using the same prefix-preserving distribution rule as simulation.
-     * Once an exact stack is only partially accepted, later variants are left untouched so
-     * numeric delivered counts remain safe for legacy escrow consumption.
-     */
     public static NonNullList<ItemStack> insertItemStacksToVaults(Level level, UUID owner, List<ItemStack> stacks) {
         List<VaultBlockEntity> receivers = new ArrayList<>();
         List<List<ItemStack>> inventories = new ArrayList<>();
@@ -176,7 +192,6 @@ public class VaultManager {
             receivers.add(v);
             inventories.add(v.getItems());
         }
-
         int before = VaultInventoryOps.total(stacks);
         NonNullList<ItemStack> remaining = VaultInventoryOps.distribute(inventories, stacks);
         if (VaultInventoryOps.total(remaining) != before) {

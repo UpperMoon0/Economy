@@ -34,6 +34,8 @@ Install the file matching both your Minecraft version and loader. A jar built fo
 - Buy orders verify that the buyer has enough compatible destination space before a trade completes.
 - Cancelling a sell order restores its remaining reserved items or fluids to the owner's storage network.
 - Only canonical, container-compatible fluid variants are listed; flowing variants are excluded.
+- Item commodities are variant-aware: metadata/component-bearing stacks such as enchanted books, named items, or damaged tools can trade as distinct exact products while plain stacks retain base-item matching.
+- Previously traded exact item variants remain resolvable from persisted market history, so another player can open their details or place a new buy order even when no active order or matching Vault stack remains.
 
 ### Market Terminal UI
 

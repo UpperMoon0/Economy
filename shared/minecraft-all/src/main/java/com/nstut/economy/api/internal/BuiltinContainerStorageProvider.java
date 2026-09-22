@@ -12,7 +12,6 @@ import net.minecraft.core.NonNullList;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 
 import java.util.*;
@@ -22,13 +21,14 @@ public final class BuiltinContainerStorageProvider implements IStorageProvider {
     public static final EconomyId ID = EconomyId.of("economy", "containers");
     private static final UUID SERVER_ID = new UUID(0L, 0L);
     private static final String OWNER = "owner", TYPE = "typeId", STACKS = "ItemStacks";
+    private static final String PAYLOAD_VERSION = "commodityPayloadVersion", PAYLOAD_PREFIX = "commodityPayload.";
 
     @Override public EconomyId id() { return ID; }
     @Override public int priority() { return -100; }
     @Override public boolean supports(ICommodity commodity) { return commodity instanceof ItemCommodity || commodity instanceof FluidCommodity; }
 
     @Override public int available(ServerLevel level, UUID owner, ICommodity commodity) {
-        if (commodity instanceof ItemCommodity item) return VaultManager.countItemInVaults(level, owner, item.getItem());
+        if (commodity instanceof ItemCommodity item) return VaultManager.countItemInVaults(level, owner, item);
         if (commodity instanceof FluidCommodity fluid) return TankManager.countFluidInTanks(level, owner, fluid.getFluid());
         return 0;
     }
@@ -36,7 +36,7 @@ public final class BuiltinContainerStorageProvider implements IStorageProvider {
     @Override public int receivable(ServerLevel level, UUID owner, ICommodity commodity, int requestedAmount) {
         if (owner.equals(SERVER_ID)) return requestedAmount;
         if (commodity instanceof ItemCommodity item) {
-            return VaultManager.countMaxAcceptableItems(level, owner, generateItemStacks(item.getItem(), requestedAmount));
+            return VaultManager.countMaxAcceptableItems(level, owner, item.createStacks(level.registryAccess(), requestedAmount));
         }
         if (commodity instanceof FluidCommodity fluid) {
             return TankManager.simulateInsertFluidToTanks(level, owner, new EconomyFluidStack(fluid.getFluid(), requestedAmount));
@@ -47,14 +47,14 @@ public final class BuiltinContainerStorageProvider implements IStorageProvider {
     @Override
     public Optional<StorageReservation> reserve(ServerLevel level, UUID owner, ICommodity commodity, int amount) {
         if (amount <= 0 || available(level, owner, commodity) < amount) return Optional.empty();
-        Map<String, String> metadata = Map.of(OWNER, owner.toString(), TYPE, commodity.getTypeId().toString());
+        Map<String, String> metadata = reservationMetadata(owner, commodity);
         CompoundTag state = new CompoundTag();
 
         if (commodity instanceof ItemCommodity item) {
             var vaults = VaultManager.getVaults(level, owner);
             List<NonNullList<ItemStack>> snapshots = snapshotVaults(vaults);
             NonNullList<ItemStack> extracted = NonNullList.create();
-            if (!VaultManager.extractItemFromVaults(level, owner, item.getItem(), amount, extracted)
+            if (!VaultManager.extractItemFromVaults(level, owner, item, amount, extracted)
                     || VaultInventoryOps.total(extracted) != amount) {
                 restoreVaultSnapshots(vaults, snapshots);
                 return Optional.empty();
@@ -239,10 +239,35 @@ public final class BuiltinContainerStorageProvider implements IStorageProvider {
         return StorageDeliveryResult.partial(delivered, rest);
     }
 
+    private static Map<String, String> reservationMetadata(UUID owner, ICommodity commodity) {
+        Map<String, String> metadata = new HashMap<>();
+        metadata.put(OWNER, owner.toString());
+        metadata.put(TYPE, commodity.getTypeId().toString());
+        CommodityPayload payload = EconomyApi.commodityTypes().encode(commodity);
+        metadata.put(PAYLOAD_VERSION, Integer.toString(payload.version()));
+        payload.values().forEach((key, value) -> metadata.put(PAYLOAD_PREFIX + key, value));
+        return Map.copyOf(metadata);
+    }
+
     private static ICommodity decode(StorageReservation reservation) {
         EconomyId typeId = EconomyId.parse(reservation.metadata().getOrDefault(TYPE, ICommodity.ITEM_TYPE.toString()));
+        int version = 1;
+        String encodedVersion = reservation.metadata().get(PAYLOAD_VERSION);
+        if (encodedVersion != null) {
+            try {
+                version = Math.max(1, Integer.parseInt(encodedVersion));
+            } catch (NumberFormatException failure) {
+                throw new IllegalStateException("Invalid reserved commodity payload version", failure);
+            }
+        }
+        Map<String, String> values = new HashMap<>();
+        for (Map.Entry<String, String> entry : reservation.metadata().entrySet()) {
+            if (entry.getKey().startsWith(PAYLOAD_PREFIX)) {
+                values.put(entry.getKey().substring(PAYLOAD_PREFIX.length()), entry.getValue());
+            }
+        }
         return EconomyApi.commodityTypes().require(typeId)
-                .decode(reservation.commodityId(), CommodityPayload.empty(1));
+                .decode(reservation.commodityId(), new CommodityPayload(version, values));
     }
 
     private static CompoundTag encodeStacks(ServerLevel level, Collection<ItemStack> stacks) {
@@ -298,17 +323,6 @@ public final class BuiltinContainerStorageProvider implements IStorageProvider {
                 drop = 0;
             }
             if (!copy.isEmpty()) result.add(copy);
-        }
-        return result;
-    }
-
-    private static NonNullList<ItemStack> generateItemStacks(Item item, int amount) {
-        NonNullList<ItemStack> result = NonNullList.create();
-        int max = com.nstut.economy.compat.Compat.maxStackSize(item);
-        for (int remaining = amount; remaining > 0;) {
-            int count = Math.min(remaining, max);
-            result.add(new ItemStack(item, count));
-            remaining -= count;
         }
         return result;
     }

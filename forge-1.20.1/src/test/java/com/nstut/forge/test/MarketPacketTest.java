@@ -6,7 +6,10 @@ import net.minecraft.network.FriendlyByteBuf;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -42,6 +45,134 @@ class MarketPacketTest extends MinecraftTestBase {
         assertEquals(original.itemId, decoded.itemId);
         assertEquals(original.offerCount, decoded.offerCount);
         assertEquals("FLUID", decoded.commodityType);
+    }
+
+    @Test
+    @DisplayName("Exact item variant ids survive browse and order packet round trips")
+    void exactVariantIdentityRoundTripsAcrossMarketPackets() {
+        String variantId = "minecraft:enchanted_book/variant/" + "a".repeat(64);
+
+        MarketNetwork.ItemCardData card = new MarketNetwork.ItemCardData(
+                variantId, "Enchanted Book", "15", 1, Double.NaN, "ITEM");
+        FriendlyByteBuf cardBuffer = new FriendlyByteBuf(Unpooled.buffer());
+        card.write(cardBuffer);
+        MarketNetwork.ItemCardData decodedCard = MarketNetwork.ItemCardData.read(cardBuffer);
+        assertEquals(variantId, decodedCard.itemId);
+        assertEquals("ITEM", decodedCard.commodityType);
+
+        MarketNetwork.RequestItemDetailPacket request = new MarketNetwork.RequestItemDetailPacket(variantId, "ITEM");
+        FriendlyByteBuf requestBuffer = new FriendlyByteBuf(Unpooled.buffer());
+        MarketNetwork.RequestItemDetailPacket.encode(request, requestBuffer);
+        MarketNetwork.RequestItemDetailPacket decodedRequest = MarketNetwork.RequestItemDetailPacket.decode(requestBuffer);
+        assertEquals(variantId, decodedRequest.itemId);
+        assertEquals("ITEM", decodedRequest.commodityType);
+
+        MarketNetwork.CreateOrderPacket create = new MarketNetwork.CreateOrderPacket(
+                variantId, 1, "15", true, false, "ITEM");
+        FriendlyByteBuf createBuffer = new FriendlyByteBuf(Unpooled.buffer());
+        MarketNetwork.CreateOrderPacket.encode(create, createBuffer);
+        MarketNetwork.CreateOrderPacket decodedCreate = MarketNetwork.CreateOrderPacket.decode(createBuffer);
+        assertEquals(variantId, decodedCreate.itemId);
+        assertEquals("ITEM", decodedCreate.commodityType);
+    }
+
+    @Test
+    @DisplayName("Exact item variant ids survive detail responses")
+    void exactVariantIdentityRoundTripsDetailResponse() {
+        String variantId = "minecraft:enchanted_book/variant/" + "b".repeat(64);
+        MarketNetwork.SyncItemDetailPacket original = new MarketNetwork.SyncItemDetailPacket(
+                variantId, "Sharpness V", 2, List.of(), List.of(), List.of());
+        FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
+
+        MarketNetwork.SyncItemDetailPacket.encode(original, buffer);
+        MarketNetwork.SyncItemDetailPacket decoded = MarketNetwork.SyncItemDetailPacket.decode(buffer);
+
+        assertEquals(variantId, decoded.itemId);
+        assertEquals("Sharpness V", decoded.displayName);
+        assertEquals(2, decoded.vaultCount);
+    }
+
+    @Test
+    @DisplayName("Exact item variant descriptors survive the client sync packet")
+    void exactVariantDescriptorRoundTrips() {
+        String variantId = "minecraft:enchanted_book/variant/" + "c".repeat(64);
+        String canonical = "{Count:1b,id:\"minecraft:enchanted_book\",tag:{StoredEnchantments:[{id:\"minecraft:sharpness\",lvl:5s}]}}";
+        MarketNetwork.SyncItemVariantDataPacket original =
+                new MarketNetwork.SyncItemVariantDataPacket(Map.of(variantId, canonical));
+        FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
+
+        MarketNetwork.SyncItemVariantDataPacket.encode(original, buffer);
+        MarketNetwork.SyncItemVariantDataPacket decoded = MarketNetwork.SyncItemVariantDataPacket.decode(buffer);
+
+        assertTrue(decoded.reset);
+        assertEquals(Map.of(variantId, canonical), decoded.variants);
+    }
+
+    @Test
+    @DisplayName("Exact item variant descriptor sync is bounded per packet and per Browse refresh")
+    void exactVariantDescriptorSyncIsByteBounded() {
+        Map<String, String> variants = new LinkedHashMap<>();
+        String descriptor = "x".repeat(16_000);
+        for (int i = 0; i < 100; i++) {
+            variants.put("minecraft:enchanted_book/variant/" + String.format("%064x", i), descriptor + i);
+        }
+
+        List<MarketNetwork.SyncItemVariantDataPacket> packets =
+                MarketNetwork.SyncItemVariantDataPacket.chunked(variants);
+
+        assertFalse(packets.isEmpty());
+        assertTrue(packets.get(0).reset, "first packet must replace the client descriptor cache");
+        int aggregateBytes = 0;
+        Map<String, String> reconstructed = new LinkedHashMap<>();
+        for (int i = 0; i < packets.size(); i++) {
+            MarketNetwork.SyncItemVariantDataPacket packet = packets.get(i);
+            if (i > 0) assertFalse(packet.reset, "continuation packets must append to the cache");
+            FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
+            MarketNetwork.SyncItemVariantDataPacket.encode(packet, buffer);
+            assertTrue(buffer.writerIndex() <= MarketNetwork.SyncItemVariantDataPacket.MAX_PAYLOAD_BYTES,
+                    "encoded descriptor packet exceeded its transport budget");
+            aggregateBytes += buffer.writerIndex();
+            reconstructed.putAll(packet.variants);
+        }
+        assertTrue(aggregateBytes <= MarketNetwork.SyncItemVariantDataPacket.MAX_SYNC_BYTES,
+                "aggregate descriptor sync exceeded the Browse refresh budget");
+        assertTrue(reconstructed.size() < variants.size(),
+                "oversized fixture must be truncated by the aggregate Browse refresh budget");
+        assertEquals(variants.entrySet().stream().limit(reconstructed.size()).collect(
+                java.util.stream.Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue,
+                        (a, b) -> a, LinkedHashMap::new)), reconstructed,
+                "budgeting must preserve source priority/order rather than selecting arbitrary descriptors");
+    }
+
+    @Test
+    @DisplayName("Aggregate descriptor truncation never skips a higher-priority entry for smaller history")
+    void exactVariantDescriptorSyncStopsAtFirstValidEntryThatExceedsAggregateBudget() {
+        Map<String, String> variants = new LinkedHashMap<>();
+        String filler = "x".repeat(16_000);
+        for (int i = 0; i < 64; i++) {
+            variants.put("minecraft:stone/variant/" + String.format("%064x", i), filler + i);
+        }
+
+        String higherPriority = "minecraft:enchanted_book/variant/" + "a".repeat(64);
+        String lowerPriorityHistory = "minecraft:enchanted_book/variant/" + "b".repeat(64);
+        variants.put(higherPriority, "y".repeat(24_000));
+        variants.put(lowerPriorityHistory, "z");
+
+        List<MarketNetwork.SyncItemVariantDataPacket> packets =
+                MarketNetwork.SyncItemVariantDataPacket.chunked(variants);
+
+        Map<String, String> reconstructed = new LinkedHashMap<>();
+        for (MarketNetwork.SyncItemVariantDataPacket packet : packets) {
+            reconstructed.putAll(packet.variants);
+        }
+
+        assertFalse(reconstructed.containsKey(higherPriority),
+                "fixture must make the next valid higher-priority descriptor exceed the aggregate budget");
+        assertFalse(reconstructed.containsKey(lowerPriorityHistory),
+                "later lower-priority history must not bypass an omitted higher-priority descriptor");
+        List<String> expectedPrefix = new ArrayList<>(variants.keySet()).subList(0, reconstructed.size());
+        assertEquals(java.util.Set.copyOf(expectedPrefix), reconstructed.keySet(),
+                "aggregate truncation must select exactly the strict priority prefix");
     }
 
     @Test
