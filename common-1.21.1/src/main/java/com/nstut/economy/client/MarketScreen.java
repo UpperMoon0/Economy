@@ -1084,14 +1084,17 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                 int rightWidth = r.owned ? Math.min(72, Math.max(36, width / 4)) : 0;
                 int textWidth = Math.max(1, width - (textX - x) - rightWidth - 4);
                 VariantPresentation presentation = variantPresentation(r.itemId, r.displayName);
-                String metadata = exactVariant
-                        ? compactVariantFacetSummary(presentation, 2)
-                        : r.itemId;
+                String title = presentation.displayName();
+                if (exactVariant) {
+                    String metadata = compactVariantFacetSummary(presentation, 2);
+                    if (!metadata.isBlank()) title = title + " \u00B7 " + metadata;
+                }
+                String itemIdLine = baseCommodityId(r.itemId);
 
-                drawMarqueeText(g, f, presentation.displayName(), textX, y + 4,
+                drawMarqueeText(g, f, title, textX, y + 4,
                         textWidth, colors.onSurface(), false);
-                if (metadata != null && !metadata.isBlank()) {
-                    drawMarqueeText(g, f, metadata, textX, y + 16,
+                if (itemIdLine != null && !itemIdLine.isBlank()) {
+                    drawMarqueeText(g, f, itemIdLine, textX, y + 16,
                             textWidth, colors.onSurfaceMuted(), false);
                 }
 
