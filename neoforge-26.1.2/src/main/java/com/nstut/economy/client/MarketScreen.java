@@ -976,10 +976,10 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
     private UIComponent buildSellSelectionSummary(TextField searchField) {
         return new UIComponent() {
             {
-                height(42);
+                height(30);
             }
             @Override public int preferredWidth(Font f) { return 0; }
-            @Override public int preferredHeight(Font f) { return 42; }
+            @Override public int preferredHeight(Font f) { return 30; }
             @Override public void render(GuiGraphicsExtractor g, Font f, int mx, int my, float pt) {
                 ColorScheme colors = uiRuntime().theme().colors();
                 String id = createCommodityId.get();
@@ -1005,13 +1005,15 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                 int qtyWidth = Math.min(Math.max(36, f.width(qty) + 4), Math.max(36, width / 3));
                 int textWidth = Math.max(1, width - (textX - x) - qtyWidth - 8);
                 VariantPresentation presentation = variantPresentation(id, id);
-                List<String> metadataLines = isExactVariantId(id)
-                        ? compactVariantFacetLines(presentation, 2)
-                        : List.of(baseCommodityId(id));
-                drawMarqueeText(g, f, presentation.displayName(), textX, y + 3,
+                String title = presentation.displayName();
+                if (isExactVariantId(id)) {
+                    String metadata = compactVariantFacetSummary(presentation, 2);
+                    if (!metadata.isBlank()) title = title + " \u00B7 " + metadata;
+                }
+                drawMarqueeText(g, f, title, textX, y + 4,
                         textWidth, colors.onSurface(), false);
-                drawVariantFacetLines(g, f, metadataLines, textX, y + 16,
-                        textWidth, colors.onSurfaceMuted());
+                drawMarqueeText(g, f, baseCommodityId(id), textX, y + 16,
+                        textWidth, colors.onSurfaceMuted(), false);
                 String fittedQty = fitText(f, qty, qtyWidth);
                 UiRender.text(g, f, fittedQty,
                         x + width - f.width(fittedQty) - 4,
@@ -2246,17 +2248,6 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         }
         return new VariantPresentation(displayName, List.copyOf(facets),
                 Component.literal(tooltipText.toString()));
-    }
-
-    private static List<String> compactVariantFacetLines(VariantPresentation presentation, int maxLines) {
-        if (presentation == null || presentation.facets().isEmpty() || maxLines <= 0) return List.of();
-        List<String> facets = presentation.facets();
-        if (facets.size() <= maxLines) return facets;
-        if (maxLines == 1) return List.of(facets.get(0));
-        List<String> result = new ArrayList<>(facets.subList(0, maxLines - 1));
-        result.add(Component.translatable(
-                "ui.economy.variant.more", facets.size() - (maxLines - 1)).getString());
-        return List.copyOf(result);
     }
 
     private static String compactVariantFacetSummary(VariantPresentation presentation, int maxFacets) {
