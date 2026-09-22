@@ -563,6 +563,11 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                 String title = group.variants().size() == 1
                         ? getItemDisplayName(first.itemId, first.displayName)
                         : group.displayName();
+                if (group.variants().size() == 1 && isExactVariantId(first.itemId)) {
+                    String metadata = compactVariantFacetSummary(
+                            variantPresentation(first.itemId, first.displayName), 2);
+                    if (!metadata.isBlank()) title = title + " \u00B7 " + metadata;
+                }
                 drawMarqueeText(g, f, title, textX, y + 4, textWidth, colors.onSurface(), false);
 
                 if (group.globalPrice() != null && !group.globalPrice().isEmpty() && !group.globalPrice().equals("--")) {
@@ -580,17 +585,10 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                 String orderText = group.offerCount() > 0
                         ? EconomyFormatUtil.formatCount(group.offerCount(), "order", "orders")
                         : t("ui.economy.card.no_orders");
-                String footer;
-                if (group.variants().size() > 1) {
-                    footer = Component.translatable("ui.economy.card.variants", group.variants().size()).getString()
-                            + " \u00B7 " + orderText;
-                } else if (isExactVariantId(first.itemId)) {
-                    String metadata = compactVariantFacetSummary(
-                            variantPresentation(first.itemId, first.displayName), 2);
-                    footer = metadata.isBlank() ? orderText : metadata + " \u00B7 " + orderText;
-                } else {
-                    footer = orderText;
-                }
+                String footer = group.variants().size() > 1
+                        ? Component.translatable("ui.economy.card.variants", group.variants().size()).getString()
+                                + " \u00B7 " + orderText
+                        : orderText;
                 drawMarqueeText(g, f, footer, textX, y + 28, textWidth, colors.onSurfaceMuted(), false);
             }
             @Override public boolean mouseClicked(double mx, double my, int button) {
