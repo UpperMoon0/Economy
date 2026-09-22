@@ -206,6 +206,32 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         return font.plainSubstrByWidth(text, maxWidth - ellipsisWidth) + ellipsis;
     }
 
+    static void drawWrappedText(GuiGraphics g, Font font, String text,
+                                int boxX, int boxY, int boxWidth, int boxHeight,
+                                int color, int maxLines) {
+        if (text == null || text.isEmpty() || boxWidth <= 0 || boxHeight <= 0 || maxLines <= 0) return;
+        List<FormattedCharSequence> lines = font.split(Component.literal(text), boxWidth);
+        int count = Math.min(maxLines, lines.size());
+        if (count <= 0) return;
+
+        int lineStep = font.lineHeight + 2;
+        int totalHeight = count * font.lineHeight + Math.max(0, count - 1) * 2;
+        int drawY = boxY + Math.max(0, (boxHeight - totalHeight) / 2);
+
+        for (int i = 0; i < count; i++) {
+            FormattedCharSequence line = lines.get(i);
+            StringBuilder plain = new StringBuilder();
+            line.accept((index, style, codePoint) -> {
+                plain.appendCodePoint(codePoint);
+                return true;
+            });
+            String lineText = plain.toString();
+            if (i == count - 1 && lines.size() > maxLines) {
+                lineText = fitText(font, lineText + "...", boxWidth);
+            }
+            UiRender.text(g, font, lineText, boxX, drawY + i * lineStep, color);
+        }
+    }
     public MarketScreen(MarketMenu menu, net.minecraft.world.entity.player.Inventory inv, Component title) {
         super(menu, inv, title);
         this.imageWidth = SCREEN_W;
@@ -911,10 +937,10 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
 
         v.addChild(new UIComponent() {
             @Override public int preferredWidth(Font f) { return 0; }
-            @Override public int preferredHeight(Font f) { return createError.get() != null ? 12 : 0; }
+            @Override public int preferredHeight(Font f) { return createError.get() != null ? 24 : 0; }
             @Override public void render(GuiGraphics g, Font f, int mx, int my, float pt) {
                 String err = createError.get();
-                if (err != null) UiRender.text(g, f, err, x, y, theme().colors().danger());
+                if (err != null) drawWrappedText(g, f, err, x, y, Math.max(1, width), height, theme().colors().danger(), 2);
             }
         });
 
@@ -943,8 +969,8 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                     String hint = t(noMatch
                             ? "ui.economy.new_order.no_storage_match"
                             : "ui.economy.new_order.sell_select_hint");
-                    UiRender.text(g, f, fitText(f, hint, Math.max(1, width - 4)),
-                            x + 2, y + 10, noMatch ? colors.danger() : colors.onSurfaceMuted());
+                    drawWrappedText(g, f, hint, x + 2, y, Math.max(1, width - 4), height,
+                            noMatch ? colors.danger() : colors.onSurfaceMuted(), 2);
                     return;
                 }
 
@@ -1445,10 +1471,10 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         body.addChild(priceField);
         body.addChild(new UIComponent() {
             @Override public int preferredWidth(Font f) { return 0; }
-            @Override public int preferredHeight(Font f) { return errSig.get() != null ? 12 : 0; }
+            @Override public int preferredHeight(Font f) { return errSig.get() != null ? 24 : 0; }
             @Override public void render(GuiGraphics g, Font f, int mx, int my, float pt) {
                 String err = errSig.get();
-                if (err != null) UiRender.text(g, f, err, x, y, theme().colors().danger());
+                if (err != null) drawWrappedText(g, f, err, x, y, Math.max(1, width), height, theme().colors().danger(), 2);
             }
         });
         HStack actions = new HStack().gap(4).justify(com.nstut.openui.layout.Justification.END);
@@ -2335,5 +2361,3 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         }
     }
 }
-
-
