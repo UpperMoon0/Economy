@@ -78,6 +78,12 @@ teams.spendFromTeam(
 
 Those helpers resolve the actor's current party and role again immediately before the account transfer, avoiding a stale client-side or cached authorization decision.
 
+## Market wallet UI
+
+The Market sync builds a fresh server-authoritative wallet snapshot for the viewing player. `Personal` and `Team` balances are separate values; when a viewable party wallet exists, the UI also shows the FTB team display name, current role, and the configured minimum spend role. A leave, kick, demotion below the view threshold, `PERSONAL_ONLY`, missing provider, or incompatible provider removes the team wallet from the next sync instead of leaving stale client state visible.
+
+The Market principal is also shown explicitly. Until issue #29 lands, it is `Personal` even in `HYBRID` or `TEAM_PRIMARY`, because the existing order schema still binds economic ownership, actor, and physical storage to one player UUID. The team balance is therefore informational in the current Market UI; exposing it does not silently redirect order funding.
+
 ## Market orders
 
 This foundation deliberately does **not** reinterpret the existing `IOrder.owner` UUID as a team UUID. Team-funded market orders require separate economic principal, acting player, and physical storage owner identities; that migration is tracked by issue #29.

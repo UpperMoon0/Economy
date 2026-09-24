@@ -92,6 +92,39 @@ public final class TeamEconomyRegistry {
         return Optional.of(accounts.getOrCreateTeamAccount(team.get().id()));
     }
 
+    /**
+     * Builds a fresh, server-authoritative wallet view for UI/network sync.
+     * If membership/rank changes between resolution and authorization, the team
+     * portion is hidden rather than exposing stale state.
+     */
+    public TeamWalletSnapshot walletSnapshot(IAccountManager accounts, UUID playerId) {
+        Objects.requireNonNull(accounts, "accounts");
+        if (playerId == null) throw new IllegalArgumentException("playerId cannot be null");
+
+        BigDecimal personalBalance = accounts.getOrCreatePlayerAccount(playerId).getBalance();
+        Optional<TeamRef> team = resolveTeam(playerId);
+        if (team.isEmpty()) {
+            return TeamWalletSnapshot.personalOnly(mode, personalBalance, spendRole);
+        }
+
+        TeamRef current = team.get();
+        TeamRole role = roleFor(playerId, current.id());
+        if (!role.atLeast(viewRole)) {
+            return TeamWalletSnapshot.personalOnly(mode, personalBalance, spendRole);
+        }
+
+        BigDecimal teamBalance = accounts.getOrCreateTeamAccount(current.id()).getBalance();
+        return new TeamWalletSnapshot(
+                mode,
+                personalBalance,
+                Optional.of(current),
+                teamBalance,
+                role,
+                role.atLeast(depositRole),
+                role.atLeast(spendRole),
+                spendRole);
+    }
+
     public boolean canView(UUID playerId, UUID teamId) {
         return roleFor(playerId, teamId).atLeast(viewRole);
     }

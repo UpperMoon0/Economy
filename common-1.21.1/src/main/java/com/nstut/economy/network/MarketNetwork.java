@@ -222,16 +222,49 @@ public class MarketNetwork {
         public final String balance;
         public final int vaultCount;
         public final List<ItemCardData> cards;
+        public final String teamMode;
+        public final boolean teamWalletVisible;
+        public final String teamName;
+        public final String teamBalance;
+        public final String teamRole;
+        public final boolean teamCanDeposit;
+        public final boolean teamCanSpend;
+        public final String teamSpendRole;
+        public final String marketPrincipal;
 
-        public SyncItemListPacket(String balance, int vaultCount, List<ItemCardData> cards) {
-            this.balance = balance; this.vaultCount = vaultCount; this.cards = cards;
+        public SyncItemListPacket(String balance, int vaultCount, List<ItemCardData> cards,
+                                  String teamMode, boolean teamWalletVisible, String teamName,
+                                  String teamBalance, String teamRole, boolean teamCanDeposit,
+                                  boolean teamCanSpend, String teamSpendRole, String marketPrincipal) {
+            this.balance = balance;
+            this.vaultCount = vaultCount;
+            this.cards = cards;
+            this.teamMode = teamMode;
+            this.teamWalletVisible = teamWalletVisible;
+            this.teamName = teamName;
+            this.teamBalance = teamBalance;
+            this.teamRole = teamRole;
+            this.teamCanDeposit = teamCanDeposit;
+            this.teamCanSpend = teamCanSpend;
+            this.teamSpendRole = teamSpendRole;
+            this.marketPrincipal = marketPrincipal;
         }
 
         public static void encode(SyncItemListPacket pkt, FriendlyByteBuf buf) {
+            // Preserve the legacy list payload as a prefix, then append wallet metadata.
             buf.writeUtf(pkt.balance);
             buf.writeInt(pkt.vaultCount);
             buf.writeInt(pkt.cards.size());
             for (ItemCardData c : pkt.cards) c.write(buf);
+            buf.writeUtf(pkt.teamMode);
+            buf.writeBoolean(pkt.teamWalletVisible);
+            buf.writeUtf(pkt.teamName);
+            buf.writeUtf(pkt.teamBalance);
+            buf.writeUtf(pkt.teamRole);
+            buf.writeBoolean(pkt.teamCanDeposit);
+            buf.writeBoolean(pkt.teamCanSpend);
+            buf.writeUtf(pkt.teamSpendRole);
+            buf.writeUtf(pkt.marketPrincipal);
         }
 
         public static SyncItemListPacket decode(FriendlyByteBuf buf) {
@@ -240,7 +273,18 @@ public class MarketNetwork {
             int count = buf.readInt();
             List<ItemCardData> cards = new ArrayList<>();
             for (int i = 0; i < count; i++) cards.add(ItemCardData.read(buf));
-            return new SyncItemListPacket(balance, vaultCount, cards);
+            String teamMode = buf.readUtf();
+            boolean teamWalletVisible = buf.readBoolean();
+            String teamName = buf.readUtf();
+            String teamBalance = buf.readUtf();
+            String teamRole = buf.readUtf();
+            boolean teamCanDeposit = buf.readBoolean();
+            boolean teamCanSpend = buf.readBoolean();
+            String teamSpendRole = buf.readUtf();
+            String marketPrincipal = buf.readUtf();
+            return new SyncItemListPacket(balance, vaultCount, cards, teamMode, teamWalletVisible,
+                    teamName, teamBalance, teamRole, teamCanDeposit, teamCanSpend, teamSpendRole,
+                    marketPrincipal);
         }
 
         public static void handle(SyncItemListPacket pkt, Supplier<NetworkManager.PacketContext> ctx) {
@@ -955,8 +999,19 @@ public class MarketNetwork {
 
     private static void sendItemList(ServerPlayer player) {
         OrderManager orderManager = Economy.getOrderManager();
-        var account = IAccountManager.getInstance().getOrCreatePlayerAccount(player.getUUID());
-        String balance = exactDecimal(account.getBalance());
+        var wallet = com.nstut.economy.api.EconomyApi.teamEconomy()
+                .walletSnapshot(IAccountManager.getInstance(), player.getUUID());
+        String balance = exactDecimal(wallet.personalBalance());
+        boolean teamWalletVisible = wallet.teamVisible();
+        String teamMode = wallet.mode().name();
+        String teamName = wallet.team().map(com.nstut.economy.api.TeamRef::displayName).orElse("");
+        String teamBalance = exactDecimal(wallet.teamBalance());
+        String teamRole = wallet.role().name();
+        boolean teamCanDeposit = wallet.canDeposit();
+        boolean teamCanSpend = wallet.canSpend();
+        String teamSpendRole = wallet.spendRole().name();
+        // Team-funded orders require principal/actor/storageOwner migration in issue #29.
+        String marketPrincipal = "PLAYER";
         int vaultCount = VaultManager.getVaultRecords(player.getUUID()).size();
 
         java.util.Set<String> itemIds = new java.util.LinkedHashSet<>();
@@ -1037,7 +1092,10 @@ public class MarketNetwork {
         }
 
         sendItemVariantData(player);
-        CHANNEL.sendToPlayer(player, new SyncItemListPacket(balance, vaultCount, cards));
+        CHANNEL.sendToPlayer(player, new SyncItemListPacket(
+                balance, vaultCount, cards,
+                teamMode, teamWalletVisible, teamName, teamBalance, teamRole,
+                teamCanDeposit, teamCanSpend, teamSpendRole, marketPrincipal));
     }
 
     private static void sendItemDetail(ServerPlayer player, String itemId) {

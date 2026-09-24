@@ -233,6 +233,14 @@
   "ui.economy.direction.to": "to",
   "ui.economy.direction.from": "from",
 
+  "ui.economy.wallet.personal": "Personal",
+  "ui.economy.wallet.team": "Team · %s",
+  "ui.economy.wallet.market_principal": "Market: %s",
+  "ui.economy.principal.personal": "Personal",
+  "ui.economy.principal.team": "Team",
+  "ui.economy.wallet.team_spend_allowed": "Spend allowed",
+  "ui.economy.wallet.team_spend_requires": "Spend requires %s+",
+
   "ui.economy.theme.to_light": "Switch to light theme",
   "ui.economy.theme.to_dark": "Switch to dark theme",
   "ui.economy.theme.light_label": "☀ Light",

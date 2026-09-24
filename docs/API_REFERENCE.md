@@ -120,6 +120,7 @@ Reached through `EconomyApi.teamEconomy()`.
 - `teamPrincipal(UUID)`
 - `defaultPrincipal(UUID)`
 - `teamAccount(IAccountManager, UUID)`
+- `walletSnapshot(IAccountManager, UUID)` — fresh server-authoritative Personal/Team balance, team identity, role, and permission state for UI/network sync.
 - `roleFor(UUID player, UUID team)`
 - `canView`, `canDeposit`, `canSpend`, `canAdmin`
 - `depositFromPlayer(...)` — permission-checked personal → team transfer.

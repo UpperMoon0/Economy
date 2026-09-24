@@ -84,6 +84,8 @@ Install the file matching both your Minecraft version and loader. A jar built fo
 - Only FTB party teams map to shared wallets; personal/server teams are deliberately excluded.
 - Team economy defaults to `PERSONAL_ONLY`; `HYBRID` and `TEAM_PRIMARY` are opt-in.
 - Team membership and role checks are resolved fresh before protected team actions.
+- The Market UI shows Personal and Team balances separately, including the active FTB party name, current role, and team-spend requirement; team UI disappears when unavailable or disabled.
+- Market actions explicitly remain Personal until the order identity migration in #29, so displaying a team wallet never silently changes who funds an order.
 - Team-funded market orders remain a separate follow-up (#29); current market orders stay personal.
 
 See [Team Economy](docs/TEAM_ECONOMY.md) for account semantics, modes, permissions, and integration guidance.

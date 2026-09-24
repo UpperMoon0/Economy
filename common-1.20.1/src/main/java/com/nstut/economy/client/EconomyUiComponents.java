@@ -9,6 +9,7 @@ import com.nstut.openui.state.ReadableSignal;
 import com.nstut.openui.theme.ColorScheme;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.network.chat.Component;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
@@ -125,5 +126,112 @@ public final class EconomyUiComponents {
             }
         };
     }
+
+    /**
+     * Compact server-authoritative wallet strip. Team details are rendered only
+     * when the latest sync says a viewable party wallet exists.
+     */
+    public static UIComponent walletBar(ReadableSignal<String> personalBalance,
+                                        ReadableSignal<MarketClientStore.TeamWalletState> teamWallet,
+                                        ReadableSignal<String> marketPrincipal) {
+        return new UIComponent() {
+            {
+                fillWidth();
+                height(32);
+            }
+
+            @Override
+            public int preferredWidth(Font f) {
+                return 100;
+            }
+
+            @Override
+            public int preferredHeight(Font f) {
+                return 32;
+            }
+
+            @Override
+            public void render(GuiGraphics g, Font f, int mx, int my, float pt) {
+                ColorScheme c = theme().colors();
+                MarketClientStore.TeamWalletState team = teamWallet.get();
+                int gap = 4;
+                boolean showTeam = team != null && team.visible();
+                int personalWidth = showTeam ? Math.max(1, (width - gap) / 2) : width;
+
+                drawWalletCell(g, f, x, y, personalWidth,
+                        Component.translatable("ui.economy.wallet.personal").getString(),
+                        personalBalance.get(), c);
+
+                if (showTeam) {
+                    int teamX = x + personalWidth + gap;
+                    int teamWidth = Math.max(1, width - personalWidth - gap);
+                    String teamLabel = Component.translatable(
+                            "ui.economy.wallet.team", team.teamName()).getString();
+                    drawWalletCell(g, f, teamX, y, teamWidth, teamLabel, team.teamBalance(), c);
+                }
+
+                String principalKey = "TEAM".equalsIgnoreCase(marketPrincipal.get())
+                        ? "ui.economy.principal.team"
+                        : "ui.economy.principal.personal";
+                String market = Component.translatable(
+                        "ui.economy.wallet.market_principal",
+                        Component.translatable(principalKey)).getString();
+                UiRender.text(g, f, fitWalletText(f, market, personalWidth), x, y + 21, c.onSurfaceMuted());
+
+                if (showTeam) {
+                    String role = humanizeEnum(team.role());
+                    String permission = team.canSpend()
+                            ? Component.translatable("ui.economy.wallet.team_spend_allowed").getString()
+                            : Component.translatable("ui.economy.wallet.team_spend_requires",
+                                    humanizeEnum(team.spendRole())).getString();
+                    String status = role + " · " + permission;
+                    int teamX = x + personalWidth + gap;
+                    int teamWidth = Math.max(1, width - personalWidth - gap);
+                    UiRender.text(g, f, fitWalletText(f, status, teamWidth),
+                            teamX, y + 21, c.onSurfaceMuted());
+                }
+            }
+        };
+    }
+
+    private static void drawWalletCell(GuiGraphics g, Font f, int cellX, int cellY, int cellWidth,
+                                       String label, String rawBalance, ColorScheme colors) {
+        UiRender.pill(g, cellX, cellY, cellWidth, 18, colors.input(), colors.borderSubtle());
+        String balance = formatWalletBalance(rawBalance);
+        int balanceWidth = f.width(balance);
+        int coinX = cellX + Math.max(3, cellWidth - balanceWidth - 13);
+        drawCoin(g, coinX, cellY + 3);
+        UiRender.text(g, f, balance, coinX + 10, cellY + 5, colors.onSurface());
+
+        int labelWidth = Math.max(0, coinX - cellX - 6);
+        if (labelWidth > 0) {
+            UiRender.text(g, f, fitWalletText(f, label, labelWidth),
+                    cellX + 4, cellY + 5, colors.onSurfaceMuted());
+        }
+    }
+
+    private static String formatWalletBalance(String raw) {
+        try {
+            return EconomyFormatUtil.formatMoneyCompact(new BigDecimal(raw));
+        } catch (Exception ignored) {
+            return raw == null ? "0" : raw;
+        }
+    }
+
+    private static String fitWalletText(Font font, String text, int maxWidth) {
+        if (text == null || maxWidth <= 0) return "";
+        if (font.width(text) <= maxWidth) return text;
+        String ellipsis = "...";
+        int ew = font.width(ellipsis);
+        if (maxWidth <= ew) return font.plainSubstrByWidth(ellipsis, maxWidth);
+        return font.plainSubstrByWidth(text, maxWidth - ew) + ellipsis;
+    }
+
+    private static String humanizeEnum(String value) {
+        if (value == null || value.isBlank()) return "";
+        String lower = value.toLowerCase(java.util.Locale.ROOT).replace('_', ' ');
+        return Character.toUpperCase(lower.charAt(0)) + lower.substring(1);
+    }
+
 }
 

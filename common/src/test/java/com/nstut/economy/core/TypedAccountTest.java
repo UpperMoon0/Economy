@@ -48,9 +48,15 @@ class TypedAccountTest {
 
         var player = manager.getOrCreatePlayerAccount(UUID.randomUUID());
         var team = manager.getOrCreateTeamAccount(UUID.randomUUID());
+        var server = manager.getServerAccount();
+        var tax = manager.getTaxAccount();
 
         assertEquals(new BigDecimal("250"), player.getBalance());
         assertEquals(BigDecimal.ZERO, team.getBalance());
+        assertNotEquals(new BigDecimal("250"), server.getBalance(),
+                "SERVER must retain its intentional reserve instead of receiving the player starting balance");
+        assertEquals(BigDecimal.ZERO, tax.getBalance(),
+                "TAX must not receive the configured player starting balance");
     }
 
     @Test
@@ -75,6 +81,31 @@ class TypedAccountTest {
         assertEquals(new BigDecimal("80"), second.getTeamAccount(teamId).orElseThrow().getBalance());
         assertFalse(second.getTeamAccount(playerId).isPresent(),
                 "legacy UUID balances must migrate deterministically to PLAYER principals");
+    }
+
+    @Test
+    void serverAndTaxBalancesUseTypedPersistenceAndNeverPlayerStartingBalance() {
+        EconomyConfig.getInstance().setStartingBalance(new BigDecimal("250"));
+        TypedStore store = new TypedStore();
+        store.typedBalances.put(AccountRef.server(AccountManager.SERVER_ACCOUNT_ID), new BigDecimal("1234"));
+        store.typedBalances.put(AccountRef.tax(AccountManager.TAX_ACCOUNT_ID), new BigDecimal("45"));
+
+        AccountManager first = new AccountManager();
+        first.loadFrom(store);
+
+        assertEquals(new BigDecimal("1234"), first.getServerAccount().getBalance());
+        assertEquals(new BigDecimal("45"), first.getTaxAccount().getBalance());
+        assertNotEquals(new BigDecimal("250"), first.getServerAccount().getBalance());
+        assertNotEquals(new BigDecimal("250"), first.getTaxAccount().getBalance());
+
+        first.getServerAccount().credit(BigDecimal.ONE, TransactionContext.adminGive("test"));
+        first.getTaxAccount().credit(BigDecimal.TEN, TransactionContext.adminGive("test"));
+        first.saveAll();
+
+        AccountManager second = new AccountManager();
+        second.loadFrom(store);
+        assertEquals(new BigDecimal("1235"), second.getServerAccount().getBalance());
+        assertEquals(new BigDecimal("55"), second.getTaxAccount().getBalance());
     }
 
     private static final class TypedStore implements BalanceStore {

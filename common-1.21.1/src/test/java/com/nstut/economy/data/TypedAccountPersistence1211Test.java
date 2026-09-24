@@ -8,11 +8,10 @@ import java.math.BigDecimal;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 
-class TypedAccountPersistence1201Test {
+class TypedAccountPersistence1211Test {
     @Test
-    void legacyPlayersAndTypedTeamsRoundTripIndependently() {
+    void legacyPlayersAndTypedPrincipalsRoundTripIndependently() {
         UUID id = UUID.randomUUID();
         UUID serverId = UUID.randomUUID();
         UUID taxId = UUID.randomUUID();
@@ -22,13 +21,12 @@ class TypedAccountPersistence1201Test {
         data.setAccountBalance(AccountRef.server(serverId), new BigDecimal("1000"));
         data.setAccountBalance(AccountRef.tax(taxId), new BigDecimal("4.5"));
 
-        CompoundTag encoded = data.save(new CompoundTag());
-        EconomyAccountData decoded = EconomyAccountData.load(encoded);
+        CompoundTag encoded = data.save(new CompoundTag(), null);
+        EconomyAccountData decoded = EconomyAccountData.load(encoded, null);
 
         assertEquals(new BigDecimal("12.5"), decoded.getAccountBalances().get(AccountRef.player(id)));
         assertEquals(new BigDecimal("77.25"), decoded.getAccountBalances().get(AccountRef.team(id)));
         assertEquals(new BigDecimal("1000"), decoded.getAccountBalances().get(AccountRef.server(serverId)));
         assertEquals(new BigDecimal("4.5"), decoded.getAccountBalances().get(AccountRef.tax(taxId)));
-        assertFalse(decoded.getBalances().containsKey(UUID.randomUUID()));
     }
 }

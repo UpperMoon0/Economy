@@ -92,6 +92,52 @@ class TeamEconomyRegistryTest {
         assertFalse(registry.canView(provider.playerId, provider.team.id()));
     }
 
+    @Test
+    void walletSnapshotDistinguishesPersonalAndTeamAndClearsAfterLeave() {
+        MutableProvider provider = new MutableProvider();
+        provider.role = TeamRole.MEMBER;
+        TeamEconomyRegistry registry = new TeamEconomyRegistry();
+        registry.registerProvider(provider);
+        registry.setMode(TeamEconomyMode.HYBRID);
+        AccountManager accounts = new AccountManager();
+
+        var personal = accounts.getOrCreatePlayerAccount(provider.playerId);
+        personal.credit(new BigDecimal("25"), TransactionContext.adminGive("test"));
+        var team = accounts.getOrCreateTeamAccount(provider.team.id());
+        team.credit(new BigDecimal("80"), TransactionContext.adminGive("test"));
+
+        TeamWalletSnapshot snapshot = registry.walletSnapshot(accounts, provider.playerId);
+        assertEquals(new BigDecimal("25"), snapshot.personalBalance());
+        assertTrue(snapshot.teamVisible());
+        assertEquals("Test Party", snapshot.team().orElseThrow().displayName());
+        assertEquals(new BigDecimal("80"), snapshot.teamBalance());
+        assertEquals(TeamRole.MEMBER, snapshot.role());
+        assertTrue(snapshot.canDeposit());
+        assertFalse(snapshot.canSpend());
+        assertEquals(TeamRole.OFFICER, snapshot.spendRole());
+
+        provider.member = false;
+        TeamWalletSnapshot afterLeave = registry.walletSnapshot(accounts, provider.playerId);
+        assertFalse(afterLeave.teamVisible(), "leave/kick must remove team UI state immediately");
+        assertEquals(BigDecimal.ZERO, afterLeave.teamBalance());
+        assertEquals(TeamRole.NONE, afterLeave.role());
+    }
+
+    @Test
+    void walletSnapshotHidesTeamWhenViewPermissionIsLost() {
+        MutableProvider provider = new MutableProvider();
+        TeamEconomyRegistry registry = new TeamEconomyRegistry();
+        registry.registerProvider(provider);
+        registry.setMode(TeamEconomyMode.HYBRID);
+        registry.setViewRole(TeamRole.OFFICER);
+        AccountManager accounts = new AccountManager();
+
+        assertFalse(registry.walletSnapshot(accounts, provider.playerId).teamVisible());
+
+        provider.role = TeamRole.OFFICER;
+        assertTrue(registry.walletSnapshot(accounts, provider.playerId).teamVisible());
+    }
+
     private static final class MutableProvider implements TeamEconomyProvider {
         final UUID playerId = UUID.randomUUID();
         final TeamRef team = new TeamRef(UUID.randomUUID(), "Test Party", playerId);
