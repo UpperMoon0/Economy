@@ -16,6 +16,7 @@ Stable static facade for runtime services and extension registries.
 - `IMarketDataService marketData()` — active read-only market analytics service; throws if Economy is not ready.
 - `CommodityTypeRegistry commodityTypes()` — process-level registry for commodity type handlers/codecs.
 - `StorageProviderRegistry storage()` — process-level registry for market storage providers.
+- `TeamEconomyRegistry teamEconomy()` — process-level optional team provider and shared-wallet policy.
 - `Optional<ServerLevel> serverLevel()` — currently bound server overworld, when available.
 
 `bindRuntime` and `unbindRuntime` are internal lifecycle hooks even though they are public Java methods. Addons must not call them.
@@ -52,10 +53,21 @@ Use `CommodityKey` for analytics and persistent keys where two commodity types c
 
 ## Accounts
 
+### `AccountRef` / `AccountKind`
+
+Typed economic identity. `AccountKind` contains `PLAYER`, `TEAM`, `SERVER`, and `TAX`. The kind participates in identity, so `PLAYER:<uuid>` and `TEAM:<same uuid>` are distinct accounts.
+
 ### `IAccountManager`
 
 Central account service.
 
+- `Optional<IBankAccount> getAccount(AccountRef account)`
+- `IBankAccount getOrCreateAccount(AccountRef account)`
+- `Optional<IBankAccount> getTeamAccount(UUID team)`
+- `IBankAccount getOrCreateTeamAccount(UUID team)`
+- `boolean hasAccount(AccountRef account)`
+- `boolean deleteAccount(AccountRef account)`
+- `boolean transfer(AccountRef source, AccountRef target, BigDecimal amount, ITransactionContext context)`
 - `Optional<IBankAccount> getPlayerAccount(UUID player)`
 - `IBankAccount getOrCreatePlayerAccount(UUID player)`
 - `boolean hasAccount(UUID player)`
@@ -73,7 +85,8 @@ Transfers must preserve atomicity: a failed/rejected target credit must not leav
 
 Virtual currency account.
 
-- `UUID getOwner()`
+- `UUID getOwner()` — compatibility raw UUID.
+- `AccountRef getAccountRef()` — preferred typed identity; defaults to `PLAYER` for legacy third-party implementations.
 - `BigDecimal getBalance()`
 - `boolean credit(BigDecimal amount, ITransactionContext context)`
 - `boolean debit(BigDecimal amount, ITransactionContext context)`
@@ -82,6 +95,38 @@ Virtual currency account.
 - `boolean hasSufficientFunds(BigDecimal amount)`
 
 New code should provide a non-null transaction context with a namespaced cause.
+
+## Team economy
+
+### `TeamEconomyProvider`
+
+Neutral external-team bridge:
+
+- `Optional<TeamRef> resolveTeam(UUID playerId)`
+- `Optional<TeamRef> getTeam(UUID teamId)`
+- `TeamRole getRole(UUID playerId, UUID teamId)`
+- `boolean isMember(UUID playerId, UUID teamId)`
+- `boolean isAvailable()`
+
+Economy's built-in FTB Teams bridge is optional and maps only party teams. FTB personal teams and server teams are excluded.
+
+### `TeamEconomyRegistry`
+
+Reached through `EconomyApi.teamEconomy()`.
+
+- `provider()` / `registerProvider(...)` / `unregisterProvider(...)`
+- `mode()` / `setMode(TeamEconomyMode)`
+- `resolveTeam(UUID)`
+- `teamPrincipal(UUID)`
+- `defaultPrincipal(UUID)`
+- `teamAccount(IAccountManager, UUID)`
+- `roleFor(UUID player, UUID team)`
+- `canView`, `canDeposit`, `canSpend`, `canAdmin`
+- configurable minimum `TeamRole` thresholds for those actions.
+
+`TeamEconomyMode` contains `PERSONAL_ONLY`, `HYBRID`, and `TEAM_PRIMARY`. Authorization performs fresh provider lookups rather than caching membership/ranks.
+
+See [Team Economy](TEAM_ECONOMY.md) for policy and FTB Teams mapping.
 
 ## Transaction context and history
 

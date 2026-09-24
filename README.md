@@ -77,6 +77,17 @@ Install the file matching both your Minecraft version and loader. A jar built fo
 - The former `Vaults` tab is now `Containers`.
 - Shows registered Vaults and Tanks together, including location, mode, capacity, stored item/fluid totals, and current contents.
 
+### Optional Team Wallets
+
+- Economy now has typed `PLAYER`, `TEAM`, `SERVER`, and `TAX` principals, so shared wallets cannot collide with player UUIDs.
+- FTB Teams can be detected as an optional team provider without becoming a hard dependency.
+- Only FTB party teams map to shared wallets; personal/server teams are deliberately excluded.
+- Team economy defaults to `PERSONAL_ONLY`; `HYBRID` and `TEAM_PRIMARY` are opt-in.
+- Team membership and role checks are resolved fresh before protected team actions.
+- Team-funded market orders remain a separate follow-up (#29); current market orders stay personal.
+
+See [Team Economy](docs/TEAM_ECONOMY.md) for account semantics, modes, permissions, and integration guidance.
+
 ### Currency Feedback
 
 - Market rows and terminal balances use the actual Coin item texture.
@@ -118,19 +129,21 @@ Economy exposes a supported addon API in the top-level `com.nstut.economy.api` p
 
 The public API supports:
 
-- player, server, and tax accounts with atomic transfers;
+- typed player, team, server, and tax accounts with atomic transfers;
 - namespaced transaction causes, metadata, and loader-neutral account events;
 - order creation/query/edit/cancel operations;
 - immutable market/trade analytics;
 - custom namespaced commodity types with versioned persistence codecs;
 - pluggable durable storage providers and reservations;
-- loader-neutral market events for order and trade integrations.
+- loader-neutral market events for order and trade integrations;
+- optional team-economy providers, shared-wallet resolution, modes, and fresh role checks.
 
 Developer documentation:
 
 - [Getting Started](docs/GETTING_STARTED.md) — dependency setup, runtime lifecycle, orders, market reads, events, and addon verification.
 - [Extending Economy](docs/EXTENDING_ECONOMY.md) — custom transaction causes, commodities/codecs, storage providers, persistence rules, and compatibility guidance.
 - [API Reference](docs/API_REFERENCE.md) — practical catalog of the supported public classes and methods.
+- [Team Economy](docs/TEAM_ECONOMY.md) — typed accounts, shared wallets, modes, and FTB Teams behavior.
 
 Economy currently defines loader-specific Maven publications but does not configure a public Maven repository. The Getting Started guide documents composite-build and Maven Local development until a public repository is officially available.
 
