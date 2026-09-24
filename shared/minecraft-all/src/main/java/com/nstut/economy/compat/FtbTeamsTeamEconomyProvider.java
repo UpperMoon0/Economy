@@ -4,6 +4,7 @@ import com.nstut.economy.api.TeamEconomyProvider;
 import com.nstut.economy.api.TeamRef;
 import com.nstut.economy.api.TeamRole;
 
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.Collection;
 import java.util.Optional;
@@ -16,16 +17,66 @@ import java.util.UUID;
  */
 public final class FtbTeamsTeamEconomyProvider implements TeamEconomyProvider {
     private static final String API_CLASS = "dev.ftb.mods.ftbteams.api.FTBTeamsAPI";
-    private final Method apiMethod;
+    private static final String MANAGER_CLASS = "dev.ftb.mods.ftbteams.api.TeamManager";
+    private static final String TEAM_CLASS = "dev.ftb.mods.ftbteams.api.Team";
 
-    private FtbTeamsTeamEconomyProvider(Method apiMethod) {
+    private final Method apiMethod;
+    private final Method isManagerLoadedMethod;
+    private final Method getManagerMethod;
+    private final Method getTeamForPlayerMethod;
+    private final Method getTeamByIdMethod;
+    private final Method isPartyTeamMethod;
+    private final Method getTeamIdMethod;
+    private final Method getOwnerMethod;
+    private final Method getShortNameMethod;
+    private final Method getMembersMethod;
+    private final Method getRankForPlayerMethod;
+
+    private FtbTeamsTeamEconomyProvider(Method apiMethod,
+                                        Method isManagerLoadedMethod,
+                                        Method getManagerMethod,
+                                        Method getTeamForPlayerMethod,
+                                        Method getTeamByIdMethod,
+                                        Method isPartyTeamMethod,
+                                        Method getTeamIdMethod,
+                                        Method getOwnerMethod,
+                                        Method getShortNameMethod,
+                                        Method getMembersMethod,
+                                        Method getRankForPlayerMethod) {
         this.apiMethod = apiMethod;
+        this.isManagerLoadedMethod = isManagerLoadedMethod;
+        this.getManagerMethod = getManagerMethod;
+        this.getTeamForPlayerMethod = getTeamForPlayerMethod;
+        this.getTeamByIdMethod = getTeamByIdMethod;
+        this.isPartyTeamMethod = isPartyTeamMethod;
+        this.getTeamIdMethod = getTeamIdMethod;
+        this.getOwnerMethod = getOwnerMethod;
+        this.getShortNameMethod = getShortNameMethod;
+        this.getMembersMethod = getMembersMethod;
+        this.getRankForPlayerMethod = getRankForPlayerMethod;
     }
 
     public static Optional<FtbTeamsTeamEconomyProvider> createIfPresent() {
         try {
-            Class<?> api = Class.forName(API_CLASS, false, FtbTeamsTeamEconomyProvider.class.getClassLoader());
-            return Optional.of(new FtbTeamsTeamEconomyProvider(api.getMethod("api")));
+            ClassLoader loader = FtbTeamsTeamEconomyProvider.class.getClassLoader();
+            Class<?> apiClass = Class.forName(API_CLASS, false, loader);
+            Class<?> managerClass = Class.forName(MANAGER_CLASS, false, loader);
+            Class<?> teamClass = Class.forName(TEAM_CLASS, false, loader);
+            Method api = apiClass.getMethod("api");
+            Class<?> apiInterface = api.getReturnType();
+            return Optional.of(new FtbTeamsTeamEconomyProvider(
+                    api,
+                    apiInterface.getMethod("isManagerLoaded"),
+                    apiInterface.getMethod("getManager"),
+                    managerClass.getMethod("getTeamForPlayerID", UUID.class),
+                    managerClass.getMethod("getTeamByID", UUID.class),
+                    teamClass.getMethod("isPartyTeam"),
+                    teamClass.getMethod("getId"),
+                    teamClass.getMethod("getOwner"),
+                    teamClass.getMethod("getShortName"),
+                    teamClass.getMethod("getMembers"),
+                    teamClass.getMethod("getRankForPlayer", UUID.class)
+            ));
         } catch (ClassNotFoundException absent) {
             return Optional.empty();
         } catch (ReflectiveOperationException incompatible) {
@@ -42,7 +93,7 @@ public final class FtbTeamsTeamEconomyProvider implements TeamEconomyProvider {
     public Optional<TeamRef> resolveTeam(UUID playerId) {
         if (playerId == null) return Optional.empty();
         return manager()
-                .flatMap(manager -> invokeOptional(manager, "getTeamForPlayerID", playerId))
+                .flatMap(manager -> invokeOptional(getTeamForPlayerMethod, manager, playerId))
                 .filter(this::isPartyTeam)
                 .flatMap(this::toRef);
     }
@@ -51,7 +102,7 @@ public final class FtbTeamsTeamEconomyProvider implements TeamEconomyProvider {
     public Optional<TeamRef> getTeam(UUID teamId) {
         if (teamId == null) return Optional.empty();
         return manager()
-                .flatMap(manager -> invokeOptional(manager, "getTeamByID", teamId))
+                .flatMap(manager -> invokeOptional(getTeamByIdMethod, manager, teamId))
                 .filter(this::isPartyTeam)
                 .flatMap(this::toRef);
     }
@@ -60,11 +111,11 @@ public final class FtbTeamsTeamEconomyProvider implements TeamEconomyProvider {
     public TeamRole getRole(UUID playerId, UUID teamId) {
         if (playerId == null || teamId == null) return TeamRole.NONE;
         Optional<Object> team = manager()
-                .flatMap(manager -> invokeOptional(manager, "getTeamByID", teamId))
+                .flatMap(manager -> invokeOptional(getTeamByIdMethod, manager, teamId))
                 .filter(this::isPartyTeam);
         if (team.isEmpty() || !containsMember(team.get(), playerId)) return TeamRole.NONE;
         try {
-            Object rank = team.get().getClass().getMethod("getRankForPlayer", UUID.class).invoke(team.get(), playerId);
+            Object rank = getRankForPlayerMethod.invoke(team.get(), playerId);
             if (rank instanceof Enum<?> value) {
                 return switch (value.name()) {
                     case "OWNER" -> TeamRole.OWNER;
@@ -79,22 +130,34 @@ public final class FtbTeamsTeamEconomyProvider implements TeamEconomyProvider {
         return TeamRole.NONE;
     }
 
+    @Override
+    public boolean isMember(UUID playerId, UUID teamId) {
+        if (playerId == null || teamId == null) return false;
+        return manager()
+                .flatMap(manager -> invokeOptional(getTeamByIdMethod, manager, teamId))
+                .filter(this::isPartyTeam)
+                .map(team -> containsMember(team, playerId))
+                .orElse(false);
+    }
+
     private Optional<Object> manager() {
         try {
             Object api = apiMethod.invoke(null);
             if (api == null) return Optional.empty();
-            Object loaded = api.getClass().getMethod("isManagerLoaded").invoke(api);
+            Object loaded = isManagerLoadedMethod.invoke(api);
             if (!(loaded instanceof Boolean value) || !value) return Optional.empty();
-            return Optional.ofNullable(api.getClass().getMethod("getManager").invoke(api));
+            return Optional.ofNullable(getManagerMethod.invoke(api));
+        } catch (InvocationTargetException notReady) {
+            return Optional.empty();
         } catch (ReflectiveOperationException | RuntimeException ignored) {
             return Optional.empty();
         }
     }
 
     @SuppressWarnings("unchecked")
-    private Optional<Object> invokeOptional(Object target, String method, UUID argument) {
+    private Optional<Object> invokeOptional(Method method, Object target, UUID argument) {
         try {
-            Object result = target.getClass().getMethod(method, UUID.class).invoke(target, argument);
+            Object result = method.invoke(target, argument);
             if (result instanceof Optional<?> optional) return (Optional<Object>) optional;
         } catch (ReflectiveOperationException | RuntimeException ignored) {
             // Optional integration fails closed.
@@ -104,7 +167,7 @@ public final class FtbTeamsTeamEconomyProvider implements TeamEconomyProvider {
 
     private boolean isPartyTeam(Object team) {
         try {
-            Object result = team.getClass().getMethod("isPartyTeam").invoke(team);
+            Object result = isPartyTeamMethod.invoke(team);
             return result instanceof Boolean value && value;
         } catch (ReflectiveOperationException | RuntimeException ignored) {
             return false;
@@ -113,7 +176,7 @@ public final class FtbTeamsTeamEconomyProvider implements TeamEconomyProvider {
 
     private boolean containsMember(Object team, UUID playerId) {
         try {
-            Object result = team.getClass().getMethod("getMembers").invoke(team);
+            Object result = getMembersMethod.invoke(team);
             return result instanceof Collection<?> members && members.contains(playerId);
         } catch (ReflectiveOperationException | RuntimeException ignored) {
             return false;
@@ -122,9 +185,9 @@ public final class FtbTeamsTeamEconomyProvider implements TeamEconomyProvider {
 
     private Optional<TeamRef> toRef(Object team) {
         try {
-            UUID id = (UUID) team.getClass().getMethod("getId").invoke(team);
-            UUID owner = (UUID) team.getClass().getMethod("getOwner").invoke(team);
-            String name = String.valueOf(team.getClass().getMethod("getShortName").invoke(team));
+            UUID id = (UUID) getTeamIdMethod.invoke(team);
+            UUID owner = (UUID) getOwnerMethod.invoke(team);
+            String name = String.valueOf(getShortNameMethod.invoke(team));
             return Optional.of(new TeamRef(id, name, owner));
         } catch (ReflectiveOperationException | RuntimeException ignored) {
             return Optional.empty();

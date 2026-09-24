@@ -24,6 +24,14 @@ public final class Economy {
 
         accountManager = new AccountManager();
         orderManager = new com.nstut.economy.trading.OrderManager();
+
+        EconomyConfig config = EconomyConfig.getInstance();
+        EconomyApi.teamEconomy().setMode(config.getTeamEconomyMode());
+        EconomyApi.teamEconomy().setViewRole(config.getTeamViewRole());
+        EconomyApi.teamEconomy().setDepositRole(config.getTeamDepositRole());
+        EconomyApi.teamEconomy().setSpendRole(config.getTeamSpendRole());
+        EconomyApi.teamEconomy().setAdminRole(config.getTeamAdminRole());
+
         ensureApiRegistrations();
 
         LOGGER.info("Economy Mod initialized successfully");
@@ -35,13 +43,6 @@ public final class Economy {
         if (EconomyApi.commodityTypes().handler(ICommodity.ITEM_TYPE).isEmpty()) ItemCommodity.registerApiType();
         if (EconomyApi.commodityTypes().handler(ICommodity.FLUID_TYPE).isEmpty()) FluidCommodity.registerApiType();
         if (EconomyApi.storage().provider(BuiltinContainerStorageProvider.ID).isEmpty()) EconomyApi.storage().register(BUILTIN_STORAGE);
-
-        EconomyConfig config = EconomyConfig.getInstance();
-        EconomyApi.teamEconomy().setMode(config.getTeamEconomyMode());
-        EconomyApi.teamEconomy().setViewRole(config.getTeamViewRole());
-        EconomyApi.teamEconomy().setDepositRole(config.getTeamDepositRole());
-        EconomyApi.teamEconomy().setSpendRole(config.getTeamSpendRole());
-        EconomyApi.teamEconomy().setAdminRole(config.getTeamAdminRole());
 
         if (EconomyApi.teamEconomy().provider().isEmpty()) {
             FtbTeamsTeamEconomyProvider.createIfPresent().ifPresent(provider -> {
