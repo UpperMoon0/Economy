@@ -63,7 +63,20 @@ if (team.isPresent() && teams.canSpend(playerId, team.get().id())) {
 }
 ```
 
-Do not trust a team ID or permission decision supplied by a client.
+Do not trust a team ID or permission decision supplied by a client. Prefer the registry's mutation helpers when money moves:
+
+```java
+TeamEconomyRegistry teams = EconomyApi.teamEconomy();
+teams.depositFromPlayer(
+        EconomyApi.accounts(), playerId, amount,
+        TransactionContext.transfer("team deposit", teamId));
+
+teams.spendFromTeam(
+        EconomyApi.accounts(), playerId, AccountRef.player(recipientId), amount,
+        TransactionContext.transfer("team payment", recipientId));
+```
+
+Those helpers resolve the actor's current party and role again immediately before the account transfer, avoiding a stale client-side or cached authorization decision.
 
 ## Market orders
 

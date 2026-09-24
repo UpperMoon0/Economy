@@ -1,5 +1,6 @@
 package com.nstut.economy.api;
 
+import java.math.BigDecimal;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -105,6 +106,38 @@ public final class TeamEconomyRegistry {
 
     public boolean canAdmin(UUID playerId, UUID teamId) {
         return roleFor(playerId, teamId).atLeast(adminRole);
+    }
+
+    /**
+     * Atomically chooses the actor's current party, revalidates deposit permission,
+     * then transfers from the actor's personal wallet into that TEAM principal.
+     */
+    public boolean depositFromPlayer(IAccountManager accounts, UUID actor, BigDecimal amount,
+                                     ITransactionContext context) {
+        Objects.requireNonNull(accounts, "accounts");
+        if (actor == null || amount == null || amount.signum() <= 0) return false;
+        Optional<TeamRef> team = resolveTeam(actor);
+        if (team.isEmpty() || !canDeposit(actor, team.get().id())) return false;
+        return accounts.transfer(AccountRef.player(actor), team.get().account(), amount, context);
+    }
+
+    /**
+     * Revalidates the actor immediately before debiting the shared wallet.
+     * This is the safe primitive for team payments/withdrawals outside the market.
+     */
+    public boolean spendFromTeam(IAccountManager accounts, UUID actor, AccountRef target,
+                                 BigDecimal amount, ITransactionContext context) {
+        Objects.requireNonNull(accounts, "accounts");
+        if (actor == null || target == null || amount == null || amount.signum() <= 0) return false;
+        Optional<TeamRef> team = resolveTeam(actor);
+        if (team.isEmpty() || !canSpend(actor, team.get().id())) return false;
+        return accounts.transfer(team.get().account(), target, amount, context);
+    }
+
+    /** Convenience withdrawal to the acting player's personal wallet. */
+    public boolean withdrawToPlayer(IAccountManager accounts, UUID actor, BigDecimal amount,
+                                    ITransactionContext context) {
+        return actor != null && spendFromTeam(accounts, actor, AccountRef.player(actor), amount, context);
     }
 
     /** Fresh server-side membership/rank lookup; never trusts client state. */

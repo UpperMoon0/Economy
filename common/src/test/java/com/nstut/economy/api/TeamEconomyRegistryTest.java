@@ -1,6 +1,9 @@
 package com.nstut.economy.api;
 
 import com.nstut.economy.core.AccountManager;
+import com.nstut.economy.core.TransactionContext;
+
+import java.math.BigDecimal;
 import org.junit.jupiter.api.Test;
 
 import java.util.Optional;
@@ -36,6 +39,37 @@ class TeamEconomyRegistryTest {
         AccountManager accounts = new AccountManager();
         assertEquals(AccountKind.TEAM,
                 registry.teamAccount(accounts, provider.playerId).orElseThrow().getAccountRef().kind());
+    }
+
+    @Test
+    void authorizedMoneyOperationsRecheckRoleAtMutationTime() {
+        MutableProvider provider = new MutableProvider();
+        TeamEconomyRegistry registry = new TeamEconomyRegistry();
+        registry.registerProvider(provider);
+        registry.setMode(TeamEconomyMode.HYBRID);
+        AccountManager accounts = new AccountManager();
+
+        var personal = accounts.getOrCreatePlayerAccount(provider.playerId);
+        assertTrue(personal.credit(new BigDecimal("100"), TransactionContext.adminGive("test")));
+
+        assertTrue(registry.depositFromPlayer(accounts, provider.playerId, new BigDecimal("40"),
+                TransactionContext.transfer("team deposit", provider.team.id())));
+        assertEquals(new BigDecimal("60"), personal.getBalance());
+        assertEquals(new BigDecimal("40"), accounts.getTeamAccount(provider.team.id()).orElseThrow().getBalance());
+
+        assertFalse(registry.withdrawToPlayer(accounts, provider.playerId, BigDecimal.TEN,
+                TransactionContext.transfer("member cannot spend", provider.playerId)));
+        assertEquals(new BigDecimal("40"), accounts.getTeamAccount(provider.team.id()).orElseThrow().getBalance());
+
+        provider.role = TeamRole.OFFICER;
+        assertTrue(registry.withdrawToPlayer(accounts, provider.playerId, BigDecimal.TEN,
+                TransactionContext.transfer("officer withdraw", provider.playerId)));
+        assertEquals(new BigDecimal("70"), personal.getBalance());
+        assertEquals(new BigDecimal("30"), accounts.getTeamAccount(provider.team.id()).orElseThrow().getBalance());
+
+        provider.role = TeamRole.MEMBER;
+        assertFalse(registry.withdrawToPlayer(accounts, provider.playerId, BigDecimal.ONE,
+                TransactionContext.transfer("demoted", provider.playerId)));
     }
 
     @Test

@@ -122,6 +122,9 @@ Reached through `EconomyApi.teamEconomy()`.
 - `teamAccount(IAccountManager, UUID)`
 - `roleFor(UUID player, UUID team)`
 - `canView`, `canDeposit`, `canSpend`, `canAdmin`
+- `depositFromPlayer(...)` — permission-checked personal → team transfer.
+- `spendFromTeam(...)` — permission-checked team → typed target transfer.
+- `withdrawToPlayer(...)` — convenience team → actor-personal transfer.
 - configurable minimum `TeamRole` thresholds for those actions.
 
 `TeamEconomyMode` contains `PERSONAL_ONLY`, `HYBRID`, and `TEAM_PRIMARY`. Authorization performs fresh provider lookups rather than caching membership/ranks.
