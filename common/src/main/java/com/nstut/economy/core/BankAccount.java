@@ -1,5 +1,6 @@
 package com.nstut.economy.core;
 
+import com.nstut.economy.api.AccountRef;
 import com.nstut.economy.api.EconomyEvents;
 import com.nstut.economy.api.EconomyId;
 import com.nstut.economy.api.IBankAccount;
@@ -21,6 +22,7 @@ public class BankAccount implements IBankAccount {
     private static final Object TRANSFER_TIE_LOCK = new Object();
     private static final System.Logger LOGGER = System.getLogger(BankAccount.class.getName());
 
+    private final AccountRef accountRef;
     private final UUID owner;
     private BigDecimal balance;
     private final List<ITransactionRecord> transactionHistory;
@@ -29,11 +31,20 @@ public class BankAccount implements IBankAccount {
     private boolean mutationInProgress;
 
     public BankAccount(UUID owner, BigDecimal initialBalance) {
-        this(owner, initialBalance, null);
+        this(AccountRef.player(owner), initialBalance, null);
     }
 
     public BankAccount(UUID owner, BigDecimal initialBalance, Consumer<BigDecimal> onBalanceChanged) {
-        this.owner = Objects.requireNonNull(owner, "owner");
+        this(AccountRef.player(owner), initialBalance, onBalanceChanged);
+    }
+
+    public BankAccount(AccountRef owner, BigDecimal initialBalance) {
+        this(owner, initialBalance, null);
+    }
+
+    public BankAccount(AccountRef owner, BigDecimal initialBalance, Consumer<BigDecimal> onBalanceChanged) {
+        this.accountRef = Objects.requireNonNull(owner, "owner");
+        this.owner = owner.id();
         this.balance = Objects.requireNonNull(initialBalance, "initialBalance");
         this.maxHistory = EconomyConfig.getInstance().getMaxTransactionHistory();
         this.transactionHistory = new LinkedList<>();
@@ -43,6 +54,11 @@ public class BankAccount implements IBankAccount {
     @Override
     public UUID getOwner() {
         return owner;
+    }
+
+    @Override
+    public AccountRef getAccountRef() {
+        return accountRef;
     }
 
     @Override
@@ -114,7 +130,7 @@ public class BankAccount implements IBankAccount {
     }
 
     private boolean transferToBuiltIn(BankAccount target, BigDecimal amount, ITransactionContext ctx) {
-        int ownerOrder = owner.compareTo(target.owner);
+        int ownerOrder = accountRef.compareTo(target.accountRef);
         if (ownerOrder == 0) {
             synchronized (TRANSFER_TIE_LOCK) {
                 synchronized (this) {
