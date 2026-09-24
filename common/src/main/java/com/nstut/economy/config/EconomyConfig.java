@@ -1,5 +1,8 @@
 package com.nstut.economy.config;
 
+import com.nstut.economy.api.TeamEconomyMode;
+import com.nstut.economy.api.TeamRole;
+
 import java.math.BigDecimal;
 
 /**
@@ -34,6 +37,13 @@ public class EconomyConfig {
     // Ownership: when false, tanks expose no fluid capability to pipes/automation
     private boolean allowExternalAutomation = false;
 
+    // Optional shared team economy. Default remains fully backward-compatible.
+    private TeamEconomyMode teamEconomyMode = TeamEconomyMode.PERSONAL_ONLY;
+    private TeamRole teamViewRole = TeamRole.MEMBER;
+    private TeamRole teamDepositRole = TeamRole.MEMBER;
+    private TeamRole teamSpendRole = TeamRole.OFFICER;
+    private TeamRole teamAdminRole = TeamRole.OWNER;
+
     private EconomyConfig() {}
     
     public static EconomyConfig getInstance() {
@@ -58,6 +68,11 @@ public class EconomyConfig {
     public int getMaxPriceScale() { return maxPriceScale; }
     public int getMaxPriceDigits() { return maxPriceDigits; }
     public boolean isExternalAutomationAllowed() { return allowExternalAutomation; }
+    public TeamEconomyMode getTeamEconomyMode() { return teamEconomyMode; }
+    public TeamRole getTeamViewRole() { return teamViewRole; }
+    public TeamRole getTeamDepositRole() { return teamDepositRole; }
+    public TeamRole getTeamSpendRole() { return teamSpendRole; }
+    public TeamRole getTeamAdminRole() { return teamAdminRole; }
 
     // Setters for configuration (would be called during config loading)
     public void setCurrencyName(String name) { this.currencyName = name; }
@@ -74,4 +89,9 @@ public class EconomyConfig {
         this.maxPriceDigits = Math.max(1, maxPriceDigits);
     }
     public void setAllowExternalAutomation(boolean allow) { this.allowExternalAutomation = allow; }
+    public void setTeamEconomyMode(TeamEconomyMode mode) { this.teamEconomyMode = java.util.Objects.requireNonNull(mode, "mode"); }
+    public void setTeamViewRole(TeamRole role) { this.teamViewRole = java.util.Objects.requireNonNull(role, "role"); }
+    public void setTeamDepositRole(TeamRole role) { this.teamDepositRole = java.util.Objects.requireNonNull(role, "role"); }
+    public void setTeamSpendRole(TeamRole role) { this.teamSpendRole = java.util.Objects.requireNonNull(role, "role"); }
+    public void setTeamAdminRole(TeamRole role) { this.teamAdminRole = java.util.Objects.requireNonNull(role, "role"); }
 }
