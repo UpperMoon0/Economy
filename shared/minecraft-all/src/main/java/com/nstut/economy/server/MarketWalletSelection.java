@@ -10,7 +10,8 @@ public final class MarketWalletSelection {
     private static final Map<UUID, AccountRef> selections = new HashMap<>();
     private MarketWalletSelection() {}
     public static AccountRef selected(UUID actor) {
-        return selections.computeIfAbsent(actor, id -> EconomyApi.teamEconomy().defaultPrincipal(id));
+        AccountRef explicit = selections.get(actor);
+        return explicit != null ? explicit : EconomyApi.teamEconomy().defaultPrincipal(actor);
     }
     public static void selectPersonal(UUID actor) { selections.put(actor, AccountRef.player(actor)); }
     public static boolean selectTeam(UUID actor) {

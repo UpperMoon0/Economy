@@ -1,6 +1,7 @@
 package com.nstut.economy.trading;
 
 import com.nstut.Economy;
+import com.nstut.economy.api.AccountRef;
 import com.nstut.economy.api.IOrder;
 import com.nstut.economy.data.EconomyOrderData;
 import com.nstut.economy.test.MinecraftTestBase;
@@ -61,4 +62,30 @@ class CompensationRecoveryTest extends MinecraftTestBase {
         assertEquals("8", data.getOrders().get(order.getOrderId())
                 .addonMetadata.get("economy:compensation_amount"));
     }
+    @Test
+    @DisplayName("Team-principal compensation debt preserves typed debtor and creditor across reload")
+    void teamPrincipalCompensationSurvivesReload() {
+        UUID actor = UUID.randomUUID();
+        UUID team = UUID.randomUUID();
+        UUID buyer = UUID.randomUUID();
+        ItemCommodity commodity = new ItemCommodity(new ResourceLocation("minecraft", "iron_ingot"),
+                Items.IRON_INGOT, BigDecimal.ZERO);
+        Order order = new Order(actor, commodity, 3, new BigDecimal("4"), IOrder.OrderType.SELL, null);
+        order.quarantineCompensation(AccountRef.team(team), AccountRef.player(buyer), new BigDecimal("12"),
+                "team SELL refund failed");
+
+        EconomyOrderData data = new EconomyOrderData();
+        data.putOrder(order.toSnapshot());
+        OrderManager manager = new OrderManager();
+        manager.loadFrom(data);
+        manager.saveAll();
+
+        EconomyOrderData.OrderSnapshot preserved = data.getOrders().get(order.getOrderId());
+        assertNotNull(preserved);
+        assertEquals(AccountRef.team(team).toString(), preserved.addonMetadata.get("economy:compensation_debtor"));
+        assertEquals(AccountRef.player(buyer).toString(), preserved.addonMetadata.get("economy:compensation_creditor"));
+        assertEquals("12", preserved.addonMetadata.get("economy:compensation_amount"));
+        assertEquals("team SELL refund failed", preserved.addonMetadata.get("economy:quarantine_reason"));
+    }
+
 }

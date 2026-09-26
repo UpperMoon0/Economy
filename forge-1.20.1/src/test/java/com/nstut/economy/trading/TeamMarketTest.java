@@ -78,6 +78,13 @@ class TeamMarketTest extends MinecraftTestBase {
         assertEquals(BigDecimal.ZERO, accounts.getOrCreatePlayerAccount(officer).getBalance());
         assertEquals(3, sell.getEscrowedItemCount());
     }
+    @Test void stableOrderApiRecognizesTypedTeamPrincipalsButRequiresAWorldToExecute() {
+        IOrder sell = sell(outsider, MarketIdentity.personal(outsider));
+        assertTrue(sell.canExecute(teamIdentity(officer)));
+        assertFalse(sell.execute(teamIdentity(officer), null).success);
+        assertEquals(new BigDecimal("100"), accounts.getOrCreateTeamAccount(team).getBalance());
+        assertEquals(new BigDecimal("100"), accounts.getOrCreatePlayerAccount(outsider).getBalance());
+    }
     @Test void sameTeamCannotSelfTradeAcrossDifferentActorsButPersonalTeammatesCan() {
         assertFalse(sell(owner, teamIdentity(owner)).executePartial(teamIdentity(officer), 1, null).success);
         accounts.getOrCreatePlayerAccount(officer).credit(BigDecimal.TEN, null);
@@ -136,6 +143,19 @@ class TeamMarketTest extends MinecraftTestBase {
         TeamWalletLifecycle.reconcile(accounts, orders, null);
         assertFalse(data.getTeamWallets().get(team).closing());
         assertThrows(IllegalStateException.class, () -> MarketWalletSelection.identity(officer));
+        assertEquals(AccountRef.team(team), MarketWalletSelection.selected(officer));
+    }
+    @Test void teamPrimaryDefaultTracksMembershipUntilExplicitlyOverridden() {
+        EconomyApi.teamEconomy().setMode(TeamEconomyMode.TEAM_PRIMARY);
+        MarketWalletSelection.reset(officer);
+        assertEquals(AccountRef.team(team), MarketWalletSelection.selected(officer));
+        roles.remove(officer);
+        assertEquals(AccountRef.player(officer), MarketWalletSelection.selected(officer));
+        roles.put(officer, TeamRole.OFFICER);
+        assertEquals(AccountRef.team(team), MarketWalletSelection.selected(officer));
+        MarketWalletSelection.selectPersonal(officer);
+        assertEquals(AccountRef.player(officer), MarketWalletSelection.selected(officer));
+        MarketWalletSelection.reset(officer);
         assertEquals(AccountRef.team(team), MarketWalletSelection.selected(officer));
     }
     @Test void disbandKeepsCashWhenEscrowOrCompensationStillNeedsRecovery() {

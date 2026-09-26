@@ -27,8 +27,30 @@ public interface IOrder {
     Instant getExpiresAt();
     boolean isValid();
     boolean canExecute(UUID trader);
+
+    /** Additive typed execution path for team-aware callers. Legacy implementations remain player-only by default. */
+    default boolean canExecute(MarketIdentity trader) {
+        return trader != null && trader.equals(MarketIdentity.personal(trader.actor())) && canExecute(trader.actor());
+    }
+
     TransactionResult execute(UUID trader, ServerLevel level);
     TransactionResult execute(UUID trader);
+
+    /** Additive typed execution path; implementations that support typed orders should override this method. */
+    default TransactionResult execute(MarketIdentity trader, ServerLevel level) {
+        if (trader == null || !trader.equals(MarketIdentity.personal(trader.actor()))) {
+            return TransactionResult.failure("Typed order execution not supported");
+        }
+        return execute(trader.actor(), level);
+    }
+
+    /** Additive typed execution path using the implementation's active server-level resolution. */
+    default TransactionResult execute(MarketIdentity trader) {
+        if (trader == null || !trader.equals(MarketIdentity.personal(trader.actor()))) {
+            return TransactionResult.failure("Typed order execution not supported");
+        }
+        return execute(trader.actor());
+    }
 
     /**
      * Legacy cancellation entry point. Implementations must route this through the active

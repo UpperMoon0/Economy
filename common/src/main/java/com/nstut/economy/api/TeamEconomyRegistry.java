@@ -84,14 +84,14 @@ public final class TeamEconomyRegistry {
     }
 
     /**
-     * Principal used when a UI/action asks for the configured default.
-     * HYBRID intentionally remains personal-first.
+     * Principal used when a spend-capable UI/action asks for the configured default.
+     * HYBRID intentionally remains personal-first; TEAM_PRIMARY selects a team only when the actor can spend it.
      */
     public AccountRef defaultPrincipal(UUID playerId) {
         if (playerId == null) throw new IllegalArgumentException("playerId cannot be null");
         if (mode == TeamEconomyMode.TEAM_PRIMARY) {
             Optional<TeamRef> team = resolveTeam(playerId);
-            if (team.isPresent() && roleFor(playerId, team.get().id()).atLeast(viewRole)) {
+            if (team.isPresent() && roleFor(playerId, team.get().id()).atLeast(spendRole)) {
                 return team.get().account();
             }
         }

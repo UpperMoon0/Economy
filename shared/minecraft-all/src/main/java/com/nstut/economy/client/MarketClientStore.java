@@ -43,7 +43,7 @@ public final class MarketClientStore {
     public static final Signal<String> balance = Signals.of("0");
     public static final Signal<TeamWalletState> teamWallet =
             Signals.of(TeamWalletState.hidden("PERSONAL_ONLY", "OFFICER"));
-    /** Economic principal used by current market-order actions; remains PLAYER until issue #29. */
+    /** Server-authoritative economic principal used by new market-order actions. */
     public static final Signal<String> marketPrincipal = Signals.of("PLAYER");
     public static final Signal<Integer> vaultCount = Signals.of(0);
     public static final Signal<MarketNetwork.SyncItemDetailPacket> detail = Signals.of(null);

@@ -1052,7 +1052,7 @@ public class MarketNetwork {
         boolean teamCanDeposit = wallet.canDeposit();
         boolean teamCanSpend = wallet.canSpend();
         String teamSpendRole = wallet.spendRole().name();
-        // Team-funded orders require principal/actor/storageOwner migration in issue #29.
+        // The label reflects the server-authoritative principal selected for new market actions.
         String marketPrincipal = com.nstut.economy.server.MarketWalletSelection.label(player.getUUID());
         int vaultCount = VaultManager.getVaultRecords(player.getUUID()).size();
 

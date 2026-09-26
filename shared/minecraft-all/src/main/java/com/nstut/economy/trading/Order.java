@@ -222,10 +222,15 @@ public class Order implements IOrder {
 
     @Override
     public boolean canExecute(UUID trader) {
-        if (!isValid() || !isAuthorized() || getPrincipal().equals(legacyParticipant(trader).principal())) return false;
-        IAccountManager accounts = accounts();
+        return canExecute(legacyParticipant(trader));
+    }
+
+    @Override
+    public boolean canExecute(MarketIdentity trader) {
+        if (!isValid() || !isAuthorized() || trader == null || !trader.authorized(EconomyApi.teamEconomy())
+                || getPrincipal().equals(trader.principal())) return false;
         if (type == OrderType.SELL) {
-            IBankAccount buyer = OrderManager.SERVER_ID.equals(trader) ? accounts.getServerAccount() : accounts.getOrCreatePlayerAccount(trader);
+            IBankAccount buyer = accountFor(trader.principal());
             return buyer.hasSufficientFunds(pricePerUnit.multiply(BigDecimal.valueOf(Math.max(1, quantity))));
         }
         if (serverOrder) return true;
@@ -255,10 +260,19 @@ public class Order implements IOrder {
         return executeAmount(trader, amountToTrade, level);
     }
 
+    @Override
     public TransactionResult execute(MarketIdentity trader, ServerLevel level) {
+        if (trader == null) return TransactionResult.failure("Missing market identity");
         if (trader.principal().kind() == AccountKind.SERVER || trader.principal().kind() == AccountKind.TAX)
             return TransactionResult.failure("Reserved economic principal");
-        return executeAmount(trader, quantity, level);
+        ServerLevel resolvedLevel = level != null ? level : EconomyApi.serverLevel().orElse(null);
+        if (resolvedLevel == null) return TransactionResult.failure("Order execution requires a running server level");
+        return executeAmount(trader, quantity, resolvedLevel);
+    }
+
+    @Override
+    public TransactionResult execute(MarketIdentity trader) {
+        return execute(trader, EconomyApi.serverLevel().orElse(null));
     }
 
     private static MarketIdentity legacyParticipant(UUID trader) {

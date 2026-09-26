@@ -86,6 +86,9 @@ class TeamEconomyRegistryTest {
         provider.role = TeamRole.MEMBER;
         assertFalse(registry.canSpend(provider.playerId, provider.team.id()),
                 "rank must be revalidated rather than cached");
+        assertTrue(registry.canView(provider.playerId, provider.team.id()));
+        assertEquals(AccountRef.player(provider.playerId), registry.defaultPrincipal(provider.playerId),
+                "TEAM_PRIMARY must not default to a wallet the actor cannot spend");
 
         provider.member = false;
         assertEquals(AccountRef.player(provider.playerId), registry.defaultPrincipal(provider.playerId));

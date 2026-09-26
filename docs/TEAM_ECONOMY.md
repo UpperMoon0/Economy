@@ -82,13 +82,23 @@ Those helpers resolve the actor's current party and role again immediately befor
 
 The Market sync builds a fresh server-authoritative wallet snapshot for the viewing player. `Personal` and `Team` balances are separate values; when a viewable party wallet exists, the UI also shows the FTB team display name, current role, and the configured minimum spend role. A leave, kick, demotion below the view threshold, `PERSONAL_ONLY`, missing provider, or incompatible provider removes the team wallet from the next sync instead of leaving stale client state visible.
 
-The Market principal is also shown explicitly. Until issue #29 lands, it is `Personal` even in `HYBRID` or `TEAM_PRIMARY`, because the existing order schema still binds economic ownership, actor, and physical storage to one player UUID. The team balance is therefore informational in the current Market UI; exposing it does not silently redirect order funding.
+The Market principal is also shown explicitly. In `HYBRID`, Personal is the default until the player runs `/economy team use team`. In `TEAM_PRIMARY`, the default is resolved from current FTB membership/rank each time, so joining/leaving/changing teams cannot leave a stale implicit default. An explicit Personal or Team override is retained until `/economy team use default`; a stale explicit Team selection fails closed instead of silently charging Personal.
 
 ## Market orders
 
-This foundation deliberately does **not** reinterpret the existing `IOrder.owner` UUID as a team UUID. Team-funded market orders require separate economic principal, acting player, and physical storage owner identities; that migration is tracked by issue #29.
+Orders persist three identities independently:
 
-Until #29 is implemented, normal market orders continue to use personal player principals and player-owned Vault/Tank storage.
+```text
+principal    = AccountRef   // who pays / receives money
+actor        = UUID         // player who placed/performed the action
+storageOwner = UUID         // player whose Vault/Tank/provider storage is used
+```
+
+For current built-in player placement, `actor == storageOwner`. A team-funded order uses `TEAM:<ftb-team-id>` as its principal while keeping the placing player's UUID for physical storage. Team UUIDs are never passed to Vault/Tank/provider owner lookup. Legacy orders migrate to `PLAYER:<old-owner>` with the old owner as both actor and storage owner.
+
+Matching compares economic principals, so two different members cannot make the same team trade with itself. Every team order revalidates current membership/rank before execution, edit, or cancellation. Leave/kick/demotion invalidates the order lazily even if an FTB lifecycle event is missed; Economy attempts a lossless cancellation and keeps any unrecoverable escrow/compensation record persisted until recovery succeeds.
+
+When an FTB party is deleted, its wallet is tombstoned/closed, new team actions are rejected, outstanding team orders are cancelled and escrow is restored to their recorded storage owners, and remaining cash is transferred once to the last recorded FTB owner only after no recovery references remain. Replayed deletion events or restart reconciliation therefore cannot duplicate funds.
 
 ## Development dependencies and compatibility checks
 
@@ -100,6 +110,6 @@ All five loader development environments include FTB Teams and FTB Library on th
 | Fabric / NeoForge 1.21.1 | 2101.1.11 | 2101.1.36 |
 | NeoForge 26.1.2 | 26.1.2.4 | 26.1.2.8 |
 
-`./gradlew :common:ftbContractTest` resolves the five published Teams jars from [FTB Maven](https://maven.ftb.dev/releases/dev/ftb/mods/) and checks every reflected method's public signature, return descriptor, static access, and required rank enum constants directly from class files. It uses a separate source set without local FTB doubles or Minecraft class loading. The same task runs automatically with `:common:test` / `check`, including the shared CI lane. Each artifact resolves separately so Gradle cannot collapse different Minecraft versions into one jar.
+`./gradlew :common:ftbContractTest` resolves the five published Teams jars and their matching FTB Library jars from [FTB Maven](https://maven.ftb.dev/releases/dev/ftb/mods/). It checks every reflected provider method plus both lifecycle-event generations directly from class files: Architectury `TeamEvent` fields on 1.20.1/1.21.1, and NeoForge 26.x event wrappers/data records together with FTB Library's `BaseEventWithData#getEventData`. It uses a separate source set without local FTB doubles or Minecraft class loading. The same task runs automatically with `:common:test` / `check`, including the shared CI lane. Each target resolves separately so Gradle cannot collapse different Minecraft versions into one jar.
 
 The existing reflection-adapter unit tests use behavioral doubles for membership changes, party filtering, and failures; they do not claim artifact compatibility. When upgrading a development pin, run the artifact contract and the corresponding live-join lane.

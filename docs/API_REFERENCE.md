@@ -106,6 +106,7 @@ Neutral external-team bridge:
 - `Optional<TeamRef> getTeam(UUID teamId)`
 - `TeamRole getRole(UUID playerId, UUID teamId)`
 - `boolean isMember(UUID playerId, UUID teamId)`
+- `boolean isTeamDeleted(UUID teamId)` - authoritative deletion signal; must return false on lookup/provider failure.
 - `boolean isAvailable()`
 
 Economy's built-in FTB Teams bridge is optional and maps only party teams. FTB personal teams and server teams are excluded.
@@ -299,6 +300,8 @@ Creation:
 
 - `OrderCreateResult createBuyOrder(UUID owner, ICommodity commodity, int quantity, BigDecimal pricePerUnit)`
 - `OrderCreateResult createSellOrder(UUID owner, ICommodity commodity, int quantity, BigDecimal pricePerUnit)`
+- `OrderCreateResult createBuyOrder(MarketIdentity identity, ICommodity commodity, int quantity, BigDecimal pricePerUnit)`
+- `OrderCreateResult createSellOrder(MarketIdentity identity, ICommodity commodity, int quantity, BigDecimal pricePerUnit)`
 - `IOrder createServerBuyOrder(ICommodity commodity, int quantity, BigDecimal pricePerUnit)`
 - `IOrder createServerSellOrder(ICommodity commodity, int quantity, BigDecimal pricePerUnit)`
 
@@ -345,7 +348,11 @@ A fully filled accepted order has no `remainingOrder()` even though `accepted()`
 Read/operation contract for one order.
 
 - `UUID getOrderId()`
-- `UUID getOwner()`
+- `UUID getOwner()` - legacy storage-owner UUID projection.
+- `MarketIdentity getIdentity()` - preferred principal/actor/storage-owner identity.
+- `AccountRef getPrincipal()`
+- `UUID getActor()`
+- `UUID getStorageOwner()`
 - `ICommodity getCommodity()`
 - `int getQuantity()`
 - `BigDecimal getPricePerUnit()`
@@ -354,9 +361,12 @@ Read/operation contract for one order.
 - `Instant getCreatedAt()`
 - `Instant getExpiresAt()`
 - `boolean isValid()`
-- `boolean canExecute(UUID trader)`
+- `boolean canExecute(UUID trader)` - legacy Personal/server compatibility path.
+- `boolean canExecute(MarketIdentity trader)` - typed principal-aware execution check.
+- `TransactionResult execute(UUID trader, ServerLevel level)` / `execute(UUID trader)` - legacy compatibility paths.
+- `TransactionResult execute(MarketIdentity trader, ServerLevel level)` / `execute(MarketIdentity trader)` - typed execution paths.
 
-`execute`/`cancel` remain on the compatibility interface, but addon code should prefer `IOrderManager` so world resolution, ownership, and order-book invariants stay centralized.
+`cancel` remains on the compatibility interface, but addon code should prefer `IOrderManager` for cancellation/editing so world resolution, current team authorization, escrow restoration, and order-book invariants stay centralized.
 
 ## Market data
 
@@ -378,8 +388,8 @@ Immutable completed-trade view:
 - `EconomyId commodityTypeId()`
 - `BigDecimal pricePerUnit()`
 - `int quantity()`
-- `UUID buyer()`
-- `UUID seller()`
+- `UUID buyer()` / `UUID seller()` - legacy actor UUID projections.
+- `MarketIdentity buyerIdentity()` / `MarketIdentity sellerIdentity()` - persisted typed economic/human/storage attribution.
 - `Instant timestamp()`
 
 ## Storage integration

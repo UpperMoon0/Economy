@@ -50,7 +50,16 @@ project(':common') {
         dependencies.add(artifactConfiguration.name, "dev.ftb.mods:ftb-teams-${versions.loader}:${versions.teams}@jar")
         artifactConfiguration
     }
+    def libraryArtifactConfigurations = targets.collect { target, versions ->
+        def artifactConfiguration = configurations.create('ftbLibraryContract_' + target.replace('-', '_').replace('.', '_')) {
+            canBeConsumed = false
+            transitive = false
+        }
+        dependencies.add(artifactConfiguration.name, "dev.ftb.mods:ftb-library-${versions.loader}:${versions.library}@jar")
+        artifactConfiguration
+    }
     def artifacts = files(artifactConfigurations)
+    def libraryArtifacts = files(libraryArtifactConfigurations)
     dependencies {
         ftbContractTestImplementation platform('org.junit:junit-bom:5.11.4')
         ftbContractTestImplementation 'org.junit.jupiter:junit-jupiter'
@@ -63,9 +72,10 @@ project(':common') {
         testClassesDirs = sourceSets.ftbContractTest.output.classesDirs
         classpath = sourceSets.ftbContractTest.runtimeClasspath
         useJUnitPlatform()
-        inputs.files(artifacts)
+        inputs.files(artifacts, libraryArtifacts)
         doFirst {
             systemProperty 'economy.ftbArtifacts', artifacts.files.collect { it.absolutePath }.sort().join(File.pathSeparator)
+            systemProperty 'economy.ftbLibraryArtifacts', libraryArtifacts.files.collect { it.absolutePath }.sort().join(File.pathSeparator)
         }
     }
     tasks.named('check') { dependsOn contractTest }

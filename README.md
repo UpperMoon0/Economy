@@ -84,9 +84,10 @@ Install the file matching both your Minecraft version and loader. A jar built fo
 - Only FTB party teams map to shared wallets; personal/server teams are deliberately excluded.
 - Team economy defaults to `PERSONAL_ONLY`; `HYBRID` and `TEAM_PRIMARY` are opt-in.
 - Team membership and role checks are resolved fresh before protected team actions.
-- The Market UI shows Personal and Team balances separately, including the active FTB party name, current role, and team-spend requirement; team UI disappears when unavailable or disabled.
-- Market actions explicitly remain Personal until the order identity migration in #29, so displaying a team wallet never silently changes who funds an order.
-- Team-funded market orders remain a separate follow-up (#29); current market orders stay personal.
+- The Market UI shows Personal and Team balances separately, including the active FTB party name, current role, team-spend requirement, and the wallet currently used for new market actions.
+- `HYBRID` keeps Personal as the default but allows `/economy team use team`; `TEAM_PRIMARY` dynamically uses the current spend-authorized party unless the player explicitly overrides the selection.
+- Team-funded orders persist separate economic principal, acting player, and physical storage owner identities. Team money can therefore fund an order while Vault/Tank/provider storage remains owned by the placing player.
+- Same-principal self-trades are blocked, team authorization is revalidated before execution/edit/cancel, and team deletion closes orders before the remaining cash is settled to the last recorded owner.
 
 See [Team Economy](docs/TEAM_ECONOMY.md) for account semantics, modes, permissions, and integration guidance.
 
@@ -105,6 +106,11 @@ See [Team Economy](docs/TEAM_ECONOMY.md) for account semantics, modes, permissio
 | `/economy balance` | Player | View your balance and open the Market Terminal |
 | `/economy balance <player>` | OP Level 2 | View another player's balance |
 | `/economy pay <player> <amount>` | Player | Transfer coins to another player |
+| `/economy team [balance]` | Player | View Personal/Team balances, current role, and Market wallet selection |
+| `/economy team deposit <amount>` | Player | Move personal funds into the current party wallet (default MEMBER+) |
+| `/economy team withdraw <amount>` | Player | Withdraw party funds to your personal wallet (default OFFICER+) |
+| `/economy team pay <player> <amount>` | Player | Pay a player from the party wallet (default OFFICER+) |
+| `/economy team use <personal|team|default>` | Player | Choose the wallet used by new market actions, or return to mode-driven default |
 | `/economy serverorder buy <commodity> <qty> <price>` | OP Level 2 | Create a server buy order for an item or fluid |
 | `/economy serverorder sell <commodity> <qty> <price>` | OP Level 2 | Create a server sell order for an item or fluid |
 | `/economy serverorder list` | OP Level 2 | List active server orders and their IDs |
