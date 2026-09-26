@@ -10,6 +10,10 @@ import java.util.UUID;
 public interface IOrder {
     UUID getOrderId();
     UUID getOwner();
+    default MarketIdentity getIdentity() { return MarketIdentity.personal(getOwner()); }
+    default AccountRef getPrincipal() { return getIdentity().principal(); }
+    default UUID getActor() { return getIdentity().actor(); }
+    default UUID getStorageOwner() { return getIdentity().storageOwner(); }
     ICommodity getCommodity();
     int getQuantity();
     BigDecimal getPricePerUnit();

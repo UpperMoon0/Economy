@@ -14,6 +14,17 @@ import java.util.UUID;
  */
 public final class TeamEconomyRegistry {
     private volatile TeamEconomyProvider provider;
+    private volatile java.util.function.Consumer<TeamRef> observer = team -> {};
+    private volatile java.util.function.Predicate<UUID> closing = team -> false;
+
+    /** Internal server lifecycle hooks; cleared on server shutdown. */
+    public void bindLifecycle(java.util.function.Consumer<TeamRef> observer, java.util.function.Predicate<UUID> closing) {
+        this.observer = Objects.requireNonNull(observer);
+        this.closing = Objects.requireNonNull(closing);
+    }
+    public void clearLifecycle() { observer = team -> {}; closing = team -> false; }
+    public boolean isClosing(UUID teamId) { return closing.test(teamId); }
+
     private volatile TeamEconomyMode mode = TeamEconomyMode.PERSONAL_ONLY;
     private volatile TeamRole viewRole = TeamRole.MEMBER;
     private volatile TeamRole depositRole = TeamRole.MEMBER;
@@ -60,7 +71,9 @@ public final class TeamEconomyRegistry {
         if (current == null || !safeAvailable(current)) return Optional.empty();
         try {
             return current.resolveTeam(playerId)
-                    .filter(team -> current.isMember(playerId, team.id()));
+                    .filter(team -> current.isMember(playerId, team.id()))
+                    .filter(team -> !closing.test(team.id()))
+                    .map(team -> { observer.accept(team); return team; });
         } catch (RuntimeException ignored) {
             return Optional.empty();
         }
@@ -164,6 +177,7 @@ public final class TeamEconomyRegistry {
         if (actor == null || target == null || amount == null || amount.signum() <= 0) return false;
         Optional<TeamRef> team = resolveTeam(actor);
         if (team.isEmpty() || !canSpend(actor, team.get().id())) return false;
+        if (target.kind() == AccountKind.TEAM && closing.test(target.id())) return false;
         return accounts.transfer(team.get().account(), target, amount, context);
     }
 
@@ -175,7 +189,7 @@ public final class TeamEconomyRegistry {
 
     /** Fresh server-side membership/rank lookup; never trusts client state. */
     public TeamRole roleFor(UUID playerId, UUID teamId) {
-        if (playerId == null || teamId == null || mode == TeamEconomyMode.PERSONAL_ONLY) return TeamRole.NONE;
+        if (playerId == null || teamId == null || closing.test(teamId) || mode == TeamEconomyMode.PERSONAL_ONLY) return TeamRole.NONE;
         TeamEconomyProvider current = provider;
         if (current == null || !safeAvailable(current)) return TeamRole.NONE;
         try {
@@ -188,6 +202,8 @@ public final class TeamEconomyRegistry {
             return TeamRole.NONE;
         }
     }
+
+    public boolean isProviderAvailable() { return provider != null && safeAvailable(provider); }
 
     private static boolean safeAvailable(TeamEconomyProvider provider) {
         try {

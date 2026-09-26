@@ -26,6 +26,10 @@ public final class Economy {
         orderManager = new com.nstut.economy.trading.OrderManager();
 
         EconomyConfig config = EconomyConfig.getInstance();
+        try { config.loadTeamConfig(java.nio.file.Path.of("config", "economy-team.properties")); }
+        catch (java.io.IOException | IllegalArgumentException failure) {
+            throw new IllegalStateException("Could not load config/economy-team.properties", failure);
+        }
         EconomyApi.teamEconomy().setMode(config.getTeamEconomyMode());
         EconomyApi.teamEconomy().setViewRole(config.getTeamViewRole());
         EconomyApi.teamEconomy().setDepositRole(config.getTeamDepositRole());
@@ -33,6 +37,7 @@ public final class Economy {
         EconomyApi.teamEconomy().setAdminRole(config.getTeamAdminRole());
 
         ensureApiRegistrations();
+        com.nstut.economy.compat.FtbTeamsLifecycleHooks.install();
 
         LOGGER.info("Economy Mod initialized successfully");
     }

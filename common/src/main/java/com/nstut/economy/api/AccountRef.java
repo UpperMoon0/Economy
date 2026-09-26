@@ -18,6 +18,13 @@ public record AccountRef(AccountKind kind, UUID id) implements Comparable<Accoun
     public static AccountRef server(UUID id) { return new AccountRef(AccountKind.SERVER, id); }
     public static AccountRef tax(UUID id) { return new AccountRef(AccountKind.TAX, id); }
 
+    /** Strict persisted form: KIND:uuid. Never reinterpret malformed typed identities as players. */
+    public static AccountRef parse(String value) {
+        int separator = value.indexOf(':');
+        if (separator <= 0) throw new IllegalArgumentException("Invalid account identity: " + value);
+        return new AccountRef(AccountKind.valueOf(value.substring(0, separator)), UUID.fromString(value.substring(separator + 1)));
+    }
+
     @Override
     public int compareTo(AccountRef other) {
         int kindOrder = Integer.compare(kind.ordinal(), other.kind.ordinal());

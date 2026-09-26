@@ -25,6 +25,7 @@ public final class EconomyServerLifecycle {
         EconomyTradeData tradeData = EconomyTradeData.get(overworld);
 
         Economy.getAccountManager().loadFrom(accountData);
+        TeamWalletLifecycle.bind(accountData);
 
         OrderManager orderManager = Economy.getOrderManager();
         orderManager.setOrderData(orderData);
@@ -47,6 +48,8 @@ public final class EconomyServerLifecycle {
         try {
             save();
         } finally {
+            TeamWalletLifecycle.clear();
+            MarketWalletSelection.clear();
             EconomyApi.unbindRuntime();
         }
     }
@@ -54,6 +57,7 @@ public final class EconomyServerLifecycle {
     public static void tick(MinecraftServer server) {
         ServerLevel overworld = server.overworld();
         if (overworld != null && server.getTickCount() % 20 == 0) {
+            TeamWalletLifecycle.tick(overworld);
             Economy.getOrderManager().matchAllPendingOrders(overworld);
         }
     }

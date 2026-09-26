@@ -16,6 +16,9 @@ public interface TeamEconomyProvider {
         return getRole(playerId, teamId).atLeast(TeamRole.MEMBER);
     }
 
+    /** True only after an authoritative successful lookup confirms deletion, never on lookup failure. */
+    default boolean isTeamDeleted(UUID teamId) { return false; }
+
     default boolean isAvailable() {
         return true;
     }

@@ -49,8 +49,8 @@ class CompensationRecoveryTest extends MinecraftTestBase {
         assertTrue(preserved.reservedItems.isEmpty());
         assertTrue(preserved.reservedFluids.isEmpty());
         assertNull(preserved.externalReservation);
-        assertEquals(seller.toString(), preserved.addonMetadata.get("economy:compensation_debtor"));
-        assertEquals(buyer.toString(), preserved.addonMetadata.get("economy:compensation_creditor"));
+        assertEquals(com.nstut.economy.api.AccountRef.player(seller).toString(), preserved.addonMetadata.get("economy:compensation_debtor"));
+        assertEquals(com.nstut.economy.api.AccountRef.player(buyer).toString(), preserved.addonMetadata.get("economy:compensation_creditor"));
         assertEquals("8", preserved.addonMetadata.get("economy:compensation_amount"));
         assertEquals("partial BUY refund failed", preserved.addonMetadata.get("economy:quarantine_reason"));
 

@@ -53,6 +53,35 @@ public class EconomyConfig {
         return INSTANCE;
     }
     
+    /** Persistent server configuration, loaded before team integration is exposed. */
+    public void loadTeamConfig(java.nio.file.Path path) throws java.io.IOException {
+        java.util.Properties properties = new java.util.Properties();
+        if (java.nio.file.Files.exists(path)) {
+            try (var input = java.nio.file.Files.newInputStream(path)) { properties.load(input); }
+        }
+        teamEconomyMode = TeamEconomyMode.valueOf(properties.getProperty("mode", "PERSONAL_ONLY").trim());
+        teamViewRole = configuredRole(properties, "viewRole", TeamRole.MEMBER);
+        teamDepositRole = configuredRole(properties, "depositRole", TeamRole.MEMBER);
+        teamSpendRole = configuredRole(properties, "spendRole", TeamRole.OFFICER);
+        teamAdminRole = configuredRole(properties, "adminRole", TeamRole.OWNER);
+        if (!java.nio.file.Files.exists(path)) {
+            java.nio.file.Files.createDirectories(path.toAbsolutePath().getParent());
+            properties.setProperty("mode", teamEconomyMode.name());
+            properties.setProperty("viewRole", teamViewRole.name());
+            properties.setProperty("depositRole", teamDepositRole.name());
+            properties.setProperty("spendRole", teamSpendRole.name());
+            properties.setProperty("adminRole", teamAdminRole.name());
+            try (var output = java.nio.file.Files.newOutputStream(path)) {
+                properties.store(output, "Economy team wallets. Restart the server after editing. Modes: PERSONAL_ONLY, HYBRID, TEAM_PRIMARY. Roles: MEMBER, OFFICER, OWNER.");
+            }
+        }
+    }
+    private static TeamRole configuredRole(java.util.Properties properties, String name, TeamRole fallback) {
+        TeamRole role = TeamRole.valueOf(properties.getProperty(name, fallback.name()).trim());
+        if (role == TeamRole.NONE) throw new IllegalArgumentException(name + " must require MEMBER, OFFICER, or OWNER");
+        return role;
+    }
+
     // Getters
     public String getCurrencyName() { return currencyName; }
     public String getCurrencySymbol() { return currencySymbol; }

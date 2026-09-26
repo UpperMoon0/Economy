@@ -1,6 +1,9 @@
 package com.nstut.economy.trading;
 
 import com.nstut.Economy;
+import com.nstut.economy.api.AccountRef;
+import com.nstut.economy.api.AccountKind;
+import com.nstut.economy.api.MarketIdentity;
 import com.nstut.economy.api.CommodityPayload;
 import com.nstut.economy.api.EconomyApi;
 import com.nstut.economy.api.EconomyId;
@@ -39,6 +42,7 @@ public class Order implements IOrder {
     private static final String COMPENSATION_AMOUNT = "economy:compensation_amount";
     private final UUID orderId;
     private final UUID owner;
+    private MarketIdentity identity;
     private final ICommodity commodity;
     private int quantity;
     private int initialQuantity;
@@ -84,6 +88,7 @@ public class Order implements IOrder {
                   EconomyId persistedTypeId, CommodityPayload persistedPayload) {
         this.orderId = orderId;
         this.owner = owner;
+        this.identity = MarketIdentity.personal(owner);
         this.commodity = commodity;
         this.quantity = quantity;
         this.initialQuantity = initialQuantity > 0 ? initialQuantity : quantity;
@@ -112,6 +117,7 @@ public class Order implements IOrder {
                 Instant.ofEpochMilli(snap.createdAt), expiry, snap.reservedItems, snap.reservedFluids,
                 snap.isInfinite, snap.externalReservation, snap.addonMetadata, typeId, payload);
         order.serverOrder = snap.isServerOrder;
+        order.identity = snap.identity;
         return order;
     }
 
@@ -126,7 +132,7 @@ public class Order implements IOrder {
         return new EconomyOrderData.OrderSnapshot(orderId, owner, commodity.getId().toString(), quantity, initialQuantity,
                 pricePerUnit.toPlainString(), type.name(), createdAt.toEpochMilli(), expiresAt == null ? 0 : expiresAt.toEpochMilli(),
                 expiresAt != null, reservedItems, reservedFluids, serverOrder, infinite, legacyType,
-                persistedTypeId.toString(), persistedPayload.version(), persistedPayload.values(), externalReservation, addonMetadata);
+                persistedTypeId.toString(), persistedPayload.version(), persistedPayload.values(), externalReservation, addonMetadata, identity);
     }
 
     private static CommodityPayload encodeSafely(ICommodity commodity) {
@@ -134,8 +140,16 @@ public class Order implements IOrder {
         catch (RuntimeException unavailable) { return null; }
     }
 
+    /** Internal construction hook, called before reservation/matching/registration. */
+    void setIdentity(MarketIdentity identity) { this.identity = java.util.Objects.requireNonNull(identity); }
+    @Override public MarketIdentity getIdentity() { return identity; }
+    public boolean isAuthorized() { return identity.authorized(EconomyApi.teamEconomy()); }
+
     public boolean isServerOrder() { return serverOrder; }
-    public void setServerOrder(boolean serverOrder) { this.serverOrder = serverOrder; }
+    public void setServerOrder(boolean serverOrder) {
+        this.serverOrder = serverOrder;
+        if (serverOrder) identity = new MarketIdentity(AccountRef.server(com.nstut.economy.core.AccountManager.SERVER_ACCOUNT_ID), owner, owner);
+    }
     public boolean isInfinite() { return infinite; }
     public void setInfinite(boolean infinite) { this.infinite = infinite; }
     public void setPricePerUnit(BigDecimal pricePerUnit) { this.pricePerUnit = pricePerUnit; }
@@ -154,6 +168,10 @@ public class Order implements IOrder {
     public boolean isQuarantined() { return addonMetadata.containsKey(QUARANTINE_REASON); }
 
     void markCompensationDue(UUID debtor, UUID creditor, BigDecimal amount) {
+        markCompensationDue(AccountRef.player(debtor), AccountRef.player(creditor), amount);
+    }
+
+    void markCompensationDue(AccountRef debtor, AccountRef creditor, BigDecimal amount) {
         HashMap<String, String> metadata = new HashMap<>(addonMetadata);
         metadata.put(COMPENSATION_DEBTOR, debtor == null ? "unknown" : debtor.toString());
         metadata.put(COMPENSATION_CREDITOR, creditor == null ? "unknown" : creditor.toString());
@@ -176,6 +194,10 @@ public class Order implements IOrder {
     }
 
     void quarantineCompensation(UUID debtor, UUID creditor, BigDecimal amount, String reason) {
+        quarantineCompensation(AccountRef.player(debtor), AccountRef.player(creditor), amount, reason);
+    }
+
+    void quarantineCompensation(AccountRef debtor, AccountRef creditor, BigDecimal amount, String reason) {
         markQuarantined(reason);
         markCompensationDue(debtor, creditor, amount);
         persistRecovery(reason);
@@ -200,52 +222,70 @@ public class Order implements IOrder {
 
     @Override
     public boolean canExecute(UUID trader) {
-        if (!isValid() || owner.equals(trader)) return false;
+        if (!isValid() || !isAuthorized() || getPrincipal().equals(legacyParticipant(trader).principal())) return false;
         IAccountManager accounts = accounts();
         if (type == OrderType.SELL) {
             IBankAccount buyer = OrderManager.SERVER_ID.equals(trader) ? accounts.getServerAccount() : accounts.getOrCreatePlayerAccount(trader);
             return buyer.hasSufficientFunds(pricePerUnit.multiply(BigDecimal.valueOf(Math.max(1, quantity))));
         }
         if (serverOrder) return true;
-        return accounts.getOrCreatePlayerAccount(owner).hasSufficientFunds(pricePerUnit.multiply(BigDecimal.valueOf(Math.max(1, quantity))));
+        return accountFor(getPrincipal()).hasSufficientFunds(pricePerUnit.multiply(BigDecimal.valueOf(Math.max(1, quantity))));
     }
 
     @Override
     public TransactionResult execute(UUID trader) {
         ServerLevel level = EconomyApi.serverLevel().orElse(null);
         if (level == null) return TransactionResult.failure("Order execution requires a running server level");
-        return executeAmount(trader, quantity, level);
+        return executeAmount(legacyParticipant(trader), quantity, level);
     }
 
     @Override
     public TransactionResult execute(UUID trader, ServerLevel level) {
         ServerLevel resolvedLevel = level != null ? level : EconomyApi.serverLevel().orElse(null);
         if (resolvedLevel == null) return TransactionResult.failure("Order execution requires a running server level");
-        return executeAmount(trader, quantity, resolvedLevel);
+        return executeAmount(legacyParticipant(trader), quantity, resolvedLevel);
     }
 
     /** Internal order-book matching hook. Stable addon code must execute through {@link IOrder}. */
     TransactionResult executePartial(UUID trader, int amountToTrade, ServerLevel level) {
+        return executeAmount(legacyParticipant(trader), amountToTrade, level);
+    }
+
+    TransactionResult executePartial(MarketIdentity trader, int amountToTrade, ServerLevel level) {
         return executeAmount(trader, amountToTrade, level);
     }
 
-    private TransactionResult executeAmount(UUID trader, int requested, ServerLevel level) {
-        if (!isValid() || owner.equals(trader) || requested <= 0) return TransactionResult.failure("Invalid execution request");
+    public TransactionResult execute(MarketIdentity trader, ServerLevel level) {
+        if (trader.principal().kind() == AccountKind.SERVER || trader.principal().kind() == AccountKind.TAX)
+            return TransactionResult.failure("Reserved economic principal");
+        return executeAmount(trader, quantity, level);
+    }
+
+    private static MarketIdentity legacyParticipant(UUID trader) {
+        return OrderManager.SERVER_ID.equals(trader)
+                ? new MarketIdentity(AccountRef.server(com.nstut.economy.core.AccountManager.SERVER_ACCOUNT_ID), trader, trader)
+                : MarketIdentity.personal(trader);
+    }
+
+    private TransactionResult executeAmount(MarketIdentity trader, int requested, ServerLevel level) {
+        if (!isValid() || !isAuthorized() || !trader.authorized(EconomyApi.teamEconomy())
+                || getPrincipal().equals(trader.principal()) || requested <= 0) return TransactionResult.failure("Invalid execution request");
         int amount = infinite ? requested : Math.min(quantity, requested);
         if (amount <= 0) return TransactionResult.failure("Nothing to trade");
         if (type == OrderType.SELL) return executeSell(trader, amount, level);
         return executeBuy(trader, amount, level);
     }
 
-    private TransactionResult executeSell(UUID buyerId, int requested, ServerLevel level) {
+    private TransactionResult executeSell(MarketIdentity buyer, int requested, ServerLevel level) {
+        UUID buyerId = buyer.storageOwner();
         IAccountManager accounts = accounts();
-        boolean serverBuyer = OrderManager.SERVER_ID.equals(buyerId);
-        IBankAccount sellerAccount = accounts.getOrCreatePlayerAccount(owner);
-        IBankAccount buyerAccount = serverBuyer ? accounts.getServerAccount() : accounts.getOrCreatePlayerAccount(buyerId);
+        boolean serverBuyer = buyer.principal().kind() == AccountKind.SERVER;
+        IBankAccount sellerAccount = accountFor(getPrincipal());
+        IBankAccount buyerAccount = accountFor(buyer.principal());
         int amount = serverBuyer ? requested : capByFunds(requested, buyerAccount);
         if (amount <= 0) return TransactionResult.failure("Buyer has insufficient funds");
 
-        if (externalReservation != null) return executeReservedProviderSell(buyerId, sellerAccount, buyerAccount, amount, level, serverBuyer);
+        if (externalReservation != null) return executeReservedProviderSell(buyer, sellerAccount, buyerAccount, amount, level, serverBuyer);
 
         NonNullList<ItemStack> items = NonNullList.create();
         List<EconomyFluidStack> fluids = new ArrayList<>();
@@ -295,14 +335,15 @@ public class Order implements IOrder {
         if (!serverOrder) consumeEscrow(delivered);
         reduceAfterFill(delivered);
         if (!compensated) {
-            quarantineCompensation(owner, buyerId, refundAmount, "partial built-in SELL delivery refund failed");
+            quarantineCompensation(sellerAccount.getAccountRef(), buyerAccount.getAccountRef(), refundAmount, "partial built-in SELL delivery refund failed");
         }
         return delivered <= 0 ? TransactionResult.failure("Nothing could be delivered")
-                : completeTrade(level, buyerId, owner, delivered, totalFor(delivered));
+                : completeTrade(level, buyer, identity, delivered, totalFor(delivered));
     }
 
-    private TransactionResult executeReservedProviderSell(UUID buyerId, IBankAccount sellerAccount, IBankAccount buyerAccount,
+    private TransactionResult executeReservedProviderSell(MarketIdentity buyer, IBankAccount sellerAccount, IBankAccount buyerAccount,
                                                           int requested, ServerLevel level, boolean serverBuyer) {
+        UUID buyerId = buyer.storageOwner();
         if (level == null) return TransactionResult.failure("Provider-backed orders require a running server level");
         IStorageProvider provider = EconomyApi.storage().provider(externalReservation.providerId()).orElse(null);
         if (provider == null) return TransactionResult.failure("Storage provider unavailable: " + externalReservation.providerId());
@@ -323,7 +364,7 @@ public class Order implements IOrder {
             boolean compensated = refund(sellerAccount, buyerAccount, buyerId, total, "Refund - provider delivery failed");
             String reason = "provider delivery failed after payment: " + provider.id();
             markQuarantined(reason);
-            if (!compensated) markCompensationDue(owner, buyerId, total);
+            if (!compensated) markCompensationDue(sellerAccount.getAccountRef(), buyerAccount.getAccountRef(), total);
             persistRecovery(reason);
             Economy.LOGGER.error("Provider {} failed after payment on SELL order {}; payment compensated={}, reservation {} quarantined",
                     provider.id(), orderId, compensated, beforeDelivery.token(), providerFailure);
@@ -338,33 +379,34 @@ public class Order implements IOrder {
         if (delivered < amount) {
             BigDecimal refundAmount = totalFor(amount - delivered);
             if (!refund(sellerAccount, buyerAccount, buyerId, refundAmount, "Refund - partial provider delivery")) {
-                quarantineCompensation(owner, buyerId, refundAmount, "partial provider SELL delivery refund failed: " + provider.id());
+                quarantineCompensation(sellerAccount.getAccountRef(), buyerAccount.getAccountRef(), refundAmount, "partial provider SELL delivery refund failed: " + provider.id());
             }
         }
         return delivered <= 0 ? TransactionResult.failure("Nothing could be delivered")
-                : completeTrade(level, buyerId, owner, delivered, totalFor(delivered));
+                : completeTrade(level, buyer, identity, delivered, totalFor(delivered));
     }
 
-    private TransactionResult executeBuy(UUID sellerId, int requested, ServerLevel level) {
+    private TransactionResult executeBuy(MarketIdentity seller, int requested, ServerLevel level) {
+        UUID sellerId = seller.storageOwner();
         IAccountManager accounts = accounts();
-        IBankAccount buyerAccount = serverOrder ? accounts.getServerAccount() : accounts.getOrCreatePlayerAccount(owner);
-        IBankAccount sellerAccount = accounts.getOrCreatePlayerAccount(sellerId);
+        IBankAccount buyerAccount = accountFor(getPrincipal());
+        IBankAccount sellerAccount = accountFor(seller.principal());
         int amount = requested;
         if (!serverOrder) amount = capByFunds(amount, buyerAccount);
         if (amount <= 0) return TransactionResult.failure("Buyer has insufficient funds");
 
         if (!(commodity instanceof ItemCommodity) && !(commodity instanceof FluidCommodity)) {
-            return executeProviderBuy(sellerId, buyerAccount, sellerAccount, amount, level);
+            return executeProviderBuy(seller, buyerAccount, sellerAccount, amount, level);
         }
 
         if (level != null && commodity instanceof ItemCommodity item) {
             amount = Math.min(amount, VaultManager.countItemInVaults(level, sellerId, item));
-            if (!serverOrder) amount = Math.min(amount, VaultManager.hasVault(owner)
-                    ? VaultManager.countMaxAcceptableItems(level, owner, createItemStacks(item, amount, level)) : 0);
+            if (!serverOrder) amount = Math.min(amount, VaultManager.hasVault(getStorageOwner())
+                    ? VaultManager.countMaxAcceptableItems(level, getStorageOwner(), createItemStacks(item, amount, level)) : 0);
         } else if (level != null && commodity instanceof FluidCommodity fluid) {
             amount = Math.min(amount, TankManager.countFluidInTanks(level, sellerId, fluid.getFluid()));
-            if (!serverOrder) amount = Math.min(amount, TankManager.hasTank(owner)
-                    ? TankManager.simulateInsertFluidToTanks(level, owner, new EconomyFluidStack(fluid.getFluid(), amount)) : 0);
+            if (!serverOrder) amount = Math.min(amount, TankManager.hasTank(getStorageOwner())
+                    ? TankManager.simulateInsertFluidToTanks(level, getStorageOwner(), new EconomyFluidStack(fluid.getFluid(), amount)) : 0);
         }
         if (amount <= 0) return TransactionResult.failure("Seller lacks goods or buyer lacks storage space");
 
@@ -379,7 +421,7 @@ public class Order implements IOrder {
             NonNullList<ItemStack> extracted = NonNullList.create();
             if (!VaultManager.extractItemFromVaults(level, sellerId, item, amount, extracted)) delivered = 0;
             else if (!serverOrder) {
-                NonNullList<ItemStack> leftover = VaultManager.insertItemStacksToVaults(level, owner, extracted);
+                NonNullList<ItemStack> leftover = VaultManager.insertItemStacksToVaults(level, getStorageOwner(), extracted);
                 delivered = VaultInventoryOps.total(extracted) - VaultInventoryOps.total(leftover);
                 if (!leftover.isEmpty()) VaultManager.insertItemStacksToVaults(level, sellerId, leftover);
             }
@@ -389,7 +431,7 @@ public class Order implements IOrder {
             if (drained < amount) { for (EconomyFluidStack stack : extracted) TankManager.restoreFluidToTanks(level, sellerId, stack); delivered = 0; }
             else if (serverOrder) delivered = drained;
             else {
-                delivered = 0; for (EconomyFluidStack stack : extracted) delivered += TankManager.insertFluidToTanks(level, owner, stack);
+                delivered = 0; for (EconomyFluidStack stack : extracted) delivered += TankManager.insertFluidToTanks(level, getStorageOwner(), stack);
                 if (delivered < drained) TankManager.restoreFluidToTanks(level, sellerId, new EconomyFluidStack(fluid.getFluid(), drained - delivered));
             }
         }
@@ -399,14 +441,15 @@ public class Order implements IOrder {
                 || refund(sellerAccount, buyerAccount, sellerId, refundAmount, "Refund - partial delivery");
         reduceAfterFill(delivered);
         if (!compensated) {
-            quarantineCompensation(sellerId, owner, refundAmount, "partial built-in BUY delivery refund failed");
+            quarantineCompensation(sellerAccount.getAccountRef(), buyerAccount.getAccountRef(), refundAmount, "partial built-in BUY delivery refund failed");
         }
         if (delivered <= 0) return TransactionResult.failure("Nothing could be delivered");
-        return completeTrade(level, owner, sellerId, delivered, totalFor(delivered));
+        return completeTrade(level, identity, seller, delivered, totalFor(delivered));
     }
 
-    private TransactionResult executeProviderBuy(UUID sellerId, IBankAccount buyerAccount, IBankAccount sellerAccount,
+    private TransactionResult executeProviderBuy(MarketIdentity seller, IBankAccount buyerAccount, IBankAccount sellerAccount,
                                                  int requested, ServerLevel level) {
+        UUID sellerId = seller.storageOwner();
         if (level == null) return TransactionResult.failure("Custom commodities require a running server level");
         StorageReservation reservation = EconomyApi.storage().reserve(level, sellerId, commodity, requested).orElse(null);
         if (reservation == null) return TransactionResult.failure("Seller has no compatible registered storage provider");
@@ -430,11 +473,11 @@ public class Order implements IOrder {
         StorageDeliveryResult delivery;
         try {
             delivery = provider.deliverReserved(level, reservation,
-                    serverOrder ? OrderManager.SERVER_ID : owner, amount).validateAgainst(reservation, amount);
+                    serverOrder ? OrderManager.SERVER_ID : getStorageOwner(), amount).validateAgainst(reservation, amount);
         } catch (RuntimeException providerFailure) {
             boolean compensated = refund(sellerAccount, buyerAccount, sellerId, total, "Refund - provider delivery failed");
             if (!compensated) {
-                quarantineCompensation(sellerId, owner, total, "provider BUY delivery failed and refund failed: " + provider.id());
+                quarantineCompensation(sellerAccount.getAccountRef(), buyerAccount.getAccountRef(), total, "provider BUY delivery failed and refund failed: " + provider.id());
             }
             preserveProviderReservation(sellerId, reservation,
                     compensated ? "provider delivery failed after payment"
@@ -452,7 +495,7 @@ public class Order implements IOrder {
         boolean compensated = delivered >= amount || refund(sellerAccount, buyerAccount, sellerId, refundAmount,
                 "Refund - partial provider delivery");
         if (!compensated) {
-            quarantineCompensation(sellerId, owner, refundAmount, "partial provider BUY delivery refund failed: " + provider.id());
+            quarantineCompensation(sellerAccount.getAccountRef(), buyerAccount.getAccountRef(), refundAmount, "partial provider BUY delivery refund failed: " + provider.id());
         }
         var remainingReservation = delivery.remainingReservation();
         if (remainingReservation.isPresent()) {
@@ -465,21 +508,24 @@ public class Order implements IOrder {
             }
         }
         if (delivered <= 0) return TransactionResult.failure("Nothing could be delivered");
-        return completeTrade(level, owner, sellerId, delivered, totalFor(delivered));
+        return completeTrade(level, identity, seller, delivered, totalFor(delivered));
     }
 
-    private TransactionResult completeTrade(ServerLevel level, UUID buyer, UUID seller, int delivered, BigDecimal total) {
+    private TransactionResult completeTrade(ServerLevel level, MarketIdentity buyer, MarketIdentity seller, int delivered, BigDecimal total) {
         recordTrade(level, pricePerUnit, delivered, buyer, seller);
         boolean fluidLike = isFluidLike();
-        notifyPlayerTrade(level, buyer, seller, true, commodity.getDisplayName().getString(), fluidLike, delivered, pricePerUnit, total);
-        notifyPlayerTrade(level, seller, buyer, false, commodity.getDisplayName().getString(), fluidLike, delivered, pricePerUnit, total);
+        notifyPlayerTrade(level, buyer.actor(), seller.actor(), true, commodity.getDisplayName().getString(), fluidLike, delivered, pricePerUnit, total);
+        notifyPlayerTrade(level, seller.actor(), buyer.actor(), false, commodity.getDisplayName().getString(), fluidLike, delivered, pricePerUnit, total);
         if (level != null) {
-            com.nstut.economy.data.EconomyAccountData.recordSnapshot(buyer, level);
-            com.nstut.economy.data.EconomyAccountData.recordSnapshot(seller, level);
+            com.nstut.economy.data.EconomyAccountData.recordSnapshot(buyer.actor(), level);
+            com.nstut.economy.data.EconomyAccountData.recordSnapshot(seller.actor(), level);
         }
         return TransactionResult.success(type == OrderType.SELL ? "Purchase successful" : "Sale successful", total, delivered);
     }
 
+    private IBankAccount accountFor(AccountRef principal) {
+        return principal.kind() == AccountKind.SERVER ? accounts().getServerAccount() : accounts().getOrCreateAccount(principal);
+    }
     private IAccountManager accounts() { return EconomyApi.isReady() ? EconomyApi.accounts() : IAccountManager.getInstance(); }
     private BigDecimal totalFor(int amount) { return pricePerUnit.multiply(BigDecimal.valueOf(amount)); }
     private int capByFunds(int requested, IBankAccount account) {
@@ -540,7 +586,7 @@ public class Order implements IOrder {
                 reservation.token(), orderId);
     }
 
-    private void recordTrade(ServerLevel level, BigDecimal price, int amount, UUID buyer, UUID seller) {
+    private void recordTrade(ServerLevel level, BigDecimal price, int amount, MarketIdentity buyer, MarketIdentity seller) {
         String typeValue = commodity.getType() == ICommodity.CommodityType.ITEM ? "ITEM"
                 : commodity.getType() == ICommodity.CommodityType.FLUID ? "FLUID" : commodity.getTypeId().toString();
         String variantData = "";

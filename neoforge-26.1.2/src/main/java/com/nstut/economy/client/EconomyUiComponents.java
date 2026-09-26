@@ -170,12 +170,9 @@ public final class EconomyUiComponents {
                     drawWalletCell(g, f, teamX, y, teamWidth, teamLabel, team.teamBalance(), c);
                 }
 
-                String principalKey = "TEAM".equalsIgnoreCase(marketPrincipal.get())
-                        ? "ui.economy.principal.team"
-                        : "ui.economy.principal.personal";
-                String market = Component.translatable(
-                        "ui.economy.wallet.market_principal",
-                        Component.translatable(principalKey)).getString();
+                String selected = marketPrincipal.get();
+                if ("PLAYER".equals(selected)) selected = Component.translatable("ui.economy.principal.personal").getString();
+                String market = Component.translatable("ui.economy.wallet.market_principal", selected).getString();
                 UiRender.text(g, f, fitWalletText(f, market, personalWidth), x, y + 21, c.onSurfaceMuted());
 
                 if (showTeam) {

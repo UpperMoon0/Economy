@@ -48,6 +48,7 @@ public class EconomyCommands {
 
     private static LiteralArgumentBuilder<CommandSourceStack> buildEconomyNode(String rootName) {
         return Commands.literal(rootName)
+            .then(TeamWalletCommands.node())
             .then(Commands.literal("balance")
                 .executes(context -> {
                     if (context.getSource().getEntity() instanceof ServerPlayer player) {

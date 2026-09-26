@@ -1,6 +1,8 @@
 package com.nstut.economy.data;
 
 import com.nstut.economy.api.EconomyId;
+import com.nstut.economy.api.AccountRef;
+import com.nstut.economy.api.MarketIdentity;
 import com.nstut.economy.api.StorageReservation;
 import com.nstut.economy.trading.EconomyFluidStack;
 import net.minecraft.core.HolderLookup;
@@ -25,10 +27,11 @@ public class EconomyOrderData extends SavedData {
                 HolderLookup.Provider registries = level.registryAccess();
                 return CompoundTag.CODEC.xmap(tag -> EconomyOrderData.load(tag, registries), data -> data.save(new CompoundTag(), registries));
             });
-    public static final int DATA_VERSION = 2;
+    public static final int DATA_VERSION = 3;
     private final List<CompoundTag> quarantinedOrders = new ArrayList<>();
 
     public static final class OrderSnapshot {
+        public final MarketIdentity identity;
         public final UUID orderId; public final UUID owner; public final String itemId;
         public final int quantity; public final int initialQuantity; public final String pricePerUnit; public final String type;
         public final long createdAt; public final long expiresAt; public final boolean hasExpiry;
@@ -42,6 +45,19 @@ public class EconomyOrderData extends SavedData {
                              List<EconomyFluidStack> reservedFluids, boolean isServerOrder, boolean isInfinite, String commodityType,
                              String commodityTypeId, int commodityPayloadVersion, Map<String, String> commodityPayload,
                              StorageReservation externalReservation, Map<String, String> addonMetadata) {
+            this(orderId, owner, itemId, quantity, initialQuantity, pricePerUnit, type, createdAt, expiresAt,
+                    hasExpiry, reservedItems, reservedFluids, isServerOrder, isInfinite, commodityType,
+                    commodityTypeId, commodityPayloadVersion, commodityPayload, externalReservation, addonMetadata,
+                    isServerOrder ? new MarketIdentity(AccountRef.server(com.nstut.economy.core.AccountManager.SERVER_ACCOUNT_ID), owner, owner)
+                            : MarketIdentity.personal(owner));
+        }
+
+        public OrderSnapshot(UUID orderId, UUID owner, String itemId, int quantity, int initialQuantity, String pricePerUnit,
+                             String type, long createdAt, long expiresAt, boolean hasExpiry, NonNullList<ItemStack> reservedItems,
+                             List<EconomyFluidStack> reservedFluids, boolean isServerOrder, boolean isInfinite, String commodityType,
+                             String commodityTypeId, int commodityPayloadVersion, Map<String, String> commodityPayload,
+                             StorageReservation externalReservation, Map<String, String> addonMetadata, MarketIdentity identity) {
+            this.identity = java.util.Objects.requireNonNull(identity);
             this.orderId = orderId; this.owner = owner; this.itemId = itemId; this.quantity = quantity;
             this.initialQuantity = initialQuantity > 0 ? initialQuantity : quantity; this.pricePerUnit = pricePerUnit; this.type = type;
             this.createdAt = createdAt; this.expiresAt = expiresAt; this.hasExpiry = hasExpiry;
@@ -116,7 +132,7 @@ public class EconomyOrderData extends SavedData {
                         t.getStringOr("PricePerUnit", ""), t.getStringOr("Type", ""), t.getLongOr("CreatedAt", 0L),
                         t.getLongOr("ExpiresAt", 0L), t.getBooleanOr("HasExpiry", false), items, fluids,
                         t.getBooleanOr("ServerOrder", false), t.getBooleanOr("IsInfinite", false), legacy, typeId, payloadVersion,
-                        readStringMap(t, "CommodityPayload"), readReservation(t), readStringMap(t, "AddonMetadata")));
+                        readStringMap(t, "CommodityPayload"), readReservation(t), readStringMap(t, "AddonMetadata"), readIdentity(t, owner)));
             } catch (Exception e) {
                 com.nstut.Economy.LOGGER.error("Failed to load persisted order; quarantining raw snapshot without discarding extension state", e);
                 data.quarantinedOrders.add(t.copy());
@@ -131,6 +147,14 @@ public class EconomyOrderData extends SavedData {
         tag.put("Orders", list);
         if (!quarantinedOrders.isEmpty()) { ListTag q = new ListTag(); for (CompoundTag t : quarantinedOrders) q.add(t.copy()); tag.put("QuarantinedOrders", q); }
         return tag;
+    }
+
+    private static MarketIdentity readIdentity(CompoundTag t, UUID owner) {
+        if (!t.contains("Principal")) {
+            return t.getBooleanOr("ServerOrder", false) ? new MarketIdentity(AccountRef.server(com.nstut.economy.core.AccountManager.SERVER_ACCOUNT_ID), owner, owner)
+                    : MarketIdentity.personal(owner);
+        }
+        return new MarketIdentity(AccountRef.parse(t.getStringOr("Principal", "")), UUID.fromString(t.getStringOr("Actor", "")), UUID.fromString(t.getStringOr("StorageOwner", "")));
     }
 
     private static NonNullList<ItemStack> readItems(CompoundTag t, HolderLookup.Provider registries) {
@@ -159,6 +183,9 @@ public class EconomyOrderData extends SavedData {
     private static CompoundTag writeSnapshot(OrderSnapshot s, HolderLookup.Provider registries) {
         CompoundTag tag = new CompoundTag(); com.nstut.economy.util.NbtCompat.putUuid(tag, "OrderId", s.orderId);
         if (s.owner != null) com.nstut.economy.util.NbtCompat.putUuid(tag, "Owner", s.owner);
+        tag.putString("Principal", s.identity.principal().toString());
+        tag.putString("Actor", s.identity.actor().toString());
+        tag.putString("StorageOwner", s.identity.storageOwner().toString());
         tag.putString("ItemId", s.itemId); tag.putInt("Quantity", s.quantity); tag.putInt("InitialQuantity", s.initialQuantity);
         tag.putString("PricePerUnit", s.pricePerUnit); tag.putString("Type", s.type); tag.putLong("CreatedAt", s.createdAt); tag.putLong("ExpiresAt", s.expiresAt);
         tag.putBoolean("HasExpiry", s.hasExpiry); tag.putBoolean("ServerOrder", s.isServerOrder); tag.putBoolean("IsInfinite", s.isInfinite);

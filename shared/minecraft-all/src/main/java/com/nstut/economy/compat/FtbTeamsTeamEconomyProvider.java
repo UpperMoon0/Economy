@@ -85,6 +85,18 @@ public final class FtbTeamsTeamEconomyProvider implements TeamEconomyProvider {
     }
 
     @Override
+    public boolean isTeamDeleted(UUID teamId) {
+        Optional<Object> manager = manager();
+        if (manager.isEmpty()) return false;
+        try {
+            Object result = getTeamByIdMethod.invoke(manager.get(), teamId);
+            return result instanceof Optional<?> optional && optional.isEmpty();
+        } catch (ReflectiveOperationException | RuntimeException failure) {
+            return false;
+        }
+    }
+
+    @Override
     public boolean isAvailable() {
         return manager().isPresent();
     }

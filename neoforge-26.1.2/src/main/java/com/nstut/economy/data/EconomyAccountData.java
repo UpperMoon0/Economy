@@ -2,6 +2,7 @@ package com.nstut.economy.data;
 
 import com.nstut.economy.api.AccountKind;
 import com.nstut.economy.api.AccountRef;
+import com.nstut.economy.api.TeamWalletState;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
@@ -51,6 +52,12 @@ public class EconomyAccountData extends SavedData implements com.nstut.economy.c
             this.balance = balance;
             this.assets = assets;
         }
+    }
+
+    private final Map<UUID, TeamWalletState> teamWallets = new HashMap<>();
+    public Map<UUID, TeamWalletState> getTeamWallets() { return Map.copyOf(teamWallets); }
+    public void putTeamWallet(TeamWalletState state) {
+        if (!state.equals(teamWallets.put(state.teamId(), state))) setDirty();
     }
 
     private final Map<UUID, BigDecimal> balances = new HashMap<>();
@@ -194,8 +201,30 @@ public class EconomyAccountData extends SavedData implements com.nstut.economy.c
         return target.getDataStorage().computeIfAbsent(TYPE);
     }
 
+    private static void readTeamWallets(CompoundTag tag, EconomyAccountData data) {
+        ListTag list = tag.getListOrEmpty("TeamWallets");
+        for (int i = 0; i < list.size(); i++) {
+            CompoundTag entry = list.getCompoundOrEmpty(i);
+            UUID team = UUID.fromString(entry.getStringOr("Team", ""));
+            UUID owner = UUID.fromString(entry.getStringOr("Owner", ""));
+            data.teamWallets.put(team, new TeamWalletState(team, owner, entry.getBooleanOr("Closing", false)));
+        }
+    }
+    private void writeTeamWallets(CompoundTag tag) {
+        ListTag list = new ListTag();
+        for (TeamWalletState state : teamWallets.values()) {
+            CompoundTag entry = new CompoundTag();
+            entry.putString("Team", state.teamId().toString());
+            entry.putString("Owner", state.ownerId().toString());
+            entry.putBoolean("Closing", state.closing());
+            list.add(entry);
+        }
+        tag.put("TeamWallets", list);
+    }
+
     public static EconomyAccountData load(CompoundTag tag) {
         EconomyAccountData data = new EconomyAccountData();
+        readTeamWallets(tag, data);
         CompoundTag balancesTag = tag.getCompoundOrEmpty("Balances");
         for (String key : balancesTag.keySet()) {
             try {
@@ -282,6 +311,7 @@ public class EconomyAccountData extends SavedData implements com.nstut.economy.c
     }
 
     public CompoundTag save(CompoundTag tag) {
+        writeTeamWallets(tag);
         CompoundTag balancesTag = new CompoundTag();
         for (Map.Entry<UUID, BigDecimal> e : balances.entrySet())
             balancesTag.putString(e.getKey().toString(), e.getValue().toPlainString());
