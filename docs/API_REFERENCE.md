@@ -40,6 +40,16 @@ EconomyId parsed = EconomyId.parse("minecraft:iron_ingot");
 
 Namespaces accept `[a-z0-9_.-]+`; paths accept `[a-z0-9/._-]+`. Use your own addon namespace for extension IDs.
 
+### `MarketIdentity`
+
+Typed attribution for market actions and orders:
+
+- `AccountRef principal()` - economic owner whose balance is debited or credited.
+- `UUID actor()` - player who placed or performed the action.
+- `UUID storageOwner()` - player whose Vault/Tank/provider storage supplies or receives physical goods.
+
+These fields may intentionally differ for team orders. Authorization, self-trade checks, and economic auditing should use `principal()` (or the complete `MarketIdentity`) rather than comparing raw UUIDs. `actor()` and `storageOwner()` describe human/storage attribution, not account ownership.
+
 ### `CommodityKey`
 
 Full stable market identity: commodity type plus commodity ID.
@@ -215,11 +225,13 @@ All four balance/transfer events carry typed identities: `accountRef()` on balan
 
 Market event payloads published through `EconomyEvents`.
 
-- `OrderCreatePre` — cancellable proposal with `owner()`, `commodity()`, `type()`, `quantity()`, and `pricePerUnit()`; posted before Economy creates new provider escrow.
-- `OrderCreated` — `order`, `requestedQuantity`, `filledQuantity`.
-- `OrderEdited` — resulting `order`.
-- `OrderCancelled` — `orderId`, `owner`.
-- `TradeCompleted` — immutable `TradeView trade`.
+- `OrderCreatePre` - cancellable proposal with preferred typed `identity()`, plus `commodity()`, `type()`, `quantity()`, and `pricePerUnit()`; posted before Economy creates new provider escrow. `owner()` is only the legacy actor-UUID projection.
+- `OrderCreated` - `order`, `requestedQuantity`, `filledQuantity`; inspect `order.getIdentity()` / `getPrincipal()` for team-aware attribution.
+- `OrderEdited` - resulting `order`; inspect the typed order identity rather than `getOwner()` for authorization or auditing.
+- `OrderCancelled` - `orderId`, preferred typed `identity()`; `owner()` is only the legacy actor-UUID projection.
+- `TradeCompleted` - immutable `TradeView trade`.
+
+For market authorization, self-trade detection, and audit attribution, addons should use `MarketIdentity` / `AccountRef`. Legacy `owner()` and `IOrder#getOwner()` values are UUID projections kept for source compatibility and are not sufficient to distinguish `PLAYER:<uuid>` from `TEAM:<uuid>` or to represent principal/actor/storage-owner separation.
 
 Storage-provider registry changes are also events:
 
@@ -365,6 +377,8 @@ Read/operation contract for one order.
 - `boolean canExecute(MarketIdentity trader)` - typed principal-aware execution check.
 - `TransactionResult execute(UUID trader, ServerLevel level)` / `execute(UUID trader)` - legacy compatibility paths.
 - `TransactionResult execute(MarketIdentity trader, ServerLevel level)` / `execute(MarketIdentity trader)` - typed execution paths.
+
+For team-aware code, `getIdentity()` is the canonical attribution tuple. `getPrincipal()` identifies the economic account, `getActor()` identifies the player who placed the order, and `getStorageOwner()` identifies the player storage used for goods. `getOwner()` is a legacy storage-owner UUID projection and must not be used as an account-authorization key.
 
 `cancel` remains on the compatibility interface, but addon code should prefer `IOrderManager` for cancellation/editing so world resolution, current team authorization, escrow restoration, and order-book invariants stay centralized.
 
