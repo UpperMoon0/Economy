@@ -1,6 +1,8 @@
 package com.nstut.economy.data;
 
 import com.nstut.economy.api.EconomyId;
+import com.nstut.economy.api.AccountRef;
+import com.nstut.economy.api.MarketIdentity;
 import com.nstut.economy.api.StorageReservation;
 import com.nstut.economy.trading.EconomyFluidStack;
 import net.minecraft.core.HolderLookup;
@@ -19,10 +21,11 @@ import java.util.UUID;
 
 public class EconomyOrderData extends SavedData {
     private static final String NAME = "economy_orders";
-    public static final int DATA_VERSION = 2;
+    public static final int DATA_VERSION = 3;
     private final List<CompoundTag> quarantinedOrders = new ArrayList<>();
 
     public static final class OrderSnapshot {
+        public final MarketIdentity identity;
         public final UUID orderId; public final UUID owner; public final String itemId;
         public final int quantity; public final int initialQuantity; public final String pricePerUnit; public final String type;
         public final long createdAt; public final long expiresAt; public final boolean hasExpiry;
@@ -38,6 +41,20 @@ public class EconomyOrderData extends SavedData {
                              boolean isServerOrder, boolean isInfinite, String commodityType,
                              String commodityTypeId, int commodityPayloadVersion, Map<String, String> commodityPayload,
                              StorageReservation externalReservation, Map<String, String> addonMetadata) {
+            this(orderId, owner, itemId, quantity, initialQuantity, pricePerUnit, type, createdAt, expiresAt,
+                    hasExpiry, reservedItems, reservedFluids, isServerOrder, isInfinite, commodityType,
+                    commodityTypeId, commodityPayloadVersion, commodityPayload, externalReservation, addonMetadata,
+                    isServerOrder ? new MarketIdentity(AccountRef.server(com.nstut.economy.core.AccountManager.SERVER_ACCOUNT_ID), owner, owner)
+                            : MarketIdentity.personal(owner));
+        }
+
+        public OrderSnapshot(UUID orderId, UUID owner, String itemId, int quantity, int initialQuantity,
+                             String pricePerUnit, String type, long createdAt, long expiresAt, boolean hasExpiry,
+                             NonNullList<ItemStack> reservedItems, List<EconomyFluidStack> reservedFluids,
+                             boolean isServerOrder, boolean isInfinite, String commodityType,
+                             String commodityTypeId, int commodityPayloadVersion, Map<String, String> commodityPayload,
+                             StorageReservation externalReservation, Map<String, String> addonMetadata, MarketIdentity identity) {
+            this.identity = java.util.Objects.requireNonNull(identity);
             this.orderId = orderId; this.owner = owner; this.itemId = itemId; this.quantity = quantity;
             this.initialQuantity = initialQuantity > 0 ? initialQuantity : quantity; this.pricePerUnit = pricePerUnit;
             this.type = type; this.createdAt = createdAt; this.expiresAt = expiresAt; this.hasExpiry = hasExpiry;
@@ -108,7 +125,7 @@ public class EconomyOrderData extends SavedData {
                 data.orders.put(id, new OrderSnapshot(id, owner, t.getString("ItemId"), qty, initial, t.getString("PricePerUnit"),
                         t.getString("Type"), t.getLong("CreatedAt"), t.getLong("ExpiresAt"), t.getBoolean("HasExpiry"), reserved, fluids,
                         t.getBoolean("ServerOrder"), t.getBoolean("IsInfinite"), legacy, typeId, payloadVersion,
-                        readStringMap(t, "CommodityPayload"), readReservation(t), readStringMap(t, "AddonMetadata")));
+                        readStringMap(t, "CommodityPayload"), readReservation(t), readStringMap(t, "AddonMetadata"), readIdentity(t, owner)));
             } catch (Exception e) {
                 com.nstut.Economy.LOGGER.error("Failed to load persisted order; quarantining raw snapshot without discarding extension state", e);
                 data.quarantinedOrders.add(t.copy());
@@ -124,6 +141,14 @@ public class EconomyOrderData extends SavedData {
         tag.put("Orders", list);
         if (!quarantinedOrders.isEmpty()) { ListTag q = new ListTag(); for (CompoundTag t : quarantinedOrders) q.add(t.copy()); tag.put("QuarantinedOrders", q); }
         return tag;
+    }
+
+    private static MarketIdentity readIdentity(CompoundTag t, UUID owner) {
+        if (!t.contains("Principal")) {
+            return t.getBoolean("ServerOrder") ? new MarketIdentity(AccountRef.server(com.nstut.economy.core.AccountManager.SERVER_ACCOUNT_ID), owner, owner)
+                    : MarketIdentity.personal(owner);
+        }
+        return new MarketIdentity(AccountRef.parse(t.getString("Principal")), UUID.fromString(t.getString("Actor")), UUID.fromString(t.getString("StorageOwner")));
     }
 
     private static NonNullList<ItemStack> readItems(CompoundTag t, HolderLookup.Provider registries) {
@@ -151,6 +176,9 @@ public class EconomyOrderData extends SavedData {
     }
     private static CompoundTag writeSnapshot(OrderSnapshot s, HolderLookup.Provider registries) {
         CompoundTag tag = new CompoundTag(); tag.putUUID("OrderId", s.orderId); if (s.owner != null) tag.putUUID("Owner", s.owner);
+        tag.putString("Principal", s.identity.principal().toString());
+        tag.putString("Actor", s.identity.actor().toString());
+        tag.putString("StorageOwner", s.identity.storageOwner().toString());
         tag.putString("ItemId", s.itemId); tag.putInt("Quantity", s.quantity); tag.putInt("InitialQuantity", s.initialQuantity);
         tag.putString("PricePerUnit", s.pricePerUnit); tag.putString("Type", s.type); tag.putLong("CreatedAt", s.createdAt);
         tag.putLong("ExpiresAt", s.expiresAt); tag.putBoolean("HasExpiry", s.hasExpiry); tag.putBoolean("ServerOrder", s.isServerOrder);

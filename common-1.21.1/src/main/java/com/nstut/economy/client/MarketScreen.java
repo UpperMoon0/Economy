@@ -371,7 +371,6 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         sidebar.fillHeight();
         sidebar.addChild(Ui.text(Component.translatable("ui.economy.brand")).style(TextStyle.TITLE));
         sidebar.addChild(Ui.text(Component.translatable("ui.economy.market.subtitle")));
-        sidebar.addChild(EconomyUiComponents.balancePill(MarketClientStore.balance));
         sidebar.addChild(Ui.divider());
         buildNav(sidebar);
         sidebar.addChild(Ui.spacer());
@@ -409,6 +408,10 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
     private UIComponent buildContent() {
         VStack content = new VStack().gap(6);
         content.flex();
+        content.addChild(EconomyUiComponents.walletBar(
+                MarketClientStore.balance,
+                MarketClientStore.teamWallet,
+                MarketClientStore.marketPrincipal));
         UIComponent switcher = Ui.switcher(view)
                 .when(MarketView.BROWSE, this::buildBrowseView)
                 .when(MarketView.DETAIL, this::buildDetailView)

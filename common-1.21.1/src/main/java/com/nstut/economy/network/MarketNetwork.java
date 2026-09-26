@@ -152,11 +152,28 @@ public class MarketNetwork {
         return value.stripTrailingZeros().toPlainString();
     }
 
+    private static boolean canViewTrade(UUID player, com.nstut.economy.api.MarketIdentity identity) {
+        return identity.actor().equals(player) || (identity.principal().kind() == com.nstut.economy.api.AccountKind.TEAM
+                && com.nstut.economy.api.EconomyApi.teamEconomy().canView(player, identity.principal().id()));
+    }
+
+    private static String describePrincipal(com.nstut.economy.api.MarketIdentity identity, String actorName) {
+        if (identity.principal().kind() != com.nstut.economy.api.AccountKind.TEAM) return actorName;
+        String name = identity.principal().id().toString();
+        var provider = com.nstut.economy.api.EconomyApi.teamEconomy().provider().orElse(null);
+        if (provider != null) {
+            try { name = provider.getTeam(identity.principal().id()).map(com.nstut.economy.api.TeamRef::displayName).orElse(name); }
+            catch (RuntimeException unavailable) { /* Retain the durable team ID. */ }
+        }
+        return "Team " + name + " (placed by " + actorName + ")";
+    }
+
     public static boolean isValidQuantity(int quantity) {
         return com.nstut.economy.util.OrderInputValidator.isValidQuantity(quantity);
     }
 
     public static class OrderEntry {
+        public final com.nstut.economy.api.MarketIdentity identity;
         public final UUID orderId;
         public final UUID ownerId;
         public final String sellerName;
@@ -168,6 +185,10 @@ public class MarketNetwork {
         public final boolean isInfinite;
 
         public OrderEntry(UUID orderId, UUID ownerId, String sellerName, String price, int quantity, int initialQuantity, boolean isPlayerOwned, boolean isServerOrder, boolean isInfinite) {
+            this(orderId, ownerId, sellerName, price, quantity, initialQuantity, isPlayerOwned, isServerOrder, isInfinite, com.nstut.economy.api.MarketIdentity.personal(ownerId));
+        }
+        public OrderEntry(UUID orderId, UUID ownerId, String sellerName, String price, int quantity, int initialQuantity, boolean isPlayerOwned, boolean isServerOrder, boolean isInfinite, com.nstut.economy.api.MarketIdentity identity) {
+            this.identity = identity;
             this.orderId = orderId; this.ownerId = ownerId; this.sellerName = sellerName; this.price = price;
             this.quantity = quantity; this.initialQuantity = initialQuantity > 0 ? initialQuantity : quantity;
             this.isPlayerOwned = isPlayerOwned; this.isServerOrder = isServerOrder; this.isInfinite = isInfinite;
@@ -187,10 +208,11 @@ public class MarketNetwork {
             buf.writeBoolean(isPlayerOwned);
             buf.writeBoolean(isServerOrder);
             buf.writeBoolean(isInfinite);
+            MarketIdentityCodec.write(buf, identity);
         }
 
         public static OrderEntry read(FriendlyByteBuf buf) {
-            return new OrderEntry(buf.readUUID(), buf.readUUID(), buf.readUtf(), buf.readUtf(), buf.readInt(), buf.readInt(), buf.readBoolean(), buf.readBoolean(), buf.readBoolean());
+            return new OrderEntry(buf.readUUID(), buf.readUUID(), buf.readUtf(), buf.readUtf(), buf.readInt(), buf.readInt(), buf.readBoolean(), buf.readBoolean(), buf.readBoolean(), MarketIdentityCodec.read(buf));
         }
     }
 
@@ -222,16 +244,49 @@ public class MarketNetwork {
         public final String balance;
         public final int vaultCount;
         public final List<ItemCardData> cards;
+        public final String teamMode;
+        public final boolean teamWalletVisible;
+        public final String teamName;
+        public final String teamBalance;
+        public final String teamRole;
+        public final boolean teamCanDeposit;
+        public final boolean teamCanSpend;
+        public final String teamSpendRole;
+        public final String marketPrincipal;
 
-        public SyncItemListPacket(String balance, int vaultCount, List<ItemCardData> cards) {
-            this.balance = balance; this.vaultCount = vaultCount; this.cards = cards;
+        public SyncItemListPacket(String balance, int vaultCount, List<ItemCardData> cards,
+                                  String teamMode, boolean teamWalletVisible, String teamName,
+                                  String teamBalance, String teamRole, boolean teamCanDeposit,
+                                  boolean teamCanSpend, String teamSpendRole, String marketPrincipal) {
+            this.balance = balance;
+            this.vaultCount = vaultCount;
+            this.cards = cards;
+            this.teamMode = teamMode;
+            this.teamWalletVisible = teamWalletVisible;
+            this.teamName = teamName;
+            this.teamBalance = teamBalance;
+            this.teamRole = teamRole;
+            this.teamCanDeposit = teamCanDeposit;
+            this.teamCanSpend = teamCanSpend;
+            this.teamSpendRole = teamSpendRole;
+            this.marketPrincipal = marketPrincipal;
         }
 
         public static void encode(SyncItemListPacket pkt, FriendlyByteBuf buf) {
+            // Preserve the legacy list payload as a prefix, then append wallet metadata.
             buf.writeUtf(pkt.balance);
             buf.writeInt(pkt.vaultCount);
             buf.writeInt(pkt.cards.size());
             for (ItemCardData c : pkt.cards) c.write(buf);
+            buf.writeUtf(pkt.teamMode);
+            buf.writeBoolean(pkt.teamWalletVisible);
+            buf.writeUtf(pkt.teamName);
+            buf.writeUtf(pkt.teamBalance);
+            buf.writeUtf(pkt.teamRole);
+            buf.writeBoolean(pkt.teamCanDeposit);
+            buf.writeBoolean(pkt.teamCanSpend);
+            buf.writeUtf(pkt.teamSpendRole);
+            buf.writeUtf(pkt.marketPrincipal);
         }
 
         public static SyncItemListPacket decode(FriendlyByteBuf buf) {
@@ -240,7 +295,18 @@ public class MarketNetwork {
             int count = buf.readInt();
             List<ItemCardData> cards = new ArrayList<>();
             for (int i = 0; i < count; i++) cards.add(ItemCardData.read(buf));
-            return new SyncItemListPacket(balance, vaultCount, cards);
+            String teamMode = buf.readUtf();
+            boolean teamWalletVisible = buf.readBoolean();
+            String teamName = buf.readUtf();
+            String teamBalance = buf.readUtf();
+            String teamRole = buf.readUtf();
+            boolean teamCanDeposit = buf.readBoolean();
+            boolean teamCanSpend = buf.readBoolean();
+            String teamSpendRole = buf.readUtf();
+            String marketPrincipal = buf.readUtf();
+            return new SyncItemListPacket(balance, vaultCount, cards, teamMode, teamWalletVisible,
+                    teamName, teamBalance, teamRole, teamCanDeposit, teamCanSpend, teamSpendRole,
+                    marketPrincipal);
         }
 
         public static void handle(SyncItemListPacket pkt, Supplier<NetworkManager.PacketContext> ctx) {
@@ -509,6 +575,13 @@ public class MarketNetwork {
 
                     ServerLevel level = player.serverLevel();
                     OrderManager orderManager = Economy.getOrderManager();
+                    com.nstut.economy.api.MarketIdentity identity;
+                    try { identity = com.nstut.economy.server.MarketWalletSelection.identity(player.getUUID()); }
+                    catch (IllegalStateException denied) {
+                        sendActionResult(player, Action.CREATE_ORDER, Result.ERROR, "ui.economy.error.team_permission",
+                                com.nstut.economy.api.EconomyApi.teamEconomy().spendRole().name());
+                        return;
+                    }
                     CreateOrderResult creation;
 
                     if ("FLUID".equals(pkt.commodityType)) {
@@ -536,10 +609,10 @@ public class MarketNetwork {
                                 sendItemDetail(player, pkt.itemId, pkt.commodityType);
                                 return;
                             }
-                            creation = orderManager.createSellOrder(player.getUUID(), commodity, pkt.quantity, price,
+                            creation = orderManager.createSellOrder(identity, commodity, pkt.quantity, price,
                                     net.minecraft.core.NonNullList.create(), reservedFluids, level);
                         } else {
-                            creation = orderManager.createBuyOrder(player.getUUID(), commodity, pkt.quantity, price, pkt.isInfinite, level);
+                            creation = orderManager.createBuyOrder(identity, commodity, pkt.quantity, price, pkt.isInfinite, level);
                         }
                     } else {
                         ItemCommodity commodity = resolveItemCommodityForOrder(orderManager, level, player.getUUID(), pkt.itemId);
@@ -563,9 +636,9 @@ public class MarketNetwork {
                                 sendItemDetail(player, pkt.itemId, pkt.commodityType);
                                 return;
                             }
-                            creation = orderManager.createSellOrder(player.getUUID(), commodity, pkt.quantity, price, reserved, level);
+                            creation = orderManager.createSellOrder(identity, commodity, pkt.quantity, price, reserved, new ArrayList<>(), level);
                         } else {
-                            creation = orderManager.createBuyOrder(player.getUUID(), commodity, pkt.quantity, price, pkt.isInfinite, level);
+                            creation = orderManager.createBuyOrder(identity, commodity, pkt.quantity, price, pkt.isInfinite, level);
                         }
                     }
                     sendCreateResult(player, creation);
@@ -593,9 +666,16 @@ public class MarketNetwork {
                 if (player == null) return;
                 OrderManager orderManager = Economy.getOrderManager();
                 var opt = orderManager.getOrder(pkt.orderId);
-                if (opt.isEmpty() || opt.get().getOwner().equals(player.getUUID())) { sendItemList(player); return; }
+                if (opt.isEmpty()) { sendItemList(player); return; }
                 Order order = opt.get();
-                IOrder.TransactionResult result = order.execute(player.getUUID(), player.serverLevel());
+                com.nstut.economy.api.MarketIdentity identity;
+                try { identity = com.nstut.economy.server.MarketWalletSelection.identity(player.getUUID()); }
+                catch (IllegalStateException denied) {
+                    sendActionResult(player, Action.ACCEPT_ORDER, Result.ERROR, "ui.economy.error.team_permission",
+                            com.nstut.economy.api.EconomyApi.teamEconomy().spendRole().name());
+                    return;
+                }
+                IOrder.TransactionResult result = order.execute(identity, player.serverLevel());
                 sendActionResult(player, Action.ACCEPT_ORDER, result.success ? Result.SUCCESS : Result.ERROR, result.success ? "ui.economy.toast.order_completed" : "ui.economy.error.transaction_failed");
                 orderManager.cleanupOrders();
                 if (order.getCommodity() instanceof ItemCommodity ic) {
@@ -624,7 +704,7 @@ public class MarketNetwork {
                 try {
                     OrderManager orderManager = Economy.getOrderManager();
                     var opt = orderManager.getOrder(pkt.orderId);
-                    if (opt.isPresent() && opt.get().getOwner().equals(player.getUUID())) {
+                    if (opt.isPresent() && opt.get().getIdentity().canManage(player.getUUID(), com.nstut.economy.api.EconomyApi.teamEconomy())) {
                         boolean cancelled = orderManager.cancelOrder(pkt.orderId, player.getUUID(), player.serverLevel());
                         if (!cancelled) sendActionResult(player, Action.CANCEL_ORDER, Result.WARNING, "ui.economy.error.cancel_storage_full");
                         else sendActionResult(player, Action.CANCEL_ORDER, Result.SUCCESS, "ui.economy.toast.order_cancelled");
@@ -701,6 +781,7 @@ public class MarketNetwork {
     }
 
     public static class ActiveOrderEntry {
+        public final com.nstut.economy.api.MarketIdentity identity;
         public final UUID orderId;
         public final String itemId;
         public final String displayName;
@@ -712,6 +793,10 @@ public class MarketNetwork {
         public final long createdAt;
 
         public ActiveOrderEntry(UUID orderId, String itemId, String displayName, String price, int quantity, int initialQuantity, boolean isSell, boolean isInfinite, long createdAt) {
+            this(orderId, itemId, displayName, price, quantity, initialQuantity, isSell, isInfinite, createdAt, null);
+        }
+        public ActiveOrderEntry(UUID orderId, String itemId, String displayName, String price, int quantity, int initialQuantity, boolean isSell, boolean isInfinite, long createdAt, com.nstut.economy.api.MarketIdentity identity) {
+            this.identity = identity;
             this.orderId = orderId; this.itemId = itemId; this.displayName = displayName; this.price = price;
             this.quantity = quantity; this.initialQuantity = initialQuantity > 0 ? initialQuantity : quantity;
             this.isSell = isSell; this.isInfinite = isInfinite; this.createdAt = createdAt;
@@ -727,10 +812,11 @@ public class MarketNetwork {
             buf.writeBoolean(isSell);
             buf.writeBoolean(isInfinite);
             buf.writeLong(createdAt);
+            MarketIdentityCodec.write(buf, identity);
         }
 
         public static ActiveOrderEntry read(FriendlyByteBuf buf) {
-            return new ActiveOrderEntry(buf.readUUID(), buf.readUtf(), buf.readUtf(), buf.readUtf(), buf.readInt(), buf.readInt(), buf.readBoolean(), buf.readBoolean(), buf.readLong());
+            return new ActiveOrderEntry(buf.readUUID(), buf.readUtf(), buf.readUtf(), buf.readUtf(), buf.readInt(), buf.readInt(), buf.readBoolean(), buf.readBoolean(), buf.readLong(), MarketIdentityCodec.read(buf));
         }
     }
 
@@ -791,7 +877,7 @@ public class MarketNetwork {
             boolean isSell = o.getType() == IOrder.OrderType.SELL;
 
             entries.add(new ActiveOrderEntry(
-                o.getOrderId(), itemId, displayName, priceStr, o.getQuantity(), o.getInitialQuantity(),
+                o.getOrderId(), itemId, displayName + " [" + describePrincipal(o.getIdentity(), o.getActor().toString()) + "]", priceStr, o.getQuantity(), o.getInitialQuantity(),
                 isSell, o.isInfinite(), o.getCreatedAt().toEpochMilli()
             ));
         }
@@ -953,10 +1039,21 @@ public class MarketNetwork {
         return null;
     }
 
-    private static void sendItemList(ServerPlayer player) {
+    public static void sendItemList(ServerPlayer player) {
         OrderManager orderManager = Economy.getOrderManager();
-        var account = IAccountManager.getInstance().getOrCreatePlayerAccount(player.getUUID());
-        String balance = exactDecimal(account.getBalance());
+        var wallet = com.nstut.economy.api.EconomyApi.teamEconomy()
+                .walletSnapshot(IAccountManager.getInstance(), player.getUUID());
+        String balance = exactDecimal(wallet.personalBalance());
+        boolean teamWalletVisible = wallet.teamVisible();
+        String teamMode = wallet.mode().name();
+        String teamName = wallet.team().map(com.nstut.economy.api.TeamRef::displayName).orElse("");
+        String teamBalance = exactDecimal(wallet.teamBalance());
+        String teamRole = wallet.role().name();
+        boolean teamCanDeposit = wallet.canDeposit();
+        boolean teamCanSpend = wallet.canSpend();
+        String teamSpendRole = wallet.spendRole().name();
+        // The label reflects the server-authoritative principal selected for new market actions.
+        String marketPrincipal = com.nstut.economy.server.MarketWalletSelection.label(player.getUUID());
         int vaultCount = VaultManager.getVaultRecords(player.getUUID()).size();
 
         java.util.Set<String> itemIds = new java.util.LinkedHashSet<>();
@@ -1037,7 +1134,10 @@ public class MarketNetwork {
         }
 
         sendItemVariantData(player);
-        CHANNEL.sendToPlayer(player, new SyncItemListPacket(balance, vaultCount, cards));
+        CHANNEL.sendToPlayer(player, new SyncItemListPacket(
+                balance, vaultCount, cards,
+                teamMode, teamWalletVisible, teamName, teamBalance, teamRole,
+                teamCanDeposit, teamCanSpend, teamSpendRole, marketPrincipal));
     }
 
     private static void sendItemDetail(ServerPlayer player, String itemId) {
@@ -1100,10 +1200,11 @@ public class MarketNetwork {
                 if (profile.isPresent()) sellerName = profile.get().getName();
             }
 
+            sellerName = describePrincipal(order.getIdentity(), sellerName);
             OrderEntry entry = new OrderEntry(
                 order.getOrderId(), order.getOwner(), sellerName,
                 priceForClient(order.getPricePerUnit(), order.getCommodity() instanceof FluidCommodity),
-                order.getQuantity(), order.getInitialQuantity(), order.getOwner().equals(playerId), order.isServerOrder(), order.isInfinite());
+                order.getQuantity(), order.getInitialQuantity(), order.getIdentity().canManage(playerId, com.nstut.economy.api.EconomyApi.teamEconomy()), order.isServerOrder(), order.isInfinite(), order.getIdentity());
 
             if (order.getType() == IOrder.OrderType.SELL) {
                 asks.add(entry);
@@ -1185,8 +1286,8 @@ public class MarketNetwork {
         // Iterate newest-first
         for (int i = all.size() - 1; i >= 0; i--) {
             com.nstut.economy.data.EconomyTradeData.TradeSnapshot t = all.get(i);
-            boolean isBuyer  = playerId.equals(t.buyer);
-            boolean isSeller = playerId.equals(t.seller);
+            boolean isBuyer  = canViewTrade(playerId, t.buyerIdentity);
+            boolean isSeller = canViewTrade(playerId, t.sellerIdentity);
             if (!isBuyer && !isSeller) continue;
 
             // Resolve item display name
@@ -1223,7 +1324,7 @@ public class MarketNetwork {
 
             entries.add(new HistoryEntry(t.itemId, displayName,
                     priceForClient(new java.math.BigDecimal(t.price), fluidCommodity),
-                    t.quantity, isSeller, t.timestamp, counterName));
+                    t.quantity, isSeller, t.timestamp, describePrincipal(isSeller ? t.buyerIdentity : t.sellerIdentity, counterName), t.buyerIdentity, t.sellerIdentity));
         }
 
         CHANNEL.sendToPlayer(player, new SyncOrderHistoryPacket(entries));

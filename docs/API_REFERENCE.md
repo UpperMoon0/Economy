@@ -16,6 +16,7 @@ Stable static facade for runtime services and extension registries.
 - `IMarketDataService marketData()` — active read-only market analytics service; throws if Economy is not ready.
 - `CommodityTypeRegistry commodityTypes()` — process-level registry for commodity type handlers/codecs.
 - `StorageProviderRegistry storage()` — process-level registry for market storage providers.
+- `TeamEconomyRegistry teamEconomy()` — process-level optional team provider and shared-wallet policy.
 - `Optional<ServerLevel> serverLevel()` — currently bound server overworld, when available.
 
 `bindRuntime` and `unbindRuntime` are internal lifecycle hooks even though they are public Java methods. Addons must not call them.
@@ -39,6 +40,16 @@ EconomyId parsed = EconomyId.parse("minecraft:iron_ingot");
 
 Namespaces accept `[a-z0-9_.-]+`; paths accept `[a-z0-9/._-]+`. Use your own addon namespace for extension IDs.
 
+### `MarketIdentity`
+
+Typed attribution for market actions and orders:
+
+- `AccountRef principal()` - economic owner whose balance is debited or credited.
+- `UUID actor()` - player who placed or performed the action.
+- `UUID storageOwner()` - player whose Vault/Tank/provider storage supplies or receives physical goods.
+
+These fields may intentionally differ for team orders. Authorization, self-trade checks, and economic auditing should use `principal()` (or the complete `MarketIdentity`) rather than comparing raw UUIDs. `actor()` and `storageOwner()` describe human/storage attribution, not account ownership.
+
 ### `CommodityKey`
 
 Full stable market identity: commodity type plus commodity ID.
@@ -52,10 +63,21 @@ Use `CommodityKey` for analytics and persistent keys where two commodity types c
 
 ## Accounts
 
+### `AccountRef` / `AccountKind`
+
+Typed economic identity. `AccountKind` contains `PLAYER`, `TEAM`, `SERVER`, and `TAX`. The kind participates in identity, so `PLAYER:<uuid>` and `TEAM:<same uuid>` are distinct accounts.
+
 ### `IAccountManager`
 
 Central account service.
 
+- `Optional<IBankAccount> getAccount(AccountRef account)`
+- `IBankAccount getOrCreateAccount(AccountRef account)`
+- `Optional<IBankAccount> getTeamAccount(UUID team)`
+- `IBankAccount getOrCreateTeamAccount(UUID team)`
+- `boolean hasAccount(AccountRef account)`
+- `boolean deleteAccount(AccountRef account)`
+- `boolean transfer(AccountRef source, AccountRef target, BigDecimal amount, ITransactionContext context)`
 - `Optional<IBankAccount> getPlayerAccount(UUID player)`
 - `IBankAccount getOrCreatePlayerAccount(UUID player)`
 - `boolean hasAccount(UUID player)`
@@ -73,7 +95,8 @@ Transfers must preserve atomicity: a failed/rejected target credit must not leav
 
 Virtual currency account.
 
-- `UUID getOwner()`
+- `UUID getOwner()` — compatibility raw UUID.
+- `AccountRef getAccountRef()` — preferred typed identity; defaults to `PLAYER` for legacy third-party implementations.
 - `BigDecimal getBalance()`
 - `boolean credit(BigDecimal amount, ITransactionContext context)`
 - `boolean debit(BigDecimal amount, ITransactionContext context)`
@@ -82,6 +105,43 @@ Virtual currency account.
 - `boolean hasSufficientFunds(BigDecimal amount)`
 
 New code should provide a non-null transaction context with a namespaced cause.
+
+## Team economy
+
+### `TeamEconomyProvider`
+
+Neutral external-team bridge:
+
+- `Optional<TeamRef> resolveTeam(UUID playerId)`
+- `Optional<TeamRef> getTeam(UUID teamId)`
+- `TeamRole getRole(UUID playerId, UUID teamId)`
+- `boolean isMember(UUID playerId, UUID teamId)`
+- `boolean isTeamDeleted(UUID teamId)` - authoritative deletion signal; must return false on lookup/provider failure.
+- `boolean isAvailable()`
+
+Economy's built-in FTB Teams bridge is optional and maps only party teams. FTB personal teams and server teams are excluded.
+
+### `TeamEconomyRegistry`
+
+Reached through `EconomyApi.teamEconomy()`.
+
+- `provider()` / `registerProvider(...)` / `unregisterProvider(...)`
+- `mode()` / `setMode(TeamEconomyMode)`
+- `resolveTeam(UUID)`
+- `teamPrincipal(UUID)`
+- `defaultPrincipal(UUID)`
+- `teamAccount(IAccountManager, UUID)`
+- `walletSnapshot(IAccountManager, UUID)` — fresh server-authoritative Personal/Team balance, team identity, role, and permission state for UI/network sync.
+- `roleFor(UUID player, UUID team)`
+- `canView`, `canDeposit`, `canSpend`, `canAdmin`
+- `depositFromPlayer(...)` — permission-checked personal → team transfer.
+- `spendFromTeam(...)` — permission-checked team → typed target transfer.
+- `withdrawToPlayer(...)` — convenience team → actor-personal transfer.
+- configurable minimum `TeamRole` thresholds for those actions.
+
+`TeamEconomyMode` contains `PERSONAL_ONLY`, `HYBRID`, and `TEAM_PRIMARY`. Authorization performs fresh provider lookups rather than caching membership/ranks.
+
+See [Team Economy](TEAM_ECONOMY.md) for policy and FTB Teams mapping.
 
 ## Transaction context and history
 
@@ -126,7 +186,8 @@ Read-only view of a completed balance transaction.
 - `Map<String, String> getMetadata()` — immutable transaction metadata.
 - `BigDecimal getAmount()`
 - `BigDecimal getResultingBalance()`
-- `UUID getCounterparty()` — counterparty when the transaction has one; implementations may use `null` when it does not.
+- `AccountRef getCounterpartyRef()` - typed counterparty, or `null` for a standalone credit/debit. Legacy implementations default to `PLAYER`.
+- `UUID getCounterparty()` - legacy UUID projection; use the typed accessor for authorization or auditing.
 - `String getDescription()`
 
 Use records returned by `IBankAccount#getRecentTransactions`; do not depend on concrete transaction record implementations.
@@ -152,20 +213,25 @@ Listeners are matched by the event's exact runtime class; registering for a base
 
 Account events:
 
-- `BalanceChangePre` — cancellable; `owner()`, `previousBalance()`, `delta()`, `resultingBalance()`, `context()`.
-- `BalanceChanged` — committed `owner`, `previousBalance`, `balance`, `delta`, and `context`.
-- `TransferPre` — cancellable; `source()`, `target()`, `amount()`, `context()`.
-- `TransferCompleted` — committed `source`, `target`, `amount`, and `context`.
+- `BalanceChangePre` — cancellable; `accountRef()`, legacy `owner()`, `previousBalance()`, `delta()`, `resultingBalance()`, `context()`.
+- `BalanceChanged` - committed `accountRef()`, `previousBalance()`, `balance()`, `delta()`, and `context()`; `owner()` retains the legacy UUID projection.
+- `TransferPre` - cancellable; `sourceRef()`, `targetRef()`, `amount()`, `context()`; `source()`/`target()` retain legacy UUID projections.
+- `TransferCompleted` - committed `sourceRef()`, `targetRef()`, `amount()`, and `context()`; `source()`/`target()` retain legacy UUID projections.
+
+All four balance/transfer events carry typed identities: `accountRef()` on balance events and `sourceRef()` / `targetRef()` on transfer events. UUID constructors still create `PLAYER` identities, and UUID accessors remain available. Listeners that authorize or audit mutations must use the typed accessors: `PLAYER:<uuid>` and `TEAM:<same uuid>` are distinct principals. Transaction history preserves the typed counterparty on both built-in transfer legs and on the outgoing leg of transfers to third-party accounts via `IBankAccount.getAccountRef()`.
+
 
 ### `MarketEvents`
 
 Market event payloads published through `EconomyEvents`.
 
-- `OrderCreatePre` — cancellable proposal with `owner()`, `commodity()`, `type()`, `quantity()`, and `pricePerUnit()`; posted before Economy creates new provider escrow.
-- `OrderCreated` — `order`, `requestedQuantity`, `filledQuantity`.
-- `OrderEdited` — resulting `order`.
-- `OrderCancelled` — `orderId`, `owner`.
-- `TradeCompleted` — immutable `TradeView trade`.
+- `OrderCreatePre` - cancellable proposal with preferred typed `identity()`, plus `commodity()`, `type()`, `quantity()`, and `pricePerUnit()`; posted before Economy creates new provider escrow. `owner()` is only the legacy actor-UUID projection.
+- `OrderCreated` - `order`, `requestedQuantity`, `filledQuantity`; inspect `order.getIdentity()` / `getPrincipal()` for team-aware attribution.
+- `OrderEdited` - resulting `order`; inspect the typed order identity rather than `getOwner()` for authorization or auditing.
+- `OrderCancelled` - `orderId`, preferred typed `identity()`; `owner()` is only the legacy actor-UUID projection.
+- `TradeCompleted` - immutable `TradeView trade`.
+
+For market authorization, self-trade detection, and audit attribution, addons should use `MarketIdentity` / `AccountRef`. Legacy `owner()` and `IOrder#getOwner()` values are UUID projections kept for source compatibility and are not sufficient to distinguish `PLAYER:<uuid>` from `TEAM:<uuid>` or to represent principal/actor/storage-owner separation.
 
 Storage-provider registry changes are also events:
 
@@ -246,6 +312,8 @@ Creation:
 
 - `OrderCreateResult createBuyOrder(UUID owner, ICommodity commodity, int quantity, BigDecimal pricePerUnit)`
 - `OrderCreateResult createSellOrder(UUID owner, ICommodity commodity, int quantity, BigDecimal pricePerUnit)`
+- `OrderCreateResult createBuyOrder(MarketIdentity identity, ICommodity commodity, int quantity, BigDecimal pricePerUnit)`
+- `OrderCreateResult createSellOrder(MarketIdentity identity, ICommodity commodity, int quantity, BigDecimal pricePerUnit)`
 - `IOrder createServerBuyOrder(ICommodity commodity, int quantity, BigDecimal pricePerUnit)`
 - `IOrder createServerSellOrder(ICommodity commodity, int quantity, BigDecimal pricePerUnit)`
 
@@ -292,7 +360,11 @@ A fully filled accepted order has no `remainingOrder()` even though `accepted()`
 Read/operation contract for one order.
 
 - `UUID getOrderId()`
-- `UUID getOwner()`
+- `UUID getOwner()` - legacy storage-owner UUID projection.
+- `MarketIdentity getIdentity()` - preferred principal/actor/storage-owner identity.
+- `AccountRef getPrincipal()`
+- `UUID getActor()`
+- `UUID getStorageOwner()`
 - `ICommodity getCommodity()`
 - `int getQuantity()`
 - `BigDecimal getPricePerUnit()`
@@ -301,9 +373,14 @@ Read/operation contract for one order.
 - `Instant getCreatedAt()`
 - `Instant getExpiresAt()`
 - `boolean isValid()`
-- `boolean canExecute(UUID trader)`
+- `boolean canExecute(UUID trader)` - legacy Personal/server compatibility path.
+- `boolean canExecute(MarketIdentity trader)` - typed principal-aware execution check.
+- `TransactionResult execute(UUID trader, ServerLevel level)` / `execute(UUID trader)` - legacy compatibility paths.
+- `TransactionResult execute(MarketIdentity trader, ServerLevel level)` / `execute(MarketIdentity trader)` - typed execution paths.
 
-`execute`/`cancel` remain on the compatibility interface, but addon code should prefer `IOrderManager` so world resolution, ownership, and order-book invariants stay centralized.
+For team-aware code, `getIdentity()` is the canonical attribution tuple. `getPrincipal()` identifies the economic account, `getActor()` identifies the player who placed the order, and `getStorageOwner()` identifies the player storage used for goods. `getOwner()` is a legacy storage-owner UUID projection and must not be used as an account-authorization key.
+
+`cancel` remains on the compatibility interface, but addon code should prefer `IOrderManager` for cancellation/editing so world resolution, current team authorization, escrow restoration, and order-book invariants stay centralized.
 
 ## Market data
 
@@ -325,8 +402,8 @@ Immutable completed-trade view:
 - `EconomyId commodityTypeId()`
 - `BigDecimal pricePerUnit()`
 - `int quantity()`
-- `UUID buyer()`
-- `UUID seller()`
+- `UUID buyer()` / `UUID seller()` - legacy actor UUID projections.
+- `MarketIdentity buyerIdentity()` / `MarketIdentity sellerIdentity()` - persisted typed economic/human/storage attribution.
 - `Instant timestamp()`
 
 ## Storage integration

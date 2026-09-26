@@ -1,6 +1,8 @@
 package com.nstut.economy.data;
 
 import net.minecraft.core.HolderLookup;
+import com.nstut.economy.api.AccountRef;
+import com.nstut.economy.api.MarketIdentity;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
@@ -15,6 +17,7 @@ public class EconomyTradeData extends SavedData {
     private static final String NAME = "economy_trades";
 
     public static final class TradeSnapshot {
+        public final MarketIdentity buyerIdentity; public final MarketIdentity sellerIdentity;
         public final String itemId; public final String commodityType; public final String variantData; public final String displayName; public final String price;
         public final int quantity; public final UUID buyer; public final UUID seller; public final long timestamp;
         public TradeSnapshot(String itemId, String price, int quantity, UUID buyer, UUID seller, long timestamp) {
@@ -25,6 +28,13 @@ public class EconomyTradeData extends SavedData {
         }
         public TradeSnapshot(String itemId, String commodityType, String variantData, String displayName,
                              String price, int quantity, UUID buyer, UUID seller, long timestamp) {
+            this(itemId, commodityType, variantData, displayName, price, quantity, buyer, seller, timestamp,
+                    MarketIdentity.personal(buyer), MarketIdentity.personal(seller));
+        }
+        public TradeSnapshot(String itemId, String commodityType, String variantData, String displayName,
+                             String price, int quantity, UUID buyer, UUID seller, long timestamp,
+                             MarketIdentity buyerIdentity, MarketIdentity sellerIdentity) {
+            this.buyerIdentity = buyerIdentity; this.sellerIdentity = sellerIdentity;
             this.itemId = itemId; this.commodityType = commodityType; this.variantData = variantData; this.displayName = displayName;
             this.price = price; this.quantity = quantity; this.buyer = buyer; this.seller = seller; this.timestamp = timestamp;
         }
@@ -41,7 +51,12 @@ public class EconomyTradeData extends SavedData {
     }
     public void recordTrade(String itemId, String commodityType, String variantData, String displayName,
                             BigDecimal price, int quantity, UUID buyer, UUID seller) {
-        trades.add(new TradeSnapshot(itemId, commodityType, variantData, displayName, price.toPlainString(), quantity, buyer, seller, System.currentTimeMillis()));
+        recordTrade(itemId, commodityType, variantData, displayName, price, quantity,
+                MarketIdentity.personal(buyer), MarketIdentity.personal(seller));
+    }
+    public void recordTrade(String itemId, String commodityType, String variantData, String displayName,
+                            BigDecimal price, int quantity, MarketIdentity buyer, MarketIdentity seller) {
+        trades.add(new TradeSnapshot(itemId, commodityType, variantData, displayName, price.toPlainString(), quantity, buyer.actor(), seller.actor(), System.currentTimeMillis(), buyer, seller));
         while (trades.size() > MAX_TRADES) trades.remove(0);
         setDirty();
     }
@@ -60,6 +75,19 @@ public class EconomyTradeData extends SavedData {
         return target.getDataStorage().computeIfAbsent(new SavedData.Factory<>(EconomyTradeData::new, EconomyTradeData::load, null), NAME);
     }
 
+    private static MarketIdentity readIdentity(CompoundTag t, String prefix) {
+        if (!t.contains(prefix + "Principal")) return MarketIdentity.personal(t.getUUID(prefix));
+        return new MarketIdentity(AccountRef.parse(identityString(t, prefix + "Principal")),
+                UUID.fromString(identityString(t, prefix + "Actor")),
+                UUID.fromString(identityString(t, prefix + "StorageOwner")));
+    }
+    private static String identityString(CompoundTag t, String key) { return t.getString(key); }
+    private static void writeIdentity(CompoundTag t, String prefix, MarketIdentity identity) {
+        t.putString(prefix + "Principal", identity.principal().toString());
+        t.putString(prefix + "Actor", identity.actor().toString());
+        t.putString(prefix + "StorageOwner", identity.storageOwner().toString());
+    }
+
     public static EconomyTradeData load(CompoundTag tag, HolderLookup.Provider registries) {
         EconomyTradeData data = new EconomyTradeData();
         ListTag list = tag.getList("Trades", Tag.TAG_COMPOUND);
@@ -68,7 +96,7 @@ public class EconomyTradeData extends SavedData {
             try {
                 data.trades.add(new TradeSnapshot(t.getString("ItemId"), t.contains("CommodityType") ? t.getString("CommodityType") : null,
                         t.contains("VariantData") ? t.getString("VariantData") : "", t.contains("DisplayName") ? t.getString("DisplayName") : "",
-                        t.getString("Price"), t.getInt("Quantity"), t.getUUID("Buyer"), t.getUUID("Seller"), t.getLong("Timestamp")));
+                        t.getString("Price"), t.getInt("Quantity"), t.getUUID("Buyer"), t.getUUID("Seller"), t.getLong("Timestamp"), readIdentity(t, "Buyer"), readIdentity(t, "Seller")));
             } catch (Exception ignored) { }
         }
         return data;
@@ -80,11 +108,13 @@ public class EconomyTradeData extends SavedData {
         for (TradeSnapshot t : trades) {
             CompoundTag tTag = new CompoundTag();
             tTag.putString("ItemId", t.itemId); tTag.putString("Price", t.price); tTag.putInt("Quantity", t.quantity);
+            writeIdentity(tTag, "Buyer", t.buyerIdentity); writeIdentity(tTag, "Seller", t.sellerIdentity);
             if (t.commodityType != null) tTag.putString("CommodityType", t.commodityType);
             if (t.variantData != null && !t.variantData.isBlank()) tTag.putString("VariantData", t.variantData);
             if (t.displayName != null && !t.displayName.isBlank()) tTag.putString("DisplayName", t.displayName);
             tTag.putUUID("Buyer", t.buyer); tTag.putUUID("Seller", t.seller); tTag.putLong("Timestamp", t.timestamp); list.add(tTag);
         }
+        tag.putInt("DataVersion", 2);
         tag.put("Trades", list); return tag;
     }
 }

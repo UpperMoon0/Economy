@@ -34,17 +34,18 @@ class AtomicStorageRestoreRegressionTest {
     }
 
     @Test
-    @DisplayName("Cancel and quantity-decrease paths use the atomic escrow restorer on both implementations")
+    @DisplayName("Shared cancel and quantity-decrease paths use the atomic escrow restorer")
     void managerRestorePathsAreWiredAtomically() throws IOException {
         Path root = Path.of(System.getProperty("economy.repoRoot"));
-        for (String relative : new String[] {
-                "shared/minecraft-1.20plus/src/main/java/com/nstut/economy/trading/OrderManager.java",
-                "neoforge-26.1.2/src/main/java/com/nstut/economy/trading/OrderManager.java"
-        }) {
-            String source = Files.readString(root.resolve(relative));
-            assertTrue(source.contains("AtomicStorageRestore.restoreEscrow(level, requester, returnItems, List.of())"), relative);
-            assertTrue(source.contains("AtomicStorageRestore.restoreEscrow(level, requester, List.of(), parts)"), relative);
-            assertTrue(source.contains("AtomicStorageRestore.restoreEscrow(level, requester,\n                    order.getReservedItems(), order.getReservedFluids())"), relative);
-        }
+        String relative = "shared/minecraft-all/src/main/java/com/nstut/economy/trading/OrderManager.java";
+        String source = Files.readString(root.resolve(relative)).replace("\r\n", "\n");
+        assertTrue(source.contains("AtomicStorageRestore.restoreEscrow(level, requester, returnItems, List.of())"), relative);
+        assertTrue(source.contains("AtomicStorageRestore.restoreEscrow(level, requester, List.of(), parts)"), relative);
+        assertTrue(source.contains("AtomicStorageRestore.restoreEscrow(level, requester,\n                    order.getReservedItems(), order.getReservedFluids())"), relative);
+
+        assertFalse(Files.exists(root.resolve("shared/minecraft-1.20plus/src/main/java/com/nstut/economy/trading/OrderManager.java")),
+                "1.20+/1.21.1 must not drift back to a version-local OrderManager copy");
+        assertFalse(Files.exists(root.resolve("neoforge-26.1.2/src/main/java/com/nstut/economy/trading/OrderManager.java")),
+                "26.1.2 must keep using the shared OrderManager implementation");
     }
 }

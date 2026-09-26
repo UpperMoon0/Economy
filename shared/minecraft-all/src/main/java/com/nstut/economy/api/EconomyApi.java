@@ -11,6 +11,7 @@ import java.util.Optional;
 public final class EconomyApi {
     private static final CommodityTypeRegistry COMMODITY_TYPES = new CommodityTypeRegistry();
     private static final StorageProviderRegistry STORAGE = new StorageProviderRegistry();
+    private static final TeamEconomyRegistry TEAM_ECONOMY = new TeamEconomyRegistry();
 
     private static volatile IAccountManager accounts;
     private static volatile IOrderManager orders;
@@ -43,6 +44,7 @@ public final class EconomyApi {
 
     public static CommodityTypeRegistry commodityTypes() { return COMMODITY_TYPES; }
     public static StorageProviderRegistry storage() { return STORAGE; }
+    public static TeamEconomyRegistry teamEconomy() { return TEAM_ECONOMY; }
 
     /** Read-only lifecycle visibility for providers that need the active overworld. */
     public static Optional<ServerLevel> serverLevel() { return Optional.ofNullable(serverLevel); }

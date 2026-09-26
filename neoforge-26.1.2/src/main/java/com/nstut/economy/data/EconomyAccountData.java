@@ -1,5 +1,9 @@
 package com.nstut.economy.data;
 
+import com.nstut.economy.api.AccountKind;
+import com.nstut.economy.api.AccountRef;
+import com.nstut.economy.api.TeamWalletState;
+
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
@@ -50,7 +54,15 @@ public class EconomyAccountData extends SavedData implements com.nstut.economy.c
         }
     }
 
+    private final Map<UUID, TeamWalletState> teamWallets = new HashMap<>();
+    public Map<UUID, TeamWalletState> getTeamWallets() { return Map.copyOf(teamWallets); }
+    public void putTeamWallet(TeamWalletState state) {
+        if (!state.equals(teamWallets.put(state.teamId(), state))) setDirty();
+    }
+
     private final Map<UUID, BigDecimal> balances = new HashMap<>();
+    /** Non-player principals; legacy PLAYER balances remain in {@link #balances}. */
+    private final Map<AccountRef, BigDecimal> typedBalances = new HashMap<>();
     private final Map<UUID, List<VaultRecord>> vaults = new HashMap<>();
     private final Map<UUID, List<VaultRecord>> tanks = new HashMap<>();
     private final Map<UUID, List<PortfolioPoint>> portfolioHistory = new HashMap<>();
@@ -83,6 +95,36 @@ public class EconomyAccountData extends SavedData implements com.nstut.economy.c
     @Override
     public void removeBalance(UUID player) { if (balances.remove(player) != null) setDirty(); }
     public BigDecimal getBalance(UUID player) { return balances.getOrDefault(player, BigDecimal.ZERO); }
+
+    @Override
+    public boolean supportsTypedAccounts() { return true; }
+
+    @Override
+    public Map<AccountRef, BigDecimal> getAccountBalances() {
+        Map<AccountRef, BigDecimal> result = new HashMap<>();
+        balances.forEach((id, balance) -> result.put(AccountRef.player(id), balance));
+        result.putAll(typedBalances);
+        return result;
+    }
+
+    @Override
+    public void setAccountBalance(AccountRef account, BigDecimal balance) {
+        if (account.kind() == AccountKind.PLAYER) {
+            setBalance(account.id(), balance);
+        } else {
+            typedBalances.put(account, balance);
+            setDirty();
+        }
+    }
+
+    @Override
+    public void removeAccountBalance(AccountRef account) {
+        if (account.kind() == AccountKind.PLAYER) {
+            removeBalance(account.id());
+        } else if (typedBalances.remove(account) != null) {
+            setDirty();
+        }
+    }
 
     public Map<UUID, List<VaultRecord>> getVaults() { return vaults; }
     public void addVault(UUID owner, BlockPos pos, String dimension) {
@@ -159,14 +201,46 @@ public class EconomyAccountData extends SavedData implements com.nstut.economy.c
         return target.getDataStorage().computeIfAbsent(TYPE);
     }
 
+    private static void readTeamWallets(CompoundTag tag, EconomyAccountData data) {
+        ListTag list = tag.getListOrEmpty("TeamWallets");
+        for (int i = 0; i < list.size(); i++) {
+            CompoundTag entry = list.getCompoundOrEmpty(i);
+            UUID team = UUID.fromString(entry.getStringOr("Team", ""));
+            UUID owner = UUID.fromString(entry.getStringOr("Owner", ""));
+            data.teamWallets.put(team, new TeamWalletState(team, owner, entry.getBooleanOr("Closing", false)));
+        }
+    }
+    private void writeTeamWallets(CompoundTag tag) {
+        ListTag list = new ListTag();
+        for (TeamWalletState state : teamWallets.values()) {
+            CompoundTag entry = new CompoundTag();
+            entry.putString("Team", state.teamId().toString());
+            entry.putString("Owner", state.ownerId().toString());
+            entry.putBoolean("Closing", state.closing());
+            list.add(entry);
+        }
+        tag.put("TeamWallets", list);
+    }
+
     public static EconomyAccountData load(CompoundTag tag) {
         EconomyAccountData data = new EconomyAccountData();
+        readTeamWallets(tag, data);
         CompoundTag balancesTag = tag.getCompoundOrEmpty("Balances");
         for (String key : balancesTag.keySet()) {
             try {
                 UUID uuid = UUID.fromString(key);
                 data.balances.put(uuid, new BigDecimal(balancesTag.getStringOr(key, "")));
             } catch (IllegalArgumentException e) {}
+        }
+        ListTag typedBalancesTag = tag.getListOrEmpty("TypedBalances");
+        for (int i = 0; i < typedBalancesTag.size(); i++) {
+            CompoundTag entry = typedBalancesTag.getCompoundOrEmpty(i);
+            try {
+                AccountKind kind = AccountKind.valueOf(entry.getStringOr("Kind", ""));
+                UUID id = UUID.fromString(entry.getStringOr("Id", ""));
+                BigDecimal balance = new BigDecimal(entry.getStringOr("Balance", ""));
+                if (kind != AccountKind.PLAYER) data.typedBalances.put(new AccountRef(kind, id), balance);
+            } catch (RuntimeException ignored) {}
         }
         data.loadVaultRecords(tag.getCompoundOrEmpty("Vaults"), data.vaults);
         data.loadVaultRecords(tag.getCompoundOrEmpty("Tanks"), data.tanks);
@@ -237,10 +311,22 @@ public class EconomyAccountData extends SavedData implements com.nstut.economy.c
     }
 
     public CompoundTag save(CompoundTag tag) {
+        writeTeamWallets(tag);
         CompoundTag balancesTag = new CompoundTag();
         for (Map.Entry<UUID, BigDecimal> e : balances.entrySet())
             balancesTag.putString(e.getKey().toString(), e.getValue().toPlainString());
         tag.put("Balances", balancesTag);
+
+        ListTag typedBalancesTag = new ListTag();
+        for (Map.Entry<AccountRef, BigDecimal> e : typedBalances.entrySet()) {
+            if (e.getKey().kind() == AccountKind.PLAYER) continue;
+            CompoundTag entry = new CompoundTag();
+            entry.putString("Kind", e.getKey().kind().name());
+            entry.putString("Id", e.getKey().id().toString());
+            entry.putString("Balance", e.getValue().toPlainString());
+            typedBalancesTag.add(entry);
+        }
+        tag.put("TypedBalances", typedBalancesTag);
 
         CompoundTag vaultsTag = new CompoundTag();
         for (Map.Entry<UUID, List<VaultRecord>> e : vaults.entrySet()) {

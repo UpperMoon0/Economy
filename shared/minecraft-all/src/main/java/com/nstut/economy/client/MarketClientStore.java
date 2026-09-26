@@ -15,8 +15,36 @@ import java.util.List;
 public final class MarketClientStore {
     private MarketClientStore() {}
 
+    public record TeamWalletState(
+            boolean visible,
+            String mode,
+            String teamName,
+            String teamBalance,
+            String role,
+            boolean canDeposit,
+            boolean canSpend,
+            String spendRole
+    ) {
+        public TeamWalletState {
+            mode = mode == null || mode.isBlank() ? "PERSONAL_ONLY" : mode;
+            teamName = teamName == null ? "" : teamName;
+            teamBalance = teamBalance == null || teamBalance.isBlank() ? "0" : teamBalance;
+            role = role == null || role.isBlank() ? "NONE" : role;
+            spendRole = spendRole == null || spendRole.isBlank() ? "OFFICER" : spendRole;
+        }
+
+        public static TeamWalletState hidden(String mode, String spendRole) {
+            return new TeamWalletState(false, mode, "", "0", "NONE", false, false, spendRole);
+        }
+    }
+
     public static final Signal<List<MarketNetwork.ItemCardData>> cards = Signals.of(List.of());
+    /** Personal/player balance. Kept under the legacy name for existing screen code. */
     public static final Signal<String> balance = Signals.of("0");
+    public static final Signal<TeamWalletState> teamWallet =
+            Signals.of(TeamWalletState.hidden("PERSONAL_ONLY", "OFFICER"));
+    /** Server-authoritative economic principal used by new market-order actions. */
+    public static final Signal<String> marketPrincipal = Signals.of("PLAYER");
     public static final Signal<Integer> vaultCount = Signals.of(0);
     public static final Signal<MarketNetwork.SyncItemDetailPacket> detail = Signals.of(null);
     public static final Signal<List<HistoryEntry>> history = Signals.of(List.of());
@@ -29,6 +57,18 @@ public final class MarketClientStore {
         Signals.batch(() -> {
             cards.set(List.copyOf(pkt.cards));
             balance.set(pkt.balance);
+            teamWallet.set(pkt.teamWalletVisible
+                    ? new TeamWalletState(
+                            true,
+                            pkt.teamMode,
+                            pkt.teamName,
+                            pkt.teamBalance,
+                            pkt.teamRole,
+                            pkt.teamCanDeposit,
+                            pkt.teamCanSpend,
+                            pkt.teamSpendRole)
+                    : TeamWalletState.hidden(pkt.teamMode, pkt.teamSpendRole));
+            marketPrincipal.set(pkt.marketPrincipal);
             vaultCount.set(pkt.vaultCount);
         });
     }

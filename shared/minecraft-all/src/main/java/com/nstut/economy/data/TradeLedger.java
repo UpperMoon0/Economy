@@ -5,6 +5,7 @@ import com.nstut.economy.api.EconomyId;
 import com.nstut.economy.api.ICommodity;
 import com.nstut.economy.api.MarketEvents;
 import com.nstut.economy.api.TradeView;
+import com.nstut.economy.api.MarketIdentity;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -29,11 +30,16 @@ public final class TradeLedger {
 
     public static void recordTrade(String itemId, String commodityType, String variantData, String displayName,
                                    BigDecimal price, int quantity, UUID buyer, UUID seller) {
+        recordTrade(itemId, commodityType, variantData, displayName, price, quantity,
+                MarketIdentity.personal(buyer), MarketIdentity.personal(seller));
+    }
+    public static void recordTrade(String itemId, String commodityType, String variantData, String displayName,
+                                   BigDecimal price, int quantity, MarketIdentity buyer, MarketIdentity seller) {
         EconomyTradeData current = data;
         if (current == null) return;
         current.recordTrade(itemId, commodityType, variantData, displayName, price, quantity, buyer, seller);
         TradeView view = new TradeView(EconomyId.parse(itemId), typeId(commodityType), price, quantity,
-                buyer, seller, Instant.now());
+                buyer.actor(), seller.actor(), Instant.now(), buyer, seller);
         EconomyEvents.post(new MarketEvents.TradeCompleted(view));
     }
 

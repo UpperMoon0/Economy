@@ -15,6 +15,14 @@ public interface IBankAccount {
      * @return The owner's UUID
      */
     UUID getOwner();
+
+    /**
+     * Gets the typed account identity. Legacy third-party account
+     * implementations automatically remain PLAYER accounts.
+     */
+    default AccountRef getAccountRef() {
+        return AccountRef.player(getOwner());
+    }
     
     /**
      * Gets the current balance of the account.

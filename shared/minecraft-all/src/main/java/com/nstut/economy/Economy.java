@@ -3,6 +3,8 @@ package com.nstut;
 import com.nstut.economy.api.EconomyApi;
 import com.nstut.economy.api.ICommodity;
 import com.nstut.economy.api.internal.BuiltinContainerStorageProvider;
+import com.nstut.economy.compat.FtbTeamsTeamEconomyProvider;
+import com.nstut.economy.config.EconomyConfig;
 import com.nstut.economy.core.AccountManager;
 import com.nstut.economy.trading.FluidCommodity;
 import com.nstut.economy.trading.ItemCommodity;
@@ -22,7 +24,20 @@ public final class Economy {
 
         accountManager = new AccountManager();
         orderManager = new com.nstut.economy.trading.OrderManager();
+
+        EconomyConfig config = EconomyConfig.getInstance();
+        try { config.loadTeamConfig(java.nio.file.Path.of("config", "economy-team.properties")); }
+        catch (java.io.IOException | IllegalArgumentException failure) {
+            throw new IllegalStateException("Could not load config/economy-team.properties", failure);
+        }
+        EconomyApi.teamEconomy().setMode(config.getTeamEconomyMode());
+        EconomyApi.teamEconomy().setViewRole(config.getTeamViewRole());
+        EconomyApi.teamEconomy().setDepositRole(config.getTeamDepositRole());
+        EconomyApi.teamEconomy().setSpendRole(config.getTeamSpendRole());
+        EconomyApi.teamEconomy().setAdminRole(config.getTeamAdminRole());
+
         ensureApiRegistrations();
+        com.nstut.economy.compat.FtbTeamsLifecycleHooks.install();
 
         LOGGER.info("Economy Mod initialized successfully");
     }
@@ -33,6 +48,13 @@ public final class Economy {
         if (EconomyApi.commodityTypes().handler(ICommodity.ITEM_TYPE).isEmpty()) ItemCommodity.registerApiType();
         if (EconomyApi.commodityTypes().handler(ICommodity.FLUID_TYPE).isEmpty()) FluidCommodity.registerApiType();
         if (EconomyApi.storage().provider(BuiltinContainerStorageProvider.ID).isEmpty()) EconomyApi.storage().register(BUILTIN_STORAGE);
+
+        if (EconomyApi.teamEconomy().provider().isEmpty()) {
+            FtbTeamsTeamEconomyProvider.createIfPresent().ifPresent(provider -> {
+                EconomyApi.teamEconomy().registerProvider(provider);
+                LOGGER.info("FTB Teams detected; optional team-economy provider registered");
+            });
+        }
     }
 
     public static AccountManager getAccountManager() {
