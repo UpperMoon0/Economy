@@ -41,7 +41,7 @@ class AtomicStorageRestoreRegressionTest {
                 "shared/minecraft-1.20plus/src/main/java/com/nstut/economy/trading/OrderManager.java",
                 "neoforge-26.1.2/src/main/java/com/nstut/economy/trading/OrderManager.java"
         }) {
-            String source = Files.readString(root.resolve(relative));
+            String source = Files.readString(root.resolve(relative)).replace("\r\n", "\n");
             assertTrue(source.contains("AtomicStorageRestore.restoreEscrow(level, requester, returnItems, List.of())"), relative);
             assertTrue(source.contains("AtomicStorageRestore.restoreEscrow(level, requester, List.of(), parts)"), relative);
             assertTrue(source.contains("AtomicStorageRestore.restoreEscrow(level, requester,\n                    order.getReservedItems(), order.getReservedFluids())"), relative);

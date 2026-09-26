@@ -1,8 +1,8 @@
 package dev.ftb.mods.ftbteams.api;
 
 /**
- * Test contract matching the public FTB Teams API surface used by Economy on
- * the supported 1.20.1, 1.21.1, and 26.1.2 release families.
+ * Behavioral test double for mutable membership/rank and failure scenarios.
+ * Published API compatibility is checked separately by :common:ftbContractTest.
  */
 public final class FTBTeamsAPI {
     private static final API INSTANCE = new API();

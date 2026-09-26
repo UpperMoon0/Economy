@@ -1,0 +1,74 @@
+// One version matrix for development runs and the real-artifact API contract.
+// These mods remain optional for users and are never included in Economy jars/POMs.
+def targets = [
+        'forge-1.20.1':    [loader: 'forge',    teams: '2001.3.2', library: '2001.2.13'],
+        'fabric-1.20.1':   [loader: 'fabric',   teams: '2001.3.2', library: '2001.2.13'],
+        'fabric-1.21.1':   [loader: 'fabric',   teams: '2101.1.11', library: '2101.1.36'],
+        'neoforge-1.21.1': [loader: 'neoforge', teams: '2101.1.11', library: '2101.1.36'],
+        'neoforge-26.1.2': [loader: 'neoforge', teams: '26.1.2.4', library: '26.1.2.8']
+]
+
+allprojects {
+    repositories {
+        maven {
+            url = 'https://maven.ftb.dev/releases'
+            content { includeGroup 'dev.ftb.mods' }
+        }
+    }
+}
+
+targets.each { target, versions ->
+    def loaderProject = findProject(":${target}")
+    if (loaderProject != null) {
+        def runtimeConfiguration = target == 'neoforge-26.1.2' ? 'localRuntime' : 'modLocalRuntime'
+        // Register against the configuration as soon as the loader plugin creates it. Some Loom
+        // configurations are resolved while the subproject is being evaluated, so afterEvaluate is too late.
+        loaderProject.configurations.matching { it.name == runtimeConfiguration }.all {
+            loaderProject.dependencies {
+                // Explicit libraries avoid old/minimum transitive versions and duplicate common jars on 26.x.
+                add(runtimeConfiguration, "dev.ftb.mods:ftb-teams-${versions.loader}:${versions.teams}") { transitive = false }
+                add(runtimeConfiguration, "dev.ftb.mods:ftb-library-${versions.loader}:${versions.library}") { transitive = false }
+                if (target == 'neoforge-26.1.2') {
+                    add(runtimeConfiguration, 'de.marhali:json5-java:3.0.0')
+                }
+            }
+        }
+    }
+}
+
+project(':common') {
+    sourceSets {
+        ftbContractTest { java.srcDir 'src/ftbContractTest/java' }
+    }
+    // Separate configurations prevent Gradle from collapsing different MC versions
+    // of the same loader artifact to the highest version.
+    def artifactConfigurations = targets.collect { target, versions ->
+        def artifactConfiguration = configurations.create('ftbContract_' + target.replace('-', '_').replace('.', '_')) {
+            canBeConsumed = false
+            transitive = false
+        }
+        dependencies.add(artifactConfiguration.name, "dev.ftb.mods:ftb-teams-${versions.loader}:${versions.teams}@jar")
+        artifactConfiguration
+    }
+    def artifacts = files(artifactConfigurations)
+    dependencies {
+        ftbContractTestImplementation platform('org.junit:junit-bom:5.11.4')
+        ftbContractTestImplementation 'org.junit.jupiter:junit-jupiter'
+        ftbContractTestImplementation 'org.ow2.asm:asm-tree:9.8'
+        ftbContractTestRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    }
+    def contractTest = tasks.register('ftbContractTest', Test) {
+        group = 'verification'
+        description = 'Checks the reflected API against published FTB Teams jars for every supported loader/version.'
+        testClassesDirs = sourceSets.ftbContractTest.output.classesDirs
+        classpath = sourceSets.ftbContractTest.runtimeClasspath
+        useJUnitPlatform()
+        inputs.files(artifacts)
+        doFirst {
+            systemProperty 'economy.ftbArtifacts', artifacts.files.collect { it.absolutePath }.sort().join(File.pathSeparator)
+        }
+    }
+    tasks.named('check') { dependsOn contractTest }
+    // testAllVersions and the shared CI lane both invoke :common:test directly.
+    tasks.named('test') { dependsOn contractTest }
+}

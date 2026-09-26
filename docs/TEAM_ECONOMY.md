@@ -89,3 +89,17 @@ The Market principal is also shown explicitly. Until issue #29 lands, it is `Per
 This foundation deliberately does **not** reinterpret the existing `IOrder.owner` UUID as a team UUID. Team-funded market orders require separate economic principal, acting player, and physical storage owner identities; that migration is tracked by issue #29.
 
 Until #29 is implemented, normal market orders continue to use personal player principals and player-owned Vault/Tank storage.
+
+## Development dependencies and compatibility checks
+
+All five loader development environments include FTB Teams and FTB Library on their local runtime classpath (client, server, live-join, and GameTest runs). They remain optional production integrations and are not bundled or published as Economy dependencies. Pins live in `gradle/ftb-teams.gradle`:
+
+| Target | FTB Teams | FTB Library |
+| --- | --- | --- |
+| Forge / Fabric 1.20.1 | 2001.3.2 | 2001.2.13 |
+| Fabric / NeoForge 1.21.1 | 2101.1.11 | 2101.1.36 |
+| NeoForge 26.1.2 | 26.1.2.4 | 26.1.2.8 |
+
+`./gradlew :common:ftbContractTest` resolves the five published Teams jars from [FTB Maven](https://maven.ftb.dev/releases/dev/ftb/mods/) and checks every reflected method's public signature, return descriptor, static access, and required rank enum constants directly from class files. It uses a separate source set without local FTB doubles or Minecraft class loading. The same task runs automatically with `:common:test` / `check`, including the shared CI lane. Each artifact resolves separately so Gradle cannot collapse different Minecraft versions into one jar.
+
+The existing reflection-adapter unit tests use behavioral doubles for membership changes, party filtering, and failures; they do not claim artifact compatibility. When upgrading a development pin, run the artifact contract and the corresponding live-join lane.

@@ -175,7 +175,8 @@ Read-only view of a completed balance transaction.
 - `Map<String, String> getMetadata()` — immutable transaction metadata.
 - `BigDecimal getAmount()`
 - `BigDecimal getResultingBalance()`
-- `UUID getCounterparty()` — counterparty when the transaction has one; implementations may use `null` when it does not.
+- `AccountRef getCounterpartyRef()` - typed counterparty, or `null` for a standalone credit/debit. Legacy implementations default to `PLAYER`.
+- `UUID getCounterparty()` - legacy UUID projection; use the typed accessor for authorization or auditing.
 - `String getDescription()`
 
 Use records returned by `IBankAccount#getRecentTransactions`; do not depend on concrete transaction record implementations.
@@ -201,10 +202,13 @@ Listeners are matched by the event's exact runtime class; registering for a base
 
 Account events:
 
-- `BalanceChangePre` — cancellable; `owner()`, `previousBalance()`, `delta()`, `resultingBalance()`, `context()`.
-- `BalanceChanged` — committed `owner`, `previousBalance`, `balance`, `delta`, and `context`.
-- `TransferPre` — cancellable; `source()`, `target()`, `amount()`, `context()`.
-- `TransferCompleted` — committed `source`, `target`, `amount`, and `context`.
+- `BalanceChangePre` — cancellable; `accountRef()`, legacy `owner()`, `previousBalance()`, `delta()`, `resultingBalance()`, `context()`.
+- `BalanceChanged` - committed `accountRef()`, `previousBalance()`, `balance()`, `delta()`, and `context()`; `owner()` retains the legacy UUID projection.
+- `TransferPre` - cancellable; `sourceRef()`, `targetRef()`, `amount()`, `context()`; `source()`/`target()` retain legacy UUID projections.
+- `TransferCompleted` - committed `sourceRef()`, `targetRef()`, `amount()`, and `context()`; `source()`/`target()` retain legacy UUID projections.
+
+All four balance/transfer events carry typed identities: `accountRef()` on balance events and `sourceRef()` / `targetRef()` on transfer events. UUID constructors still create `PLAYER` identities, and UUID accessors remain available. Listeners that authorize or audit mutations must use the typed accessors: `PLAYER:<uuid>` and `TEAM:<same uuid>` are distinct principals. Transaction history preserves the typed counterparty on both built-in transfer legs and on the outgoing leg of transfers to third-party accounts via `IBankAccount.getAccountRef()`.
+
 
 ### `MarketEvents`
 
