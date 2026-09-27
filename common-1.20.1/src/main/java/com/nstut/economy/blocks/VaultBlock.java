@@ -70,9 +70,20 @@ public class VaultBlock extends DirectionalBlock implements EntityBlock {
                 }
                 sp.openMenu(new SimpleMenuProvider(
                         (id, inv, p) -> new VaultMenu(id, inv, vault, new net.minecraft.world.inventory.ContainerData() {
-                            @Override public int get(int idx) { return vault.getMode().id; }
-                            @Override public void set(int idx, int val) { vault.setMode(VaultBlockEntity.VaultMode.byId(val)); }
-                            @Override public int getCount() { return 1; }
+                            @Override public int get(int idx) {
+                                return switch (idx) {
+                                    case VaultMenu.DATA_MODE -> vault.getMode().id;
+                                    case VaultMenu.DATA_TEAM_OWNED -> vault.getOwnerRef() != null
+                                            && vault.getOwnerRef().kind() == com.nstut.economy.api.AccountKind.TEAM ? 1 : 0;
+                                    case VaultMenu.DATA_TEAM_AVAILABLE -> com.nstut.economy.api.EconomyApi.teamEconomy()
+                                            .resolveTeam(p.getUUID()).isPresent() ? 1 : 0;
+                                    default -> 0;
+                                };
+                            }
+                            @Override public void set(int idx, int val) {
+                                if (idx == VaultMenu.DATA_MODE) vault.setMode(VaultBlockEntity.VaultMode.byId(val));
+                            }
+                            @Override public int getCount() { return VaultMenu.DATA_COUNT; }
                         }, vault),
                         Component.translatable("block.economy.vault")
                 ));

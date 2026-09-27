@@ -61,6 +61,7 @@ class FtbTeamsTeamEconomyProviderTest {
         assertEquals(owner, ref.ownerId());
         assertEquals("Upper Moon", ref.displayName());
         assertTrue(provider.isMember(member, teamId));
+        assertEquals(Set.of(owner, member), Set.copyOf(provider.getMembers(teamId)));
         assertEquals(TeamRole.OFFICER, provider.getRole(member, teamId));
 
         // Simulate kick/leave: FTB changes both effective-team resolution and party membership.

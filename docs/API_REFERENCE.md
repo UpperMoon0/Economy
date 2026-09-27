@@ -134,10 +134,9 @@ Reached through `EconomyApi.teamEconomy()`.
 - `teamAccount(IAccountManager, UUID)`
 - `walletSnapshot(IAccountManager, UUID)` — fresh server-authoritative Personal/Team balance, team identity, role, and permission state for UI/network sync.
 - `roleFor(UUID player, UUID team)`
-- `canView`, `canDeposit`, `canSpend`, `canAdmin`
+- `canView`, `canDeposit`, `canSpend`, `canPayout`, `canAdmin`
 - `depositFromPlayer(...)` — permission-checked personal → team transfer.
 - `spendFromTeam(...)` — permission-checked team → typed target transfer.
-- `withdrawToPlayer(...)` — convenience team → actor-personal transfer.
 - configurable minimum `TeamRole` thresholds for those actions.
 
 Server configuration uses `enabled=true` by default (optional FTB Teams support), or `enabled=false` to disable team economy. Without a provider, only personal accounts are exposed. The compatible Java `TeamEconomyMode` API retains `PERSONAL_ONLY`, `HYBRID`, and `TEAM_PRIMARY`; the server toggle maps to HYBRID/PERSONAL_ONLY. Authorization performs fresh provider lookups rather than caching membership/ranks.
@@ -408,6 +407,10 @@ Immutable completed-trade view:
 - `MarketIdentity buyerIdentity()` / `MarketIdentity sellerIdentity()` - persisted typed economic/human/storage attribution.
 - `Instant timestamp()`
 
+## Built-in Tank configuration
+
+`config/economy-storage.properties` controls built-in storage behavior. `tankCapacity` is the internal capacity in mB for newly created Tanks (default `128000`, minimum `1000`); persisted Tanks retain their saved per-block capacity. `allowExternalAutomation` controls direct loader fluid-capability exposure. Built-in Tanks expose two inventory slots: input accepts fluid containers and output receives the resulting container, allowing stackable container workflows without replacing the input stack in place.
+
 ## Storage integration
 
 ### `IStorageProvider`
@@ -518,6 +521,8 @@ Registration changes emit `StorageProviderRegistered` and `StorageProviderUnregi
 
 ### Team treasury and recovery compatibility
 
-`TeamWalletSnapshot` adds `canWithdraw()` and `withdrawRole()`. The previous constructor and `personalOnly` factory remain available; legacy snapshots conservatively report no withdrawal permission. Server mutations always check current permissions independently.
+`TeamWalletSnapshot` exposes separate `canPayout()` and `payoutRole()` state for direct Team-to-other-player payments. The previous constructor and `personalOnly` factory remain available; legacy snapshots conservatively report no payout permission. Ordinary Team-to-Personal withdrawal is intentionally absent. Server mutations always check current permissions independently.
+
+`TeamWalletState` persists the closing member snapshot plus already-settled recipients. This makes equal-share disband settlement retry-safe across crashes/restarts; Vault/Tank custody moves to the last recorded owner only after cash settlement completes.
 
 `IOrderManager.preserveProviderReservation(MarketIdentity, ...)` retains typed recovery attribution. Its default supports Personal identities through the legacy UUID hook; custom order managers must override it for Team recovery. Storage-registry validation failures have no human actor argument, so their quarantine uses the storage owner's UUID as the attribution placeholder while retaining its explicit account kind. Recovery initiated from an order preserves the original human actor.

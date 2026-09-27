@@ -68,13 +68,28 @@ public class EconomyAccountData extends SavedData implements com.nstut.economy.c
     private final Map<AccountRef, List<VaultRecord>> typedVaults = new HashMap<>();
     private final Map<AccountRef, List<VaultRecord>> typedTanks = new HashMap<>();
     private final Map<UUID, List<PortfolioPoint>> portfolioHistory = new HashMap<>();
+    private final Map<AccountRef, List<PortfolioPoint>> typedPortfolioHistory = new HashMap<>();
 
     public List<PortfolioPoint> getPortfolioHistory(UUID player) {
-        return portfolioHistory.getOrDefault(player, java.util.Collections.emptyList());
+        return getPortfolioHistory(AccountRef.player(player));
+    }
+
+    public List<PortfolioPoint> getPortfolioHistory(AccountRef account) {
+        if (account == null) return java.util.Collections.emptyList();
+        return account.kind() == AccountKind.PLAYER
+                ? portfolioHistory.getOrDefault(account.id(), java.util.Collections.emptyList())
+                : typedPortfolioHistory.getOrDefault(account, java.util.Collections.emptyList());
     }
 
     public void addPortfolioPoint(UUID player, BigDecimal balance, BigDecimal assets) {
-        List<PortfolioPoint> list = portfolioHistory.computeIfAbsent(player, k -> new ArrayList<>());
+        addPortfolioPoint(AccountRef.player(player), balance, assets);
+    }
+
+    public void addPortfolioPoint(AccountRef account, BigDecimal balance, BigDecimal assets) {
+        if (account == null) return;
+        List<PortfolioPoint> list = account.kind() == AccountKind.PLAYER
+                ? portfolioHistory.computeIfAbsent(account.id(), k -> new ArrayList<>())
+                : typedPortfolioHistory.computeIfAbsent(account, k -> new ArrayList<>());
         long now = System.currentTimeMillis();
         BigDecimal netWorth = balance.add(assets);
         if (!list.isEmpty()) {
@@ -82,15 +97,14 @@ public class EconomyAccountData extends SavedData implements com.nstut.economy.c
             if (last.netWorth.compareTo(netWorth) == 0 &&
                 last.balance.compareTo(balance) == 0 &&
                 last.assets.compareTo(assets) == 0) {
-                return; // Values haven't changed; ignore duplicate snapshot
+                return;
             }
         }
         list.add(new PortfolioPoint(now, netWorth, balance, assets));
-        while (list.size() > 40) {
-            list.remove(0);
-        }
+        while (list.size() > 40) list.remove(0);
         setDirty();
     }
+
 
     public Map<UUID, BigDecimal> getBalances() { return balances; }
     public void setBalance(UUID player, BigDecimal balance) { balances.put(player, balance); setDirty(); }
@@ -274,11 +288,32 @@ public class EconomyAccountData extends SavedData implements com.nstut.economy.c
         ListTag list = tag.getListOrEmpty("TeamWallets");
         for (int i = 0; i < list.size(); i++) {
             CompoundTag entry = list.getCompoundOrEmpty(i);
-            UUID team = UUID.fromString(entry.getStringOr("Team", ""));
-            UUID owner = UUID.fromString(entry.getStringOr("Owner", ""));
-            data.teamWallets.put(team, new TeamWalletState(team, owner, entry.getBooleanOr("Closing", false), entry.getBooleanOr("StorageSettled", false)));
+            try {
+                UUID team = UUID.fromString(entry.getStringOr("Team", ""));
+                UUID owner = UUID.fromString(entry.getStringOr("Owner", ""));
+                java.util.List<UUID> members = readUuidKeys(entry.getCompoundOrEmpty("SettlementMembers"));
+                java.util.Set<UUID> settled = java.util.Set.copyOf(readUuidKeys(entry.getCompoundOrEmpty("SettledMembers")));
+                data.teamWallets.put(team, new TeamWalletState(team, owner,
+                        entry.getBooleanOr("Closing", false), entry.getBooleanOr("StorageSettled", false), members, settled));
+            } catch (RuntimeException ignored) {}
         }
     }
+
+    private static java.util.List<UUID> readUuidKeys(CompoundTag tag) {
+        java.util.ArrayList<UUID> values = new java.util.ArrayList<>();
+        for (String key : tag.keySet()) {
+            try { values.add(UUID.fromString(key)); } catch (IllegalArgumentException ignored) {}
+        }
+        values.sort(UUID::compareTo);
+        return java.util.List.copyOf(values);
+    }
+
+    private static CompoundTag writeUuidKeys(java.util.Collection<UUID> values) {
+        CompoundTag tag = new CompoundTag();
+        if (values != null) for (UUID value : values) if (value != null) tag.putBoolean(value.toString(), true);
+        return tag;
+    }
+
     private void writeTeamWallets(CompoundTag tag) {
         ListTag list = new ListTag();
         for (TeamWalletState state : teamWallets.values()) {
@@ -287,6 +322,8 @@ public class EconomyAccountData extends SavedData implements com.nstut.economy.c
             entry.putString("Owner", state.ownerId().toString());
             entry.putBoolean("Closing", state.closing());
             entry.putBoolean("StorageSettled", state.storageSettled());
+            entry.put("SettlementMembers", writeUuidKeys(state.settlementMembers()));
+            entry.put("SettledMembers", writeUuidKeys(state.settledMembers()));
             list.add(entry);
         }
         tag.put("TeamWallets", list);
@@ -334,16 +371,39 @@ public class EconomyAccountData extends SavedData implements com.nstut.economy.c
                 data.portfolioHistory.put(uuid, list);
             } catch (Exception e) {}
         }
+        CompoundTag typedHistoryTag = tag.getCompoundOrEmpty("TypedPortfolioHistory");
+        for (String key : typedHistoryTag.keySet()) {
+            try {
+                AccountRef account = AccountRef.parse(key);
+                if (account.kind() == AccountKind.PLAYER) continue;
+                ListTag listTag = typedHistoryTag.getListOrEmpty(key);
+                List<PortfolioPoint> list = new ArrayList<>();
+                for (int i = 0; i < listTag.size(); i++) {
+                    CompoundTag ptTag = listTag.getCompoundOrEmpty(i);
+                    long ts = ptTag.getLongOr("TS", 0L);
+                    BigDecimal nw = new BigDecimal(ptTag.getStringOr("NW", ""));
+                    BigDecimal bal = new BigDecimal(ptTag.getStringOr("BAL", ""));
+                    BigDecimal ass = new BigDecimal(ptTag.getStringOr("ASS", ""));
+                    list.add(new PortfolioPoint(ts, nw, bal, ass));
+                }
+                data.typedPortfolioHistory.put(account, list);
+            } catch (RuntimeException ignored) {}
+        }
         return data;
     }
 
     public static void recordSnapshot(UUID player, net.minecraft.server.level.ServerLevel level) {
-        if (player == null || level == null) return;
+        if (player == null) return;
+        recordSnapshot(AccountRef.player(player), level);
+    }
+
+    public static void recordSnapshot(AccountRef account, net.minecraft.server.level.ServerLevel level) {
+        if (account == null || level == null) return;
         EconomyAccountData accountData = get(level);
-        BigDecimal balance = accountData.getBalance(player);
+        BigDecimal balance = accountData.getAccountBalances().getOrDefault(account, BigDecimal.ZERO);
 
         BigDecimal assetValue = BigDecimal.ZERO;
-        List<com.nstut.economy.blocks.VaultBlockEntity> vaults = com.nstut.economy.blocks.VaultManager.getVaults(level, player);
+        List<com.nstut.economy.blocks.VaultBlockEntity> vaults = com.nstut.economy.blocks.VaultManager.getVaults(level, account);
         Map<String, Integer> itemCounts = new HashMap<>();
         for (com.nstut.economy.blocks.VaultBlockEntity vault : vaults) {
             for (int slot = 0; slot < vault.getContainerSize(); slot++) {
@@ -355,7 +415,7 @@ public class EconomyAccountData extends SavedData implements com.nstut.economy.c
             }
         }
         for (com.nstut.economy.blocks.TankBlockEntity tank
-                : com.nstut.economy.blocks.TankManager.getTanks(level, player)) {
+                : com.nstut.economy.blocks.TankManager.getTanks(level, account)) {
             com.nstut.economy.trading.EconomyFluidStack fluid = tank.getFluid();
             if (!fluid.isEmpty()) {
                 String fluidId = net.minecraft.core.registries.BuiltInRegistries.FLUID
@@ -379,7 +439,7 @@ public class EconomyAccountData extends SavedData implements com.nstut.economy.c
             assetValue = assetValue.add(unitPrice.multiply(BigDecimal.valueOf(qty)));
         }
 
-        accountData.addPortfolioPoint(player, balance, assetValue);
+        accountData.addPortfolioPoint(account, balance, assetValue);
     }
 
     public CompoundTag save(CompoundTag tag) {
@@ -474,6 +534,22 @@ public class EconomyAccountData extends SavedData implements com.nstut.economy.c
             historyTag.put(e.getKey().toString(), listTag);
         }
         tag.put("PortfolioHistory", historyTag);
+
+        CompoundTag typedHistoryTag = new CompoundTag();
+        for (Map.Entry<AccountRef, List<PortfolioPoint>> e : typedPortfolioHistory.entrySet()) {
+            if (e.getKey().kind() == AccountKind.PLAYER) continue;
+            ListTag listTag = new ListTag();
+            for (PortfolioPoint pt : e.getValue()) {
+                CompoundTag ptTag = new CompoundTag();
+                ptTag.putLong("TS", pt.timestamp);
+                ptTag.putString("NW", pt.netWorth.toPlainString());
+                ptTag.putString("BAL", pt.balance.toPlainString());
+                ptTag.putString("ASS", pt.assets.toPlainString());
+                listTag.add(ptTag);
+            }
+            typedHistoryTag.put(e.getKey().toString(), listTag);
+        }
+        tag.put("TypedPortfolioHistory", typedHistoryTag);
         return tag;
     }
 }

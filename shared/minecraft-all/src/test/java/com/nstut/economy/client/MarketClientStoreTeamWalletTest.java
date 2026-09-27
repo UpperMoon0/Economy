@@ -23,10 +23,19 @@ class MarketClientStoreTeamWalletTest {
         assertEquals("MEMBER", team.role());
         assertTrue(team.canDeposit());
         assertFalse(team.canSpend());
-        assertFalse(team.canWithdraw());
+        assertFalse(team.canPayout());
         assertEquals("OFFICER", team.spendRole());
-        assertEquals("OWNER", team.withdrawRole());
+        assertEquals("OWNER", team.payoutRole());
         assertEquals("PLAYER", MarketClientStore.marketPrincipal.get());
+        assertTrue(MarketClientStore.isPersonalPrincipal());
+        assertFalse(MarketClientStore.isTeamPrincipal());
+
+        MarketClientStore.applySyncItemList(new MarketNetwork.SyncItemListPacket(
+                "12.50", 2, List.of(),
+                "HYBRID", true, "Upper Moon", "77.25", "OWNER",
+                true, true, true, "OFFICER", "OWNER", "TEAM"));
+        assertTrue(MarketClientStore.isTeamPrincipal());
+        assertFalse(MarketClientStore.isPersonalPrincipal());
     }
 
     @Test
@@ -46,8 +55,8 @@ class MarketClientStoreTeamWalletTest {
         assertEquals("", team.teamName());
         assertEquals("0", team.teamBalance());
         assertEquals("NONE", team.role());
-        assertFalse(team.canWithdraw());
-        assertEquals("OWNER", team.withdrawRole());
+        assertFalse(team.canPayout());
+        assertEquals("OWNER", team.payoutRole());
         assertEquals("11", MarketClientStore.balance.get());
     }
 }

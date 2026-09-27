@@ -19,10 +19,8 @@ public final class TeamWalletCommands {
     public static LiteralArgumentBuilder<CommandSourceStack> node() {
         var node = Commands.literal("team").executes(ctx -> balance(ctx.getSource()));
         node.then(Commands.literal("balance").executes(ctx -> balance(ctx.getSource())));
-        for (String action : new String[]{"deposit", "withdraw"}) {
-            node.then(Commands.literal(action).then(Commands.argument("amount", StringArgumentType.word())
-                    .executes(ctx -> move(ctx.getSource(), action, StringArgumentType.getString(ctx, "amount"), null))));
-        }
+        node.then(Commands.literal("deposit").then(Commands.argument("amount", StringArgumentType.word())
+                .executes(ctx -> move(ctx.getSource(), "deposit", StringArgumentType.getString(ctx, "amount"), null))));
         node.then(Commands.literal("pay").then(Commands.argument("player", EntityArgument.player())
                 .then(Commands.argument("amount", StringArgumentType.word()).executes(ctx ->
                         move(ctx.getSource(), "pay", StringArgumentType.getString(ctx, "amount"), EntityArgument.getPlayer(ctx, "player").getUUID())))));
@@ -65,13 +63,16 @@ public final class TeamWalletCommands {
         var teams = EconomyApi.teamEconomy();
         UUID actor = player.getUUID();
         var team = teams.resolveTeam(actor);
-        TeamRole required = action.equals("deposit") ? teams.depositRole() : teams.withdrawRole();
-        if (team.isEmpty() || !(action.equals("deposit") ? teams.canDeposit(actor, team.get().id()) : teams.canWithdraw(actor, team.get().id())))
+        if (!action.equals("deposit") && !action.equals("pay")) return fail(source, "Unknown team wallet action.");
+        if (action.equals("pay") && (recipient == null || recipient.equals(actor)))
+            return fail(source, "Team funds cannot be paid to your own Personal account.");
+        TeamRole required = action.equals("deposit") ? teams.depositRole() : teams.payoutRole();
+        if (team.isEmpty() || !(action.equals("deposit") ? teams.canDeposit(actor, team.get().id()) : teams.canPayout(actor, team.get().id())))
             return fail(source, "Team wallet unavailable or requires " + required + ".");
         var context = TransactionContext.transfer("Team " + action + " by " + actor, actor);
         boolean success = action.equals("deposit")
                 ? teams.depositFromPlayer(EconomyApi.accounts(), actor, amount, context)
-                : teams.spendFromTeam(EconomyApi.accounts(), actor, AccountRef.player(recipient == null ? actor : recipient), amount, context);
+                : teams.spendFromTeam(EconomyApi.accounts(), actor, AccountRef.player(recipient), amount, context);
         if (!success) return fail(source, "Transfer rejected: check the balance and current team permissions.");
         source.sendSuccess(() -> Component.literal("Team " + action + ": " + amount.toPlainString() + " coins."), false);
         com.nstut.economy.network.MarketNetwork.sendItemList(player);

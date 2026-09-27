@@ -222,9 +222,9 @@ tasks.register('renderUiPreviews') {
         def manifest = new File(output, 'manifest.json')
         if (!manifest.isFile()) throw new GradleException('UI preview did not complete')
         def images = new groovy.json.JsonSlurper().parse(manifest)
-        def cases = ['browse-personal', 'browse-team', 'treasury-owner', 'treasury-officer', 'treasury-member',
-                     'treasury-unavailable', 'containers-owner', 'containers-officer', 'orders-personal-selected',
-                     'orders-team-selected', 'new-team-buy', 'new-team-sell']
+        def cases = ['browse-personal', 'browse-team', 'treasury-owner', 'treasury-owner-expanded', 'treasury-officer', 'treasury-member',
+                     'treasury-unavailable', 'containers-personal', 'containers-owner', 'containers-officer', 'orders-personal-selected',
+                     'orders-team-selected', 'new-personal-buy', 'new-personal-sell', 'new-team-buy', 'new-team-sell']
         def expectedFiles = [] as Set
         ['dark', 'light'].each { theme ->
             ['wide', 'narrow'].each { layoutName ->
@@ -232,8 +232,9 @@ tasks.register('renderUiPreviews') {
             }
         }
         def actualFiles = images.collect { it.file } as Set
-        if (images.size() != 48 || actualFiles != expectedFiles)
-            throw new GradleException("Expected the complete 48-case UI matrix; missing=${expectedFiles - actualFiles}, extra=${actualFiles - expectedFiles}")
+        def expectedCount = cases.size() * 4
+        if (images.size() != expectedCount || actualFiles != expectedFiles)
+            throw new GradleException("Expected the complete ${expectedCount}-case UI matrix; missing=${expectedFiles - actualFiles}, extra=${actualFiles - expectedFiles}")
         images.each { entry ->
             def file = new File(output, entry.file)
             def png = javax.imageio.ImageIO.read(file)
@@ -246,6 +247,6 @@ tasks.register('renderUiPreviews') {
         def gallery = new File(output, 'index.html')
         if (!gallery.isFile() || !expectedFiles.every { gallery.text.contains(it) })
             throw new GradleException('UI preview gallery is incomplete')
-        logger.lifecycle("Verified 48 Market UI previews in ${output}")
+        logger.lifecycle("Verified ${expectedCount} Market UI previews in ${output}")
     }
 }

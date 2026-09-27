@@ -82,6 +82,29 @@ public final class EconomyGameTests {
         helper.succeed();
     }
 
+    @GameTest(template = "economy_gametest_empty", timeoutTicks = 40)
+    public static void tankContainerInputAndOutputSlotsProcessStack(GameTestHelper helper) {
+        BlockPos tankPos = new BlockPos(2, 1, 0);
+        helper.setBlock(tankPos, BlockRegistries.TANK.get());
+        var blockEntity = helper.getLevel().getBlockEntity(helper.absolutePos(tankPos));
+        helper.assertTrue(blockEntity instanceof TankBlockEntity, "Tank must create its block entity");
+        TankBlockEntity tank = (TankBlockEntity) blockEntity;
+        helper.assertTrue(tank.getContainerSize() == 2, "Tank must expose distinct input and output inventory slots");
+        helper.assertTrue(tank.getCapacity() == com.nstut.economy.config.EconomyConfig.getInstance().getTankCapacity(),
+                "new Tank capacity must come from server storage config");
+
+        tank.setItem(TankBlockEntity.INPUT_SLOT, new ItemStack(Items.WATER_BUCKET, 2));
+
+        helper.assertTrue(tank.getItem(TankBlockEntity.INPUT_SLOT).isEmpty(),
+                "stacked filled containers must be consumed from the input slot");
+        ItemStack output = tank.getItem(TankBlockEntity.OUTPUT_SLOT);
+        helper.assertTrue(output.is(Items.BUCKET) && output.getCount() == 2,
+                "empty result containers must accumulate in the dedicated output slot");
+        helper.assertTrue(tank.getFluidAmount() == 2000,
+                "two water containers must transfer exactly 2,000 mB into the internal tank");
+        helper.succeed();
+    }
+
     @GameTest(template = "economy_gametest_empty", timeoutTicks = 60)
     public static void exactEnchantedBooksRemainDistinctThroughVaultCodecOrdersAndHistory(GameTestHelper helper) {
         helper.assertTrue(EconomyApi.isReady(), "Economy API must be ready for variant integration coverage");

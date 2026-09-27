@@ -51,8 +51,9 @@ public class VaultScreen extends EconomyUiContainerScreen<VaultMenu> {
             modeBtn.tooltip(modeTooltipWithPermission(mode));
         }
         if (ownerBtn != null) {
+            ownerBtn.setVisible(menu.hasTeam());
             ownerBtn.setLabel(storageOwnerLabel());
-            ownerBtn.enabled(menu.getVaultBlockEntity() != null);
+            ownerBtn.enabled(menu.hasTeam() && menu.getVaultBlockEntity() != null);
         }
         if (modeBtn != null) modeBtn.tooltip(modeTooltipWithPermission(currentMode));
     }
@@ -79,10 +80,11 @@ public class VaultScreen extends EconomyUiContainerScreen<VaultMenu> {
         HStack header = new HStack().gap(4).align(Alignment.CENTER);
         header.addChild(Ui.text(Component.translatable("ui.economy.vault.title")).style(TextStyle.TITLE));
         header.addChild(Ui.spacer().flex());
-        ownerBtn = Ui.button(storageOwnerLabel(), this::toggleStorageOwner).ghost().small();
+        ownerBtn = EconomyUiComponents.configStateButton(storageOwnerLabel(), this::toggleStorageOwner);
         ownerBtn.tooltip(Component.translatable("ui.economy.container.owner_transfer_tooltip"));
+        ownerBtn.setVisible(menu.hasTeam());
         header.addChild(ownerBtn);
-        modeBtn = Ui.button(modeLabel(currentMode), this::cycleMode).ghost().small();
+        modeBtn = EconomyUiComponents.configStateButton(modeLabel(currentMode), this::cycleMode);
         modeBtn.tooltip(modeTooltipWithPermission(currentMode));
         header.addChild(modeBtn);
         header.addChild(buildCompactThemeToggle());
@@ -116,16 +118,14 @@ public class VaultScreen extends EconomyUiContainerScreen<VaultMenu> {
     }
 
     private boolean isTeamStorage() {
-        VaultBlockEntity storage = menu.getVaultBlockEntity();
-        return storage != null && storage.getOwnerRef() != null
-                && "TEAM".equals(storage.getOwnerRef().kind().name());
+        return menu.isTeamOwned();
     }
 
     private Component storageOwnerLabel() {
         Component principal = Component.translatable(isTeamStorage()
                 ? "ui.economy.principal.team"
                 : "ui.economy.principal.personal");
-        return Component.translatable("ui.economy.container.owner", principal);
+        return principal;
     }
 
     private void toggleStorageOwner() {
@@ -133,7 +133,7 @@ public class VaultScreen extends EconomyUiContainerScreen<VaultMenu> {
         if (storage == null || minecraft == null || minecraft.level == null) return;
         MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.SetStorageOwnerPacket(
                 minecraft.level.dimension().identifier().toString(),
-                storage.getBlockPos(), false, !isTeamStorage()));
+                storage.getBlockPos(), false, !menu.isTeamOwned()));
     }
 
     private void cycleMode() {

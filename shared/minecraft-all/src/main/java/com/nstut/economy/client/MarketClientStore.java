@@ -23,9 +23,9 @@ public final class MarketClientStore {
             String role,
             boolean canDeposit,
             boolean canSpend,
-            boolean canWithdraw,
+            boolean canPayout,
             String spendRole,
-            String withdrawRole
+            String payoutRole
     ) {
         public TeamWalletState {
             mode = mode == null || mode.isBlank() ? "PERSONAL_ONLY" : mode;
@@ -33,11 +33,11 @@ public final class MarketClientStore {
             teamBalance = teamBalance == null || teamBalance.isBlank() ? "0" : teamBalance;
             role = role == null || role.isBlank() ? "NONE" : role;
             spendRole = spendRole == null || spendRole.isBlank() ? "OFFICER" : spendRole;
-            withdrawRole = withdrawRole == null || withdrawRole.isBlank() ? "OWNER" : withdrawRole;
+            payoutRole = payoutRole == null || payoutRole.isBlank() ? "OWNER" : payoutRole;
         }
 
-        public static TeamWalletState hidden(String mode, String spendRole, String withdrawRole) {
-            return new TeamWalletState(false, mode, "", "0", "NONE", false, false, false, spendRole, withdrawRole);
+        public static TeamWalletState hidden(String mode, String spendRole, String payoutRole) {
+            return new TeamWalletState(false, mode, "", "0", "NONE", false, false, false, spendRole, payoutRole);
         }
     }
 
@@ -46,8 +46,19 @@ public final class MarketClientStore {
     public static final Signal<String> balance = Signals.of("0");
     public static final Signal<TeamWalletState> teamWallet =
             Signals.of(TeamWalletState.hidden("PERSONAL_ONLY", "OFFICER", "OWNER"));
-    /** Server-authoritative economic principal used by new market-order actions. */
+    /**
+     * Server-authoritative principal for the entire Market view. The wallet badge is only a control/view of
+     * this state; Orders, New Order, Portfolio, Containers and Pay Player must all derive from this signal.
+     */
     public static final Signal<String> marketPrincipal = Signals.of("PLAYER");
+
+    public static boolean isTeamPrincipal() {
+        return "TEAM".equals(marketPrincipal.get());
+    }
+
+    public static boolean isPersonalPrincipal() {
+        return !isTeamPrincipal();
+    }
     public static final Signal<Integer> vaultCount = Signals.of(0);
     public static final Signal<MarketNetwork.SyncItemDetailPacket> detail = Signals.of(null);
     public static final Signal<List<HistoryEntry>> history = Signals.of(List.of());
@@ -55,6 +66,7 @@ public final class MarketClientStore {
     public static final Signal<List<MarketNetwork.PortfolioPointData>> portfolioPoints = Signals.of(List.of());
     public static final Signal<List<MarketNetwork.AssetHoldingData>> assetHoldings = Signals.of(List.of());
     public static final Signal<List<MarketNetwork.ActiveOrderEntry>> activeOrders = Signals.of(List.of());
+    public static final Signal<List<MarketNetwork.PlayerTargetData>> playerTargets = Signals.of(List.of());
 
     public static void applySyncItemList(MarketNetwork.SyncItemListPacket pkt) {
         Signals.batch(() -> {
@@ -69,10 +81,10 @@ public final class MarketClientStore {
                             pkt.teamRole,
                             pkt.teamCanDeposit,
                             pkt.teamCanSpend,
-                            pkt.teamCanWithdraw,
+                            pkt.teamCanPayout,
                             pkt.teamSpendRole,
-                            pkt.teamWithdrawRole)
-                    : TeamWalletState.hidden(pkt.teamMode, pkt.teamSpendRole, pkt.teamWithdrawRole));
+                            pkt.teamPayoutRole)
+                    : TeamWalletState.hidden(pkt.teamMode, pkt.teamSpendRole, pkt.teamPayoutRole));
             marketPrincipal.set(pkt.marketPrincipal);
             vaultCount.set(pkt.vaultCount);
         });
@@ -99,6 +111,10 @@ public final class MarketClientStore {
 
     public static void applySyncActiveOrders(MarketNetwork.SyncActiveOrdersPacket pkt) {
         activeOrders.set(List.copyOf(pkt.entries));
+    }
+
+    public static void applySyncPlayerList(MarketNetwork.SyncPlayerListPacket pkt) {
+        playerTargets.set(List.copyOf(pkt.entries));
     }
 }
 

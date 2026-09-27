@@ -5,6 +5,7 @@ import com.nstut.economy.util.EconomyFormatUtil;
 import com.nstut.openui.api.UIComponent;
 import com.nstut.openui.api.UiRender;
 import com.nstut.openui.controls.Badge;
+import com.nstut.openui.api.ButtonWidget;
 import com.nstut.openui.state.ReadableSignal;
 import com.nstut.openui.theme.ColorScheme;
 import net.minecraft.client.gui.Font;
@@ -26,6 +27,48 @@ public final class EconomyUiComponents {
             new ItemStack(BuiltInRegistries.ITEM.getValue(Identifier.fromNamespaceAndPath(Economy.MOD_ID, "coin")));
 
     private EconomyUiComponents() {}
+
+    /** Button that uses the same font-independent two-arrow adjustment glyph as the wallet badge. */
+    public static ButtonWidget configStateButton(Component label, Runnable action) {
+        return new ConfigStateButton(label, action);
+    }
+
+    public static void drawConfigSwitchIcon(GuiGraphicsExtractor g, int x, int y, int color) {
+        g.fill(x, y + 1, x + 8, y + 2, color);
+        g.fill(x + 6, y, x + 7, y + 3, color);
+        g.fill(x + 7, y + 1, x + 9, y + 2, color);
+        g.fill(x + 1, y + 5, x + 9, y + 6, color);
+        g.fill(x + 2, y + 4, x + 3, y + 7, color);
+        g.fill(x, y + 5, x + 2, y + 6, color);
+    }
+
+    private static final class ConfigStateButton extends ButtonWidget {
+        ConfigStateButton(Component label, Runnable action) {
+            super(label);
+            onPress(action);
+            outline();
+            small();
+            alignLeft();
+        }
+
+        @Override
+        public int preferredWidth(Font font) {
+            int labelWidth = font != null ? font.width(getLabel()) : getLabel().getString().length() * 6;
+            // 7px label inset + 2px gap + 9px adjustment glyph + 2px right inset.
+            return Math.max(36, labelWidth + 20);
+        }
+
+        @Override
+        public void render(GuiGraphicsExtractor g, Font font, int mx, int my, float pt) {
+            super.render(g, font, mx, my, pt);
+            int sx = x + width - 11;
+            int sy = y + Math.max(1, (height - 7) / 2);
+            boolean hovered = mx >= x && mx < x + width && my >= y && my < y + height;
+            int color = !isEnabled() ? theme().colors().onSurfaceDisabled()
+                    : hovered ? theme().colors().primary() : theme().colors().onSurfaceMuted();
+            drawConfigSwitchIcon(g, sx, sy, color);
+        }
+    }
 
     public static void drawCoin(GuiGraphicsExtractor g, int x, int y) {
         g.pose().pushMatrix();
@@ -223,12 +266,7 @@ public final class EconomyUiComponents {
                     int sx = x + width - inset - 9;
                     int sy = y + 7;
                     int color = hovered ? c.primary() : c.onSurfaceMuted();
-                    g.fill(sx, sy + 1, sx + 8, sy + 2, color);
-                    g.fill(sx + 6, sy, sx + 7, sy + 3, color);
-                    g.fill(sx + 7, sy + 1, sx + 9, sy + 2, color);
-                    g.fill(sx + 1, sy + 5, sx + 9, sy + 6, color);
-                    g.fill(sx + 2, sy + 4, sx + 3, sy + 7, color);
-                    g.fill(sx, sy + 5, sx + 2, sy + 6, color);
+                    drawConfigSwitchIcon(g, sx, sy, color);
                 }
                 drawCoin(g, x + inset, y + 17);
                 UiRender.text(g, f, fitWalletText(f, amount, Math.max(0, width - inset * 2 - 10)),

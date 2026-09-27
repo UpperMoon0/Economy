@@ -43,12 +43,13 @@ class TeamEconomyRegistryTest {
     }
 
     @Test
-    void authorizedMoneyOperationsRecheckRoleAtMutationTime() {
+    void authorizedMoneyOperationsRecheckRoleAndNeverAllowTeamSelfPayout() {
         MutableProvider provider = new MutableProvider();
         TeamEconomyRegistry registry = new TeamEconomyRegistry();
         registry.registerProvider(provider);
         registry.setMode(TeamEconomyMode.HYBRID);
         AccountManager accounts = new AccountManager();
+        UUID recipient = UUID.randomUUID();
 
         var personal = accounts.getOrCreatePlayerAccount(provider.playerId);
         assertTrue(personal.credit(new BigDecimal("100"), TransactionContext.adminGive("test")));
@@ -58,30 +59,31 @@ class TeamEconomyRegistryTest {
         assertEquals(new BigDecimal("60"), personal.getBalance());
         assertEquals(new BigDecimal("40"), accounts.getTeamAccount(provider.team.id()).orElseThrow().getBalance());
 
-        assertFalse(registry.withdrawToPlayer(accounts, provider.playerId, BigDecimal.TEN,
-                TransactionContext.transfer("member cannot spend", provider.playerId)));
-        assertEquals(new BigDecimal("40"), accounts.getTeamAccount(provider.team.id()).orElseThrow().getBalance());
+        assertFalse(registry.spendFromTeam(accounts, provider.playerId, AccountRef.player(recipient), BigDecimal.TEN,
+                TransactionContext.transfer("member cannot payout", recipient)));
 
         provider.role = TeamRole.OFFICER;
         assertTrue(registry.canSpend(provider.playerId, provider.team.id()),
                 "officer must retain market-spend permission");
-        assertFalse(registry.canWithdraw(provider.playerId, provider.team.id()),
-                "market spending must not imply treasury extraction");
-        assertFalse(registry.withdrawToPlayer(accounts, provider.playerId, BigDecimal.TEN,
-                TransactionContext.transfer("officer cannot withdraw", provider.playerId)));
-        assertEquals(new BigDecimal("60"), personal.getBalance());
-        assertEquals(new BigDecimal("40"), accounts.getTeamAccount(provider.team.id()).orElseThrow().getBalance());
+        assertFalse(registry.canPayout(provider.playerId, provider.team.id()),
+                "market spending must not imply direct payout permission");
+        assertFalse(registry.spendFromTeam(accounts, provider.playerId, AccountRef.player(recipient), BigDecimal.TEN,
+                TransactionContext.transfer("officer cannot payout", recipient)));
 
         provider.role = TeamRole.OWNER;
-        assertTrue(registry.canWithdraw(provider.playerId, provider.team.id()));
-        assertTrue(registry.withdrawToPlayer(accounts, provider.playerId, BigDecimal.TEN,
-                TransactionContext.transfer("owner withdraw", provider.playerId)));
-        assertEquals(new BigDecimal("70"), personal.getBalance());
+        assertTrue(registry.canPayout(provider.playerId, provider.team.id()));
+        assertFalse(registry.spendFromTeam(accounts, provider.playerId, AccountRef.player(provider.playerId), BigDecimal.TEN,
+                TransactionContext.transfer("self payout forbidden", provider.playerId)),
+                "even an owner must never turn Team funds directly into Personal funds");
+        assertEquals(new BigDecimal("60"), personal.getBalance());
+        assertTrue(registry.spendFromTeam(accounts, provider.playerId, AccountRef.player(recipient), BigDecimal.TEN,
+                TransactionContext.transfer("owner external payout", recipient)));
         assertEquals(new BigDecimal("30"), accounts.getTeamAccount(provider.team.id()).orElseThrow().getBalance());
+        assertEquals(new BigDecimal("10"), accounts.getOrCreatePlayerAccount(recipient).getBalance());
 
         provider.role = TeamRole.MEMBER;
-        assertFalse(registry.withdrawToPlayer(accounts, provider.playerId, BigDecimal.ONE,
-                TransactionContext.transfer("demoted", provider.playerId)));
+        assertFalse(registry.spendFromTeam(accounts, provider.playerId, AccountRef.player(recipient), BigDecimal.ONE,
+                TransactionContext.transfer("demoted", recipient)));
     }
 
     @Test
@@ -129,9 +131,9 @@ class TeamEconomyRegistryTest {
         assertEquals(TeamRole.MEMBER, snapshot.role());
         assertTrue(snapshot.canDeposit());
         assertFalse(snapshot.canSpend());
-        assertFalse(snapshot.canWithdraw());
+        assertFalse(snapshot.canPayout());
         assertEquals(TeamRole.OFFICER, snapshot.spendRole());
-        assertEquals(TeamRole.OWNER, snapshot.withdrawRole());
+        assertEquals(TeamRole.OWNER, snapshot.payoutRole());
 
         provider.member = false;
         TeamWalletSnapshot afterLeave = registry.walletSnapshot(accounts, provider.playerId);
@@ -181,19 +183,19 @@ class TeamEconomyRegistryTest {
     void permissionThresholdCannotAuthorizeNonmembers() {
         TeamEconomyRegistry registry = new TeamEconomyRegistry();
         assertThrows(IllegalArgumentException.class, () -> registry.setSpendRole(TeamRole.NONE));
-        assertThrows(IllegalArgumentException.class, () -> registry.setWithdrawRole(TeamRole.NONE));
+        assertThrows(IllegalArgumentException.class, () -> registry.setPayoutRole(TeamRole.NONE));
         assertThrows(IllegalArgumentException.class, () -> registry.setAdminRole(TeamRole.NONE));
-        assertFalse(registry.canWithdraw(UUID.randomUUID(), UUID.randomUUID()));
+        assertFalse(registry.canPayout(UUID.randomUUID(), UUID.randomUUID()));
     }
 
     @Test
-    void legacyWalletSnapshotDoesNotGrantSeparateWithdrawalPermission() {
+    void legacyWalletSnapshotDoesNotGrantSeparatePayoutPermission() {
         TeamWalletSnapshot snapshot = new TeamWalletSnapshot(TeamEconomyMode.HYBRID, BigDecimal.TEN,
                 Optional.empty(), BigDecimal.ZERO, TeamRole.OFFICER, true, true, TeamRole.OFFICER);
-        assertFalse(snapshot.canWithdraw());
-        assertEquals(TeamRole.OWNER, snapshot.withdrawRole());
+        assertFalse(snapshot.canPayout());
+        assertEquals(TeamRole.OWNER, snapshot.payoutRole());
         assertFalse(TeamWalletSnapshot.personalOnly(TeamEconomyMode.PERSONAL_ONLY, BigDecimal.TEN,
-                TeamRole.OFFICER).canWithdraw());
+                TeamRole.OFFICER).canPayout());
     }
 
     private static final class MutableProvider implements TeamEconomyProvider {

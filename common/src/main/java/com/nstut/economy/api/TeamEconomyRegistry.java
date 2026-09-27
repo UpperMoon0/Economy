@@ -29,7 +29,7 @@ public final class TeamEconomyRegistry {
     private volatile TeamRole viewRole = TeamRole.MEMBER;
     private volatile TeamRole depositRole = TeamRole.MEMBER;
     private volatile TeamRole spendRole = TeamRole.OFFICER;
-    private volatile TeamRole withdrawRole = TeamRole.OWNER;
+    private volatile TeamRole payoutRole = TeamRole.OWNER;
     private volatile TeamRole adminRole = TeamRole.OWNER;
 
     public Optional<TeamEconomyProvider> provider() {
@@ -58,13 +58,13 @@ public final class TeamEconomyRegistry {
     public TeamRole viewRole() { return viewRole; }
     public TeamRole depositRole() { return depositRole; }
     public TeamRole spendRole() { return spendRole; }
-    public TeamRole withdrawRole() { return withdrawRole; }
+    public TeamRole payoutRole() { return payoutRole; }
     public TeamRole adminRole() { return adminRole; }
 
     public void setViewRole(TeamRole role) { viewRole = requireMemberRole(role); }
     public void setDepositRole(TeamRole role) { depositRole = requireMemberRole(role); }
     public void setSpendRole(TeamRole role) { spendRole = requireMemberRole(role); }
-    public void setWithdrawRole(TeamRole role) { withdrawRole = requireMemberRole(role); }
+    public void setPayoutRole(TeamRole role) { payoutRole = requireMemberRole(role); }
     public void setAdminRole(TeamRole role) { adminRole = requireMemberRole(role); }
 
     private static TeamRole requireMemberRole(TeamRole role) {
@@ -126,13 +126,13 @@ public final class TeamEconomyRegistry {
         BigDecimal personalBalance = accounts.getOrCreatePlayerAccount(playerId).getBalance();
         Optional<TeamRef> team = resolveTeam(playerId);
         if (team.isEmpty()) {
-            return TeamWalletSnapshot.personalOnly(mode, personalBalance, spendRole, withdrawRole);
+            return TeamWalletSnapshot.personalOnly(mode, personalBalance, spendRole, payoutRole);
         }
 
         TeamRef current = team.get();
         TeamRole role = roleFor(playerId, current.id());
         if (!role.atLeast(viewRole)) {
-            return TeamWalletSnapshot.personalOnly(mode, personalBalance, spendRole, withdrawRole);
+            return TeamWalletSnapshot.personalOnly(mode, personalBalance, spendRole, payoutRole);
         }
 
         BigDecimal teamBalance = accounts.getOrCreateTeamAccount(current.id()).getBalance();
@@ -144,9 +144,9 @@ public final class TeamEconomyRegistry {
                 role,
                 role.atLeast(depositRole),
                 role.atLeast(spendRole),
-                role.atLeast(withdrawRole),
+                role.atLeast(payoutRole),
                 spendRole,
-                withdrawRole);
+                payoutRole);
     }
 
     public boolean canView(UUID playerId, UUID teamId) {
@@ -161,9 +161,9 @@ public final class TeamEconomyRegistry {
         return roleFor(playerId, teamId).atLeast(spendRole);
     }
 
-    /** Treasury extraction (withdraw/pay) is deliberately stricter than market spending. */
-    public boolean canWithdraw(UUID playerId, UUID teamId) {
-        return roleFor(playerId, teamId).atLeast(withdrawRole);
+    /** Direct Team payouts to other players are deliberately stricter than market spending. */
+    public boolean canPayout(UUID playerId, UUID teamId) {
+        return roleFor(playerId, teamId).atLeast(payoutRole);
     }
 
     public boolean canAdmin(UUID playerId, UUID teamId) {
@@ -184,23 +184,18 @@ public final class TeamEconomyRegistry {
     }
 
     /**
-     * Revalidates the actor immediately before debiting the shared wallet.
-     * This is the safe primitive for team payments/withdrawals outside the market.
+     * Revalidates the actor immediately before a direct payout from the shared wallet.
+     * Self-payout is forbidden: Team funds only become personal through lifecycle settlement.
      */
     public boolean spendFromTeam(IAccountManager accounts, UUID actor, AccountRef target,
                                  BigDecimal amount, ITransactionContext context) {
         Objects.requireNonNull(accounts, "accounts");
         if (actor == null || target == null || amount == null || amount.signum() <= 0) return false;
+        if (target.equals(AccountRef.player(actor))) return false;
         Optional<TeamRef> team = resolveTeam(actor);
-        if (team.isEmpty() || !canWithdraw(actor, team.get().id())) return false;
+        if (team.isEmpty() || !canPayout(actor, team.get().id())) return false;
         if (target.kind() == AccountKind.TEAM && closing.test(target.id())) return false;
         return accounts.transfer(team.get().account(), target, amount, context);
-    }
-
-    /** Convenience withdrawal to the acting player's personal wallet. */
-    public boolean withdrawToPlayer(IAccountManager accounts, UUID actor, BigDecimal amount,
-                                    ITransactionContext context) {
-        return actor != null && spendFromTeam(accounts, actor, AccountRef.player(actor), amount, context);
     }
 
     /** Fresh server-side membership/rank lookup; never trusts client state. */

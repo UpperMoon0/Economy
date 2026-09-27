@@ -35,13 +35,17 @@ public final class MarketUiPreview {
         new Case("browse-personal", "BROWSE", "NONE", false, false, false),
         new Case("browse-team", "BROWSE", "OWNER", true, true, false),
         new Case("treasury-owner", "TEAM_TREASURY", "OWNER", true, true, false),
+        new Case("treasury-owner-expanded", "TEAM_TREASURY", "OWNER", true, true, false),
         new Case("treasury-officer", "TEAM_TREASURY", "OFFICER", true, true, false),
         new Case("treasury-member", "TEAM_TREASURY", "MEMBER", true, false, false),
         new Case("treasury-unavailable", "TEAM_TREASURY", "NONE", false, true, false),
+        new Case("containers-personal", "CONTAINERS", "OWNER", true, false, false),
         new Case("containers-owner", "CONTAINERS", "OWNER", true, true, false),
         new Case("containers-officer", "CONTAINERS", "OFFICER", true, true, false),
         new Case("orders-personal-selected", "ORDERS", "OWNER", true, false, false),
         new Case("orders-team-selected", "ORDERS", "OWNER", true, true, false),
+        new Case("new-personal-buy", "NEW_ORDER", "OWNER", true, false, false),
+        new Case("new-personal-sell", "NEW_ORDER", "OWNER", true, false, true),
         new Case("new-team-buy", "NEW_ORDER", "OWNER", true, true, false),
         new Case("new-team-sell", "NEW_ORDER", "OWNER", true, true, true));
     static final List<Shot> shots = new ArrayList<>();
@@ -66,7 +70,7 @@ public final class MarketUiPreview {
                 next(mc);
             } else if (advance) {
                 advance = false;
-                if (++index == 48) {
+                if (++index == CASES.size() * 4) {
                     StringBuilder html = new StringBuilder("<!doctype html><meta charset='utf-8'><title>Economy UI previews</title><style>body{background:#172020;color:#eee;font:16px sans-serif}main{display:flex;flex-wrap:wrap;gap:16px}figure{margin:8px}img{max-width:100%;image-rendering:pixelated}</style><h1>Economy production Market UI</h1><p>Deterministic fixtures, wide/narrow, dark/light. These images validate layout, not multiplayer authorization.</p><main>");
                     for (Shot shot : shots) html.append("<figure><img src='").append(shot.file()).append("'><figcaption>").append(shot.file()).append("</figcaption></figure>");
                     Files.writeString(output.resolve("index.html"), html.append("</main>").toString());
@@ -82,13 +86,14 @@ public final class MarketUiPreview {
     }
 
     static void next(Minecraft mc) throws Exception {
-        int scale = index / 12 % 2 == 0 ? 2 : 3;
+        int scale = (index / CASES.size()) % 2 == 0 ? 2 : 3;
         mc.setScreen(null);
         mc.options.guiScale().set(scale);
         mc.resizeDisplay();
-        Case fixture = CASES.get(index % 12);
+        Case fixture = CASES.get(index % CASES.size());
         fixture(fixture);
-        mc.setScreen(new PreviewScreen(fixture, index < 24 ? EconomyUiThemeMode.DARK : EconomyUiThemeMode.LIGHT, scale));
+        mc.setScreen(new PreviewScreen(fixture, index < CASES.size() * 2
+                ? EconomyUiThemeMode.DARK : EconomyUiThemeMode.LIGHT, scale));
     }
 
     static void fixture(Case c) {
@@ -97,13 +102,20 @@ public final class MarketUiPreview {
                     new MarketNetwork.ItemCardData("minecraft:diamond", "Diamond", "120", 2, -3.0)),
             "HYBRID", c.visible(), "Upper Moon Builders", "98765.25", c.role(), c.visible(),
             c.role().equals("OWNER") || c.role().equals("OFFICER"), c.role().equals("OWNER"), "OFFICER", "OWNER", c.team() ? "TEAM" : "PLAYER"));
-        MarketClientStore.containerEntries.set(List.of(
-            new MarketNetwork.VaultDetailEntry(12,64,32,"minecraft:overworld",12,54,768,0,false,"",false,"Personal",c.role().equals("OWNER")),
-            new MarketNetwork.VaultDetailEntry(15,64,32,"minecraft:overworld",24,54,1536,0,false,"",true,"Team / Upper Moon Builders",c.role().equals("OWNER")),
-            new MarketNetwork.VaultDetailEntry(18,64,32,"minecraft:overworld",8000,16000,8000,0,true,"minecraft:water",true,"Team / Upper Moon Builders",c.role().equals("OWNER"))));
-        MarketClientStore.activeOrders.set(List.of(
-            new MarketNetwork.ActiveOrderEntry(PLAYER,"minecraft:iron_ingot","Iron Ingot","12.5",32,64,true,false,1700000000000L,MarketIdentity.personal(PLAYER)),
-            new MarketNetwork.ActiveOrderEntry(TEAM,"minecraft:diamond","Diamond","120",8,16,false,false,1700000000000L,new MarketIdentity(AccountRef.team(TEAM),PLAYER,AccountRef.team(TEAM)))));
+        if (c.team()) {
+            MarketClientStore.containerEntries.set(List.of(
+                    new MarketNetwork.VaultDetailEntry(15,64,32,"minecraft:overworld",24,54,1536,1,false,"",true,"Team / Upper Moon Builders",c.role().equals("OWNER")),
+                    new MarketNetwork.VaultDetailEntry(18,64,32,"minecraft:overworld",8000,16000,8000,2,true,"minecraft:water",true,"Team / Upper Moon Builders",c.role().equals("OWNER"))));
+            MarketClientStore.activeOrders.set(List.of(
+                    new MarketNetwork.ActiveOrderEntry(TEAM,"minecraft:diamond","Diamond","120",8,16,false,false,1700000000000L,
+                            new MarketIdentity(AccountRef.team(TEAM),PLAYER,AccountRef.team(TEAM)))));
+        } else {
+            MarketClientStore.containerEntries.set(List.of(
+                    new MarketNetwork.VaultDetailEntry(12,64,32,"minecraft:overworld",12,54,768,1,false,"",false,"Personal",c.role().equals("OWNER"))));
+            MarketClientStore.activeOrders.set(List.of(
+                    new MarketNetwork.ActiveOrderEntry(PLAYER,"minecraft:iron_ingot","Iron Ingot","12.5",32,64,true,false,1700000000000L,
+                            MarketIdentity.personal(PLAYER))));
+        }
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})
@@ -129,7 +141,8 @@ public final class MarketUiPreview {
             themeMode.set(theme);
             var f=MarketScreen.class.getDeclaredField("initialDataRequested"); f.setAccessible(true); f.setBoolean(this,true);
             signal(this,"view",marketView(fixture.view()));
-            signal(this,"treasuryAmount","100"); signal(this,"treasuryTarget","BuilderTwo");
+            signal(this,"treasuryAmount","100");
+            signal(this,"treasuryInfoExpanded", fixture.name().equals("treasury-owner-expanded"));
             signal(this,"createCommodityId","minecraft:iron_ingot"); signal(this,"createCommodityQuery","Iron Ingot");
             signal(this,"createQty","32"); signal(this,"createPrice","12.5"); signal(this,"createSellMode",fixture.sell());
         }

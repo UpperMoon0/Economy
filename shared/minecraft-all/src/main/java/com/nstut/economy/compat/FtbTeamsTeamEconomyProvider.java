@@ -143,6 +143,16 @@ public final class FtbTeamsTeamEconomyProvider implements TeamEconomyProvider {
     }
 
     @Override
+    public Collection<UUID> getMembers(UUID teamId) {
+        if (teamId == null) return java.util.List.of();
+        return manager()
+                .flatMap(manager -> invokeOptional(getTeamByIdMethod, manager, teamId))
+                .filter(this::isPartyTeam)
+                .map(this::members)
+                .orElseGet(java.util.List::of);
+    }
+
+    @Override
     public boolean isMember(UUID playerId, UUID teamId) {
         if (playerId == null || teamId == null) return false;
         return manager()
@@ -183,6 +193,19 @@ public final class FtbTeamsTeamEconomyProvider implements TeamEconomyProvider {
             return result instanceof Boolean value && value;
         } catch (ReflectiveOperationException | RuntimeException ignored) {
             return false;
+        }
+    }
+
+    private Collection<UUID> members(Object team) {
+        try {
+            Object result = getMembersMethod.invoke(team);
+            if (!(result instanceof Collection<?> values)) return java.util.List.of();
+            java.util.ArrayList<UUID> members = new java.util.ArrayList<>();
+            for (Object value : values) if (value instanceof UUID id) members.add(id);
+            members.sort(UUID::compareTo);
+            return java.util.List.copyOf(members);
+        } catch (ReflectiveOperationException | RuntimeException ignored) {
+            return java.util.List.of();
         }
     }
 

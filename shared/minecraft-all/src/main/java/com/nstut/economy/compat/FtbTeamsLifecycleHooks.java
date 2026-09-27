@@ -5,6 +5,9 @@ import com.nstut.economy.api.TeamRef;
 import com.nstut.economy.server.TeamWalletLifecycle;
 
 import java.lang.reflect.Method;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
 import java.util.UUID;
 import java.util.function.Consumer;
 
@@ -55,9 +58,23 @@ public final class FtbTeamsLifecycleHooks {
             TeamRef ref = new TeamRef((UUID) teamType.getMethod("getId").invoke(team),
                     String.valueOf(teamType.getMethod("getShortName").invoke(team)),
                     (UUID) teamType.getMethod("getOwner").invoke(team));
-            if (deleted) TeamWalletLifecycle.deleted(ref); else TeamWalletLifecycle.observe(ref);
+            Collection<UUID> members = teamMembers(teamType, team);
+            if (deleted) TeamWalletLifecycle.deleted(ref, members); else TeamWalletLifecycle.observe(ref, members);
         } catch (ReflectiveOperationException | RuntimeException failure) {
             Economy.LOGGER.error("Could not capture FTB Teams lifecycle event", failure);
         }
     }
+    private static Collection<UUID> teamMembers(Class<?> teamType, Object team) {
+        try {
+            Object result = teamType.getMethod("getMembers").invoke(team);
+            if (!(result instanceof Collection<?> values)) return List.of();
+            ArrayList<UUID> members = new ArrayList<>();
+            for (Object value : values) if (value instanceof UUID id) members.add(id);
+            members.sort(UUID::compareTo);
+            return List.copyOf(members);
+        } catch (ReflectiveOperationException | RuntimeException ignored) {
+            return List.of();
+        }
+    }
+
 }

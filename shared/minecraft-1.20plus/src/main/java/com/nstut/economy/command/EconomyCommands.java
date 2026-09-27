@@ -50,6 +50,16 @@ public class EconomyCommands {
         return Commands.literal(rootName)
             .then(TeamWalletCommands.node())
             .then(Commands.literal("balance")
+                .then(Commands.literal("personal")
+                    .executes(context -> showBalancePrincipal(context, null, false))
+                    .then(Commands.argument("player", EntityArgument.player())
+                        .requires(source -> source.hasPermission(2))
+                        .executes(context -> showBalancePrincipal(context, EntityArgument.getPlayer(context, "player"), false))))
+                .then(Commands.literal("team")
+                    .executes(context -> showBalancePrincipal(context, null, true))
+                    .then(Commands.argument("player", EntityArgument.player())
+                        .requires(source -> source.hasPermission(2))
+                        .executes(context -> showBalancePrincipal(context, EntityArgument.getPlayer(context, "player"), true))))
                 .executes(context -> {
                     if (context.getSource().getEntity() instanceof ServerPlayer player) {
                         return showBalance(context, player);
@@ -66,6 +76,14 @@ public class EconomyCommands {
                 )
             )
             .then(Commands.literal("pay")
+                .then(Commands.literal("personal")
+                    .then(Commands.argument("player", EntityArgument.player())
+                        .then(Commands.argument("amount", DoubleArgumentType.doubleArg(0.01))
+                            .executes(context -> payFromPrincipal(context, false)))))
+                .then(Commands.literal("team")
+                    .then(Commands.argument("player", EntityArgument.player())
+                        .then(Commands.argument("amount", DoubleArgumentType.doubleArg(0.01))
+                            .executes(context -> payFromPrincipal(context, true)))))
                 .then(Commands.argument("player", EntityArgument.player())
                     .then(Commands.argument("amount", DoubleArgumentType.doubleArg(0.01))
                         .executes(context -> {
@@ -80,6 +98,10 @@ public class EconomyCommands {
                             IBankAccount receiverAccount = accounts.getOrCreatePlayerAccount(receiver.getUUID());
 
                             boolean isSelf = sender.getUUID().equals(receiver.getUUID());
+                            if (isSelf) {
+                                context.getSource().sendFailure(Component.literal("You cannot pay yourself."));
+                                return 0;
+                            }
                             if (senderAccount.transferTo(receiverAccount, amount,
                                 TransactionContext.transfer("Payment from " + sender.getName().getString(), receiver.getUUID()))) {
                                 String amtStr = com.nstut.economy.util.EconomyFormatUtil.formatMoney(amount);
@@ -165,6 +187,14 @@ public class EconomyCommands {
             )
             .then(Commands.literal("give")
                 .requires(source -> source.hasPermission(2))
+                .then(Commands.literal("personal")
+                    .then(Commands.argument("player", EntityArgument.player())
+                        .then(Commands.argument("amount", DoubleArgumentType.doubleArg(0.01))
+                            .executes(context -> adminGivePrincipal(context, false)))))
+                .then(Commands.literal("team")
+                    .then(Commands.argument("player", EntityArgument.player())
+                        .then(Commands.argument("amount", DoubleArgumentType.doubleArg(0.01))
+                            .executes(context -> adminGivePrincipal(context, true)))))
                 .then(Commands.argument("player", EntityArgument.player())
                     .then(Commands.argument("amount", DoubleArgumentType.doubleArg(0.01))
                         .executes(context -> adminGive(context))
@@ -173,6 +203,14 @@ public class EconomyCommands {
             )
             .then(Commands.literal("take")
                 .requires(source -> source.hasPermission(2))
+                .then(Commands.literal("personal")
+                    .then(Commands.argument("player", EntityArgument.player())
+                        .then(Commands.argument("amount", DoubleArgumentType.doubleArg(0.01))
+                            .executes(context -> adminTakePrincipal(context, false)))))
+                .then(Commands.literal("team")
+                    .then(Commands.argument("player", EntityArgument.player())
+                        .then(Commands.argument("amount", DoubleArgumentType.doubleArg(0.01))
+                            .executes(context -> adminTakePrincipal(context, true)))))
                 .then(Commands.argument("player", EntityArgument.player())
                     .then(Commands.argument("amount", DoubleArgumentType.doubleArg(0.01))
                         .executes(context -> adminTake(context))
@@ -181,12 +219,110 @@ public class EconomyCommands {
             )
             .then(Commands.literal("set")
                 .requires(source -> source.hasPermission(2))
+                .then(Commands.literal("personal")
+                    .then(Commands.argument("player", EntityArgument.player())
+                        .then(Commands.argument("amount", DoubleArgumentType.doubleArg(0))
+                            .executes(context -> adminSetPrincipal(context, false)))))
+                .then(Commands.literal("team")
+                    .then(Commands.argument("player", EntityArgument.player())
+                        .then(Commands.argument("amount", DoubleArgumentType.doubleArg(0))
+                            .executes(context -> adminSetPrincipal(context, true)))))
                 .then(Commands.argument("player", EntityArgument.player())
                     .then(Commands.argument("amount", DoubleArgumentType.doubleArg(0))
                         .executes(context -> adminSet(context))
                     )
                 )
             );
+    }
+
+    private static int showBalancePrincipal(CommandContext<CommandSourceStack> context, ServerPlayer explicitTarget, boolean team) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        ServerPlayer target = explicitTarget;
+        if (target == null) {
+            if (!(context.getSource().getEntity() instanceof ServerPlayer self)) {
+                context.getSource().sendFailure(Component.literal("Choose a player when running this principal balance command from the console."));
+                return 0;
+            }
+            target = self;
+        }
+        IAccountManager accounts = IAccountManager.getInstance();
+        IBankAccount account;
+        String label;
+        if (team) {
+            var ref = com.nstut.economy.api.EconomyApi.teamEconomy().resolveTeam(target.getUUID());
+            if (ref.isEmpty()) { context.getSource().sendFailure(Component.literal(target.getName().getString() + " has no available Team account.")); return 0; }
+            account = accounts.getOrCreateTeamAccount(ref.get().id());
+            label = ref.get().displayName() + " Team";
+        } else {
+            account = accounts.getOrCreatePlayerAccount(target.getUUID());
+            label = target.getName().getString() + " Personal";
+        }
+        IBankAccount resolved = account; String resolvedLabel = label;
+        context.getSource().sendSuccess(() -> Component.literal(resolvedLabel + " balance: ")
+                .append(CoinText.amount(resolved.getBalance())), false);
+        return 1;
+    }
+
+    private static int payFromPrincipal(CommandContext<CommandSourceStack> context, boolean team) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        if (!(context.getSource().getEntity() instanceof ServerPlayer sender)) {
+            context.getSource().sendFailure(Component.literal("Only players can send money.")); return 0;
+        }
+        ServerPlayer receiver = EntityArgument.getPlayer(context, "player");
+        if (sender.getUUID().equals(receiver.getUUID())) {
+            context.getSource().sendFailure(Component.literal(team ? "Team funds cannot be paid to your own Personal account." : "You cannot pay yourself.")); return 0;
+        }
+        BigDecimal amount = BigDecimal.valueOf(DoubleArgumentType.getDouble(context, "amount"));
+        boolean success;
+        if (team) {
+            success = com.nstut.economy.api.EconomyApi.teamEconomy().spendFromTeam(
+                    IAccountManager.getInstance(), sender.getUUID(), com.nstut.economy.api.AccountRef.player(receiver.getUUID()), amount,
+                    TransactionContext.transfer("Team command payment from " + sender.getName().getString(), receiver.getUUID()));
+        } else {
+            success = IAccountManager.getInstance().transfer(
+                    com.nstut.economy.api.AccountRef.player(sender.getUUID()), com.nstut.economy.api.AccountRef.player(receiver.getUUID()), amount,
+                    TransactionContext.transfer("Personal command payment from " + sender.getName().getString(), receiver.getUUID()));
+        }
+        if (!success) { context.getSource().sendFailure(Component.literal(team ? "Team payment rejected: check Team balance and payout permission." : "Personal payment rejected: insufficient balance or transaction rule.")); return 0; }
+        String sourceLabel = team ? "Team" : "Personal";
+        context.getSource().sendSuccess(() -> Component.literal(sourceLabel + " payment: ")
+                .append(CoinText.amount(amount)).append(Component.literal(" to " + receiver.getName().getString())), false);
+        com.nstut.economy.data.EconomyAccountData.recordSnapshot(com.nstut.economy.api.AccountRef.player(receiver.getUUID()), receiver.serverLevel());
+        return 1;
+    }
+
+    private static IBankAccount adminPrincipalAccount(CommandContext<CommandSourceStack> context, boolean team) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        ServerPlayer target = EntityArgument.getPlayer(context, "player");
+        if (!team) return IAccountManager.getInstance().getOrCreatePlayerAccount(target.getUUID());
+        var ref = com.nstut.economy.api.EconomyApi.teamEconomy().resolveTeam(target.getUUID());
+        if (ref.isEmpty()) return null;
+        return IAccountManager.getInstance().getOrCreateTeamAccount(ref.get().id());
+    }
+
+    private static int adminGivePrincipal(CommandContext<CommandSourceStack> context, boolean team) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        IBankAccount account = adminPrincipalAccount(context, team);
+        if (account == null) { context.getSource().sendFailure(Component.literal("Target has no available Team account.")); return 0; }
+        BigDecimal amount = BigDecimal.valueOf(DoubleArgumentType.getDouble(context, "amount"));
+        if (!account.credit(amount, TransactionContext.adminGive("Admin principal command"))) return 0;
+        context.getSource().sendSuccess(() -> Component.literal("Added ").append(CoinText.amount(amount)).append(Component.literal(team ? " to Team account." : " to Personal account.")), true);
+        return 1;
+    }
+
+    private static int adminTakePrincipal(CommandContext<CommandSourceStack> context, boolean team) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        IBankAccount account = adminPrincipalAccount(context, team);
+        if (account == null) { context.getSource().sendFailure(Component.literal("Target has no available Team account.")); return 0; }
+        BigDecimal amount = BigDecimal.valueOf(DoubleArgumentType.getDouble(context, "amount"));
+        if (!account.debit(amount, TransactionContext.adminTake("Admin principal command"))) { context.getSource().sendFailure(Component.literal("Selected principal has insufficient funds.")); return 0; }
+        context.getSource().sendSuccess(() -> Component.literal("Removed ").append(CoinText.amount(amount)).append(Component.literal(team ? " from Team account." : " from Personal account.")), true);
+        return 1;
+    }
+
+    private static int adminSetPrincipal(CommandContext<CommandSourceStack> context, boolean team) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        IBankAccount account = adminPrincipalAccount(context, team);
+        if (account == null) { context.getSource().sendFailure(Component.literal("Target has no available Team account.")); return 0; }
+        BigDecimal amount = BigDecimal.valueOf(DoubleArgumentType.getDouble(context, "amount"));
+        if (!(account instanceof com.nstut.economy.core.BankAccount bank)) { context.getSource().sendFailure(Component.literal("Selected principal does not support direct administrative balance assignment.")); return 0; }
+        bank.setBalance(amount);
+        context.getSource().sendSuccess(() -> Component.literal("Set ").append(Component.literal(team ? "Team" : "Personal")).append(Component.literal(" balance to ")).append(CoinText.amount(amount)), true);
+        return 1;
     }
 
     private static int showBalance(CommandContext<CommandSourceStack> context, ServerPlayer player) {

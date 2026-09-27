@@ -13,10 +13,16 @@ import org.jetbrains.annotations.NotNull;
 
 public class TankMenu extends AbstractContainerMenu {
 
-    public static final int CONTAINER_SIZE = 1;
+    public static final int CONTAINER_SIZE = 2;
+    public static final int DATA_MODE = 0;
+    public static final int DATA_TEAM_OWNED = 1;
+    public static final int DATA_TEAM_AVAILABLE = 2;
+    public static final int DATA_COUNT = 3;
     public static final int IMAGE_WIDTH = 280;
     public static final int IMAGE_HEIGHT = 186;
-    public static final int TRANSFER_SLOT_X = 180;
+    public static final int INPUT_SLOT_X = 170;
+    public static final int OUTPUT_SLOT_X = 206;
+    public static final int TRANSFER_SLOT_X = INPUT_SLOT_X;
     public static final int TRANSFER_SLOT_Y = 50;
     public static final int PLAYER_INV_X = (IMAGE_WIDTH - 162) / 2; // 59
     public static final int PLAYER_INV_Y = 102;
@@ -27,7 +33,7 @@ public class TankMenu extends AbstractContainerMenu {
     private final TankBlockEntity tankBlockEntity;
 
     public TankMenu(int containerId, Inventory playerInventory) {
-        this(containerId, playerInventory, new SimpleContainer(CONTAINER_SIZE), new SimpleContainerData(1), null);
+        this(containerId, playerInventory, new SimpleContainer(CONTAINER_SIZE), new SimpleContainerData(DATA_COUNT), null);
     }
 
     public TankMenu(int containerId, Inventory playerInventory, TankBlockEntity tank, ContainerData data) {
@@ -37,23 +43,21 @@ public class TankMenu extends AbstractContainerMenu {
     public TankMenu(int containerId, Inventory playerInventory, net.minecraft.world.Container container, ContainerData data, TankBlockEntity tank) {
         super(BlockRegistries.TANK_MENU.get(), containerId);
         checkContainerSize(container, CONTAINER_SIZE);
-        checkContainerDataCount(data, 1);
+        checkContainerDataCount(data, DATA_COUNT);
 
         this.container = container;
         this.data = data;
         this.tankBlockEntity = tank;
         container.startOpen(playerInventory.player);
 
-        this.addSlot(new Slot(container, 0, TRANSFER_SLOT_X, TRANSFER_SLOT_Y) {
+        this.addSlot(new Slot(container, TankBlockEntity.INPUT_SLOT, INPUT_SLOT_X, TRANSFER_SLOT_Y) {
             @Override
             public boolean mayPlace(@NotNull ItemStack stack) {
                 return com.nstut.economy.platform.Services.FLUID.isFluidContainer(stack);
             }
-
-            @Override
-            public int getMaxStackSize() {
-                return 1;
-            }
+        });
+        this.addSlot(new Slot(container, TankBlockEntity.OUTPUT_SLOT, OUTPUT_SLOT_X, TRANSFER_SLOT_Y) {
+            @Override public boolean mayPlace(@NotNull ItemStack stack) { return false; }
         });
 
         for (int row = 0; row < 3; row++) {
@@ -70,15 +74,25 @@ public class TankMenu extends AbstractContainerMenu {
     }
 
     public TankBlockEntity.TankMode getMode() {
-        return TankBlockEntity.TankMode.byId(data.get(0));
+        return TankBlockEntity.TankMode.byId(data.get(DATA_MODE));
     }
 
     public TankBlockEntity getTankBlockEntity() {
         return tankBlockEntity;
     }
 
+    /** Server-synchronized ownership state for reactive screen labels. */
+    public boolean isTeamOwned() {
+        return data.get(DATA_TEAM_OWNED) != 0;
+    }
+
+    /** Whether the viewing player currently belongs to a team/party. */
+    public boolean hasTeam() {
+        return data.get(DATA_TEAM_AVAILABLE) != 0;
+    }
+
     public void setMode(int modeId) {
-        data.set(0, modeId);
+        data.set(DATA_MODE, modeId);
     }
 
     @Override
@@ -88,11 +102,15 @@ public class TankMenu extends AbstractContainerMenu {
         if (slot.hasItem()) {
             ItemStack stackInSlot = slot.getItem();
             result = stackInSlot.copy();
-            if (index == 0) {
-                if (!this.moveItemStackTo(stackInSlot, 1, 37, true)) {
+            if (index < CONTAINER_SIZE) {
+                if (!this.moveItemStackTo(stackInSlot, CONTAINER_SIZE, CONTAINER_SIZE + 36, true)) {
                     return ItemStack.EMPTY;
                 }
-            } else if (!this.moveItemStackTo(stackInSlot, 0, 1, false)) {
+            } else if (com.nstut.economy.platform.Services.FLUID.isFluidContainer(stackInSlot)) {
+                if (!this.moveItemStackTo(stackInSlot, TankBlockEntity.INPUT_SLOT, TankBlockEntity.INPUT_SLOT + 1, false)) {
+                    return ItemStack.EMPTY;
+                }
+            } else {
                 return ItemStack.EMPTY;
             }
             if (stackInSlot.isEmpty()) {

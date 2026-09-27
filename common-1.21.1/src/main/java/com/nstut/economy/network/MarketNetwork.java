@@ -73,9 +73,12 @@ public class MarketNetwork {
         CHANNEL.registerC2S(SelectMarketWalletPacket.class, SelectMarketWalletPacket::encode, SelectMarketWalletPacket::decode, SelectMarketWalletPacket::handle);
         CHANNEL.registerC2S(TeamTreasuryPacket.class, TeamTreasuryPacket::encode, TeamTreasuryPacket::decode, TeamTreasuryPacket::handle);
         CHANNEL.registerC2S(SetStorageOwnerPacket.class, SetStorageOwnerPacket::encode, SetStorageOwnerPacket::decode, SetStorageOwnerPacket::handle);
+        CHANNEL.registerC2S(RequestPlayerListPacket.class, RequestPlayerListPacket::encode, RequestPlayerListPacket::decode, RequestPlayerListPacket::handle);
+        CHANNEL.registerS2C(SyncPlayerListPacket.class, SyncPlayerListPacket::encode, SyncPlayerListPacket::decode, SyncPlayerListPacket::handle);
+        CHANNEL.registerC2S(PlayerPaymentPacket.class, PlayerPaymentPacket::encode, PlayerPaymentPacket::decode, PlayerPaymentPacket::handle);
     }
 
-    public enum Action { CREATE_ORDER, ACCEPT_ORDER, CANCEL_ORDER, EDIT_ORDER, WALLET, TREASURY, STORAGE }
+    public enum Action { CREATE_ORDER, ACCEPT_ORDER, CANCEL_ORDER, EDIT_ORDER, WALLET, TREASURY, STORAGE, PAYMENT }
     public enum Result { SUCCESS, WARNING, ERROR }
     // Enum identity is serialized by ordinal; never reorder or insert constants.
     public static final int MAX_RESULT_ARGS = 8;
@@ -87,6 +90,36 @@ public class MarketNetwork {
         public static void handle(MarketActionResultPacket pkt, Supplier<NetworkManager.PacketContext> ctx) { ctx.get().queue(() -> com.nstut.economy.client.MarketScreen.handleActionResult(pkt)); }
     }
     private static void sendActionResult(ServerPlayer player, Action action, Result result, String key, String... args) { CHANNEL.sendToPlayer(player, new MarketActionResultPacket(action, result, key, List.of(args))); }
+
+    private static com.nstut.economy.api.AccountRef selectedMarketAccount(ServerPlayer player) {
+        UUID actor = player.getUUID();
+        com.nstut.economy.api.AccountRef selected = com.nstut.economy.server.MarketWalletSelection.selected(actor);
+        if (selected.kind() == com.nstut.economy.api.AccountKind.TEAM
+                && !com.nstut.economy.api.EconomyApi.teamEconomy().canSpend(actor, selected.id())) {
+            com.nstut.economy.server.MarketWalletSelection.selectPersonal(actor);
+            return com.nstut.economy.api.AccountRef.player(actor);
+        }
+        return selected;
+    }
+
+    private static void sendStorageModeDenied(ServerPlayer player, com.nstut.economy.api.AccountRef owner) {
+        if (owner != null && owner.kind() == com.nstut.economy.api.AccountKind.TEAM) {
+            sendActionResult(player, Action.STORAGE, Result.WARNING,
+                    "ui.economy.toast.storage_mode_team_permission",
+                    com.nstut.economy.api.EconomyApi.teamEconomy().adminRole().name());
+        } else {
+            sendActionResult(player, Action.STORAGE, Result.WARNING,
+                    "ui.economy.toast.storage_mode_personal_owner");
+        }
+    }
+
+    private static boolean tradeMatchesPrincipal(com.nstut.economy.api.AccountRef selected,
+                                                 com.nstut.economy.api.MarketIdentity identity,
+                                                 UUID legacyPlayer) {
+        if (identity != null) return selected.equals(identity.principal());
+        return selected.kind() == com.nstut.economy.api.AccountKind.PLAYER
+                && selected.id().equals(legacyPlayer);
+    }
 
     private static void sendCreateResult(ServerPlayer player, CreateOrderResult creation) {
         switch (creation.status()) {
@@ -254,16 +287,16 @@ public class MarketNetwork {
         public final String teamRole;
         public final boolean teamCanDeposit;
         public final boolean teamCanSpend;
-        public final boolean teamCanWithdraw;
+        public final boolean teamCanPayout;
         public final String teamSpendRole;
-        public final String teamWithdrawRole;
+        public final String teamPayoutRole;
         public final String marketPrincipal;
 
         public SyncItemListPacket(String balance, int vaultCount, List<ItemCardData> cards,
                                   String teamMode, boolean teamWalletVisible, String teamName,
                                   String teamBalance, String teamRole, boolean teamCanDeposit,
-                                  boolean teamCanSpend, boolean teamCanWithdraw, String teamSpendRole,
-                                  String teamWithdrawRole, String marketPrincipal) {
+                                  boolean teamCanSpend, boolean teamCanPayout, String teamSpendRole,
+                                  String teamPayoutRole, String marketPrincipal) {
             this.balance = balance;
             this.vaultCount = vaultCount;
             this.cards = cards;
@@ -274,9 +307,9 @@ public class MarketNetwork {
             this.teamRole = teamRole;
             this.teamCanDeposit = teamCanDeposit;
             this.teamCanSpend = teamCanSpend;
-            this.teamCanWithdraw = teamCanWithdraw;
+            this.teamCanPayout = teamCanPayout;
             this.teamSpendRole = teamSpendRole;
-            this.teamWithdrawRole = teamWithdrawRole;
+            this.teamPayoutRole = teamPayoutRole;
             this.marketPrincipal = marketPrincipal;
         }
 
@@ -293,9 +326,9 @@ public class MarketNetwork {
             buf.writeUtf(pkt.teamRole);
             buf.writeBoolean(pkt.teamCanDeposit);
             buf.writeBoolean(pkt.teamCanSpend);
-            buf.writeBoolean(pkt.teamCanWithdraw);
+            buf.writeBoolean(pkt.teamCanPayout);
             buf.writeUtf(pkt.teamSpendRole);
-            buf.writeUtf(pkt.teamWithdrawRole);
+            buf.writeUtf(pkt.teamPayoutRole);
             buf.writeUtf(pkt.marketPrincipal);
         }
 
@@ -312,13 +345,13 @@ public class MarketNetwork {
             String teamRole = buf.readUtf();
             boolean teamCanDeposit = buf.readBoolean();
             boolean teamCanSpend = buf.readBoolean();
-            boolean teamCanWithdraw = buf.readBoolean();
+            boolean teamCanPayout = buf.readBoolean();
             String teamSpendRole = buf.readUtf();
-            String teamWithdrawRole = buf.readUtf();
+            String teamPayoutRole = buf.readUtf();
             String marketPrincipal = buf.readUtf();
             return new SyncItemListPacket(balance, vaultCount, cards, teamMode, teamWalletVisible,
-                    teamName, teamBalance, teamRole, teamCanDeposit, teamCanSpend, teamCanWithdraw,
-                    teamSpendRole, teamWithdrawRole, marketPrincipal);
+                    teamName, teamBalance, teamRole, teamCanDeposit, teamCanSpend, teamCanPayout,
+                    teamSpendRole, teamPayoutRole, marketPrincipal);
         }
 
         public static void handle(SyncItemListPacket pkt, Supplier<NetworkManager.PacketContext> ctx) {
@@ -336,84 +369,224 @@ public class MarketNetwork {
             ctx.get().queue(() -> {
                 ServerPlayer player = ctx.get().getPlayer() instanceof ServerPlayer sp ? sp : null;
                 if (player == null) return;
-                boolean ok;
-                if (pkt.team) ok = com.nstut.economy.server.MarketWalletSelection.selectTeam(player.getUUID());
-                else { com.nstut.economy.server.MarketWalletSelection.selectPersonal(player.getUUID()); ok = true; }
-                sendActionResult(player, Action.WALLET, ok ? Result.SUCCESS : Result.WARNING,
-                        ok ? "ui.economy.toast.wallet_switched" : "ui.economy.toast.team_wallet_unavailable");
+                if (pkt.team) {
+                    UUID actor = player.getUUID();
+                    var teams = com.nstut.economy.api.EconomyApi.teamEconomy();
+                    var team = teams.resolveTeam(actor);
+                    if (team.isEmpty()) {
+                        sendActionResult(player, Action.WALLET, Result.WARNING, "ui.economy.toast.team_wallet_no_team");
+                    } else if (!teams.canSpend(actor, team.get().id())) {
+                        sendActionResult(player, Action.WALLET, Result.WARNING,
+                                "ui.economy.toast.team_wallet_permission", teams.spendRole().name());
+                    } else {
+                        com.nstut.economy.server.MarketWalletSelection.selectTeam(actor);
+                    }
+                } else {
+                    com.nstut.economy.server.MarketWalletSelection.selectPersonal(player.getUUID());
+                }
                 sendItemList(player);
             });
         }
     }
 
-    public enum TreasuryAction { DEPOSIT, WITHDRAW, PAY }
-
+    /** Team treasury deposit. Ordinary Team -> Personal withdrawal does not exist. */
     public static class TeamTreasuryPacket {
-        public final TreasuryAction action;
         public final String amount;
-        public final String target;
-        public TeamTreasuryPacket(TreasuryAction action, String amount, String target) {
-            this.action = action; this.amount = amount == null ? "" : amount; this.target = target == null ? "" : target;
+        public TeamTreasuryPacket(String amount) {
+            this.amount = amount == null ? "" : amount;
         }
         public static void encode(TeamTreasuryPacket pkt, FriendlyByteBuf buf) {
-            buf.writeEnum(pkt.action); buf.writeUtf(pkt.amount, 32); buf.writeUtf(pkt.target, 64);
+            buf.writeUtf(pkt.amount, 32);
         }
         public static TeamTreasuryPacket decode(FriendlyByteBuf buf) {
-            return new TeamTreasuryPacket(buf.readEnum(TreasuryAction.class), buf.readUtf(32), buf.readUtf(64));
+            return new TeamTreasuryPacket(buf.readUtf(32));
         }
         public static void handle(TeamTreasuryPacket pkt, Supplier<NetworkManager.PacketContext> ctx) {
             ctx.get().queue(() -> {
                 ServerPlayer player = ctx.get().getPlayer() instanceof ServerPlayer sp ? sp : null;
                 if (player == null) return;
-                java.math.BigDecimal amount;
+                BigDecimal amount;
                 try {
-                    amount = new java.math.BigDecimal(pkt.amount);
+                    amount = new BigDecimal(pkt.amount);
                     if (amount.signum() <= 0 || amount.scale() > 4 || amount.scale() < 0 || amount.precision() > 18)
                         throw new IllegalArgumentException();
                 } catch (RuntimeException invalid) {
                     sendActionResult(player, Action.TREASURY, Result.WARNING, "ui.economy.error.invalid_amount");
                     return;
                 }
-                var teams = com.nstut.economy.api.EconomyApi.teamEconomy();
-                var accounts = com.nstut.economy.api.EconomyApi.accounts();
-                UUID actor = player.getUUID();
-                var team = teams.resolveTeam(actor);
-                if (team.isEmpty()) {
-                    sendActionResult(player, Action.TREASURY, Result.WARNING, "ui.economy.toast.treasury_unavailable");
-                    return;
-                }
-                if (pkt.action == TreasuryAction.DEPOSIT && !teams.canDeposit(actor, team.get().id())) {
-                    sendActionResult(player, Action.TREASURY, Result.WARNING,
-                            "ui.economy.toast.treasury_deposit_permission", teams.depositRole().name());
-                    return;
-                }
-                if ((pkt.action == TreasuryAction.WITHDRAW || pkt.action == TreasuryAction.PAY)
-                        && !teams.canWithdraw(actor, team.get().id())) {
-                    sendActionResult(player, Action.TREASURY, Result.WARNING,
-                            "ui.economy.toast.treasury_withdraw_permission", teams.withdrawRole().name());
-                    return;
-                }
-                boolean success;
-                switch (pkt.action) {
-                    case DEPOSIT -> success = teams.depositFromPlayer(accounts, actor, amount,
+
+                try {
+                    var teams = com.nstut.economy.api.EconomyApi.teamEconomy();
+                    var accounts = com.nstut.economy.api.EconomyApi.accounts();
+                    UUID actor = player.getUUID();
+                    var team = teams.resolveTeam(actor);
+                    if (team.isEmpty()) {
+                        sendActionResult(player, Action.TREASURY, Result.WARNING, "ui.economy.toast.treasury_unavailable");
+                        return;
+                    }
+                    if (!teams.canDeposit(actor, team.get().id())) {
+                        sendActionResult(player, Action.TREASURY, Result.WARNING,
+                                "ui.economy.toast.treasury_deposit_permission", teams.depositRole().name());
+                        return;
+                    }
+                    BigDecimal personalBalance = accounts.getOrCreatePlayerAccount(actor).getBalance();
+                    if (personalBalance.compareTo(amount) < 0) {
+                        sendActionResult(player, Action.TREASURY, Result.WARNING,
+                                "ui.economy.toast.treasury_deposit_insufficient",
+                                exactDecimal(personalBalance), exactDecimal(amount));
+                        return;
+                    }
+
+                    boolean success = teams.depositFromPlayer(accounts, actor, amount,
                             com.nstut.economy.core.TransactionContext.transfer("Team deposit from Market UI", actor));
-                    case WITHDRAW -> success = teams.withdrawToPlayer(accounts, actor, amount,
-                            com.nstut.economy.core.TransactionContext.transfer("Team withdrawal from Market UI", actor));
-                    case PAY -> {
-                        ServerPlayer target = player.getServer() == null ? null : player.getServer().getPlayerList().getPlayerByName(pkt.target);
-                        if (target == null) {
-                            sendActionResult(player, Action.TREASURY, Result.WARNING, "ui.economy.toast.treasury_target_missing");
+                    sendActionResult(player, Action.TREASURY, success ? Result.SUCCESS : Result.WARNING,
+                            success ? "ui.economy.toast.treasury_updated" : "ui.economy.toast.treasury_blocked");
+                    sendItemList(player);
+                } catch (Exception failure) {
+                    com.nstut.Economy.LOGGER.warn("Error handling team treasury deposit from {}", player.getGameProfile().getName(), failure);
+                    sendActionResult(player, Action.TREASURY, Result.ERROR, "ui.economy.toast.treasury_unexpected");
+                }
+            });
+        }
+    }
+
+
+    public static class PlayerTargetData {
+        public final UUID playerId;
+        public final String name;
+        public PlayerTargetData(UUID playerId, String name) { this.playerId = playerId; this.name = name == null ? "" : name; }
+        public void write(FriendlyByteBuf buf) { buf.writeUUID(playerId); buf.writeUtf(name, 64); }
+        public static PlayerTargetData read(FriendlyByteBuf buf) { return new PlayerTargetData(buf.readUUID(), buf.readUtf(64)); }
+    }
+
+    public static class RequestPlayerListPacket {
+        public RequestPlayerListPacket() {}
+        public static void encode(RequestPlayerListPacket pkt, FriendlyByteBuf buf) {}
+        public static RequestPlayerListPacket decode(FriendlyByteBuf buf) { return new RequestPlayerListPacket(); }
+        public static void handle(RequestPlayerListPacket pkt, Supplier<NetworkManager.PacketContext> ctx) {
+            ctx.get().queue(() -> {
+                ServerPlayer player = ctx.get().getPlayer() instanceof ServerPlayer sp ? sp : null;
+                if (player == null || player.getServer() == null) return;
+                List<PlayerTargetData> entries = player.getServer().getPlayerList().getPlayers().stream()
+                        .filter(target -> !target.getUUID().equals(player.getUUID()))
+                        .sorted(java.util.Comparator.comparing(target -> target.getGameProfile().getName(), String.CASE_INSENSITIVE_ORDER))
+                        .map(target -> new PlayerTargetData(target.getUUID(), target.getGameProfile().getName()))
+                        .toList();
+                CHANNEL.sendToPlayer(player, new SyncPlayerListPacket(entries));
+            });
+        }
+    }
+
+    public static class SyncPlayerListPacket {
+        public final List<PlayerTargetData> entries;
+        public SyncPlayerListPacket(List<PlayerTargetData> entries) { this.entries = List.copyOf(entries); }
+        public static void encode(SyncPlayerListPacket pkt, FriendlyByteBuf buf) {
+            buf.writeInt(pkt.entries.size());
+            for (PlayerTargetData entry : pkt.entries) entry.write(buf);
+        }
+        public static SyncPlayerListPacket decode(FriendlyByteBuf buf) {
+            int count = buf.readInt();
+            if (count < 0 || count > 4096) throw new io.netty.handler.codec.DecoderException("Invalid player list size: " + count);
+            List<PlayerTargetData> entries = new ArrayList<>();
+            for (int i = 0; i < count; i++) entries.add(PlayerTargetData.read(buf));
+            return new SyncPlayerListPacket(entries);
+        }
+        public static void handle(SyncPlayerListPacket pkt, Supplier<NetworkManager.PacketContext> ctx) {
+            ctx.get().queue(() -> com.nstut.economy.client.MarketScreen.handleSyncPlayerList(pkt));
+        }
+    }
+
+    public static class PlayerPaymentPacket {
+        public final UUID target;
+        public final String amount;
+        public PlayerPaymentPacket(UUID target, String amount) { this.target = target; this.amount = amount == null ? "" : amount; }
+        public static void encode(PlayerPaymentPacket pkt, FriendlyByteBuf buf) { buf.writeUUID(pkt.target); buf.writeUtf(pkt.amount, 32); }
+        public static PlayerPaymentPacket decode(FriendlyByteBuf buf) { return new PlayerPaymentPacket(buf.readUUID(), buf.readUtf(32)); }
+        public static void handle(PlayerPaymentPacket pkt, Supplier<NetworkManager.PacketContext> ctx) {
+            ctx.get().queue(() -> {
+                ServerPlayer player = ctx.get().getPlayer() instanceof ServerPlayer sp ? sp : null;
+                if (player == null || player.getServer() == null) return;
+                BigDecimal amount;
+                try {
+                    amount = new BigDecimal(pkt.amount);
+                    if (amount.signum() <= 0 || amount.scale() > 4 || amount.scale() < 0 || amount.precision() > 18)
+                        throw new IllegalArgumentException();
+                } catch (RuntimeException invalid) {
+                    sendActionResult(player, Action.PAYMENT, Result.WARNING, "ui.economy.error.invalid_amount");
+                    return;
+                }
+
+                ServerPlayer target = player.getServer().getPlayerList().getPlayer(pkt.target);
+                if (target == null) {
+                    sendActionResult(player, Action.PAYMENT, Result.WARNING, "ui.economy.toast.payment_target_unavailable");
+                    return;
+                }
+                if (target.getUUID().equals(player.getUUID())) {
+                    sendActionResult(player, Action.PAYMENT, Result.WARNING, "ui.economy.toast.payment_self");
+                    return;
+                }
+
+                try {
+                    UUID actor = player.getUUID();
+                    var accounts = com.nstut.economy.api.EconomyApi.accounts();
+                    var source = com.nstut.economy.server.MarketWalletSelection.selected(actor);
+                    boolean success;
+                    if (source.kind() == com.nstut.economy.api.AccountKind.TEAM) {
+                        var teams = com.nstut.economy.api.EconomyApi.teamEconomy();
+                        var currentTeam = teams.resolveTeam(actor);
+                        if (currentTeam.isEmpty() || !currentTeam.get().id().equals(source.id())) {
+                            com.nstut.economy.server.MarketWalletSelection.selectPersonal(actor);
+                            sendActionResult(player, Action.PAYMENT, Result.WARNING, "ui.economy.toast.payment_team_unavailable");
+                            sendItemList(player);
+                            return;
+                        }
+                        if (!teams.canPayout(actor, source.id())) {
+                            sendActionResult(player, Action.PAYMENT, Result.WARNING,
+                                    "ui.economy.toast.payment_team_permission", teams.payoutRole().name());
+                            return;
+                        }
+                        BigDecimal balance = accounts.getOrCreateTeamAccount(source.id()).getBalance();
+                        if (balance.compareTo(amount) < 0) {
+                            sendActionResult(player, Action.PAYMENT, Result.WARNING,
+                                    "ui.economy.toast.payment_team_insufficient",
+                                    exactDecimal(balance), exactDecimal(amount));
                             return;
                         }
                         success = teams.spendFromTeam(accounts, actor,
                                 com.nstut.economy.api.AccountRef.player(target.getUUID()), amount,
-                                com.nstut.economy.core.TransactionContext.transfer("Team payment from Market UI", actor));
+                                com.nstut.economy.core.TransactionContext.transfer("Player payment from Market UI", actor));
+                    } else if (source.kind() == com.nstut.economy.api.AccountKind.PLAYER && source.id().equals(actor)) {
+                        BigDecimal balance = accounts.getOrCreatePlayerAccount(actor).getBalance();
+                        if (balance.compareTo(amount) < 0) {
+                            sendActionResult(player, Action.PAYMENT, Result.WARNING,
+                                    "ui.economy.toast.payment_personal_insufficient",
+                                    exactDecimal(balance), exactDecimal(amount));
+                            return;
+                        }
+                        success = accounts.transfer(source,
+                                com.nstut.economy.api.AccountRef.player(target.getUUID()), amount,
+                                com.nstut.economy.core.TransactionContext.transfer("Player payment from Market UI", target.getUUID()));
+                    } else {
+                        com.nstut.economy.server.MarketWalletSelection.selectPersonal(actor);
+                        sendActionResult(player, Action.PAYMENT, Result.ERROR, "ui.economy.toast.payment_source_invalid");
+                        sendItemList(player);
+                        return;
                     }
-                    default -> success = false;
+
+                    if (success) {
+                        sendActionResult(player, Action.PAYMENT, Result.SUCCESS, "ui.economy.toast.payment_sent",
+                                target.getGameProfile().getName(), exactDecimal(amount));
+                        target.sendSystemMessage(net.minecraft.network.chat.Component.translatable(
+                                "ui.economy.payment.received", exactDecimal(amount), player.getGameProfile().getName()));
+                    } else {
+                        sendActionResult(player, Action.PAYMENT, Result.WARNING, "ui.economy.toast.payment_blocked");
+                    }
+                    sendItemList(player);
+                } catch (Exception failure) {
+                    com.nstut.Economy.LOGGER.warn("Error handling player payment from {} to {}", player.getName().getString(),
+                            pkt.target, failure);
+                    sendActionResult(player, Action.PAYMENT, Result.ERROR, "ui.economy.toast.payment_unexpected");
                 }
-                sendActionResult(player, Action.TREASURY, success ? Result.SUCCESS : Result.WARNING,
-                        success ? "ui.economy.toast.treasury_updated" : "ui.economy.toast.treasury_rejected");
-                sendItemList(player);
             });
         }
     }
@@ -456,9 +629,9 @@ public class MarketNetwork {
                 if (allowed) {
                     if (pkt.tank) ((TankBlockEntity) be).setOwner(to);
                     else ((com.nstut.economy.blocks.VaultBlockEntity) be).setOwner(to);
+                } else {
+                    sendActionResult(player, Action.STORAGE, Result.WARNING, "ui.economy.toast.storage_owner_rejected");
                 }
-                sendActionResult(player, Action.STORAGE, allowed ? Result.SUCCESS : Result.WARNING,
-                        allowed ? "ui.economy.toast.storage_owner_changed" : "ui.economy.toast.storage_owner_rejected");
                 sendVaultInfo(player);
                 sendItemList(player);
             });
@@ -799,6 +972,8 @@ public class MarketNetwork {
                     sendItemList(player);
                 } catch (Exception e) {
                     com.nstut.Economy.LOGGER.warn("Error handling order packet from {}", player.getName().getString(), e);
+                    sendActionResult(player, Action.CREATE_ORDER, Result.ERROR, "ui.economy.error.create_unexpected");
+                    sendItemList(player);
                 }
             });
         }
@@ -816,25 +991,36 @@ public class MarketNetwork {
             ctx.get().queue(() -> {
                 ServerPlayer player = ctx.get().getPlayer() instanceof ServerPlayer sp ? sp : null;
                 if (player == null) return;
-                OrderManager orderManager = Economy.getOrderManager();
-                var opt = orderManager.getOrder(pkt.orderId);
-                if (opt.isEmpty()) { sendItemList(player); return; }
-                Order order = opt.get();
-                com.nstut.economy.api.MarketIdentity identity;
-                try { identity = com.nstut.economy.server.MarketWalletSelection.identity(player.getUUID()); }
-                catch (IllegalStateException denied) {
-                    sendActionResult(player, Action.ACCEPT_ORDER, Result.ERROR, "ui.economy.error.team_permission",
-                            com.nstut.economy.api.EconomyApi.teamEconomy().spendRole().name());
-                    return;
-                }
-                IOrder.TransactionResult result = order.execute(identity, player.serverLevel());
-                sendActionResult(player, Action.ACCEPT_ORDER, result.success ? Result.SUCCESS : Result.ERROR, result.success ? "ui.economy.toast.order_completed" : "ui.economy.error.transaction_failed");
-                orderManager.cleanupOrders();
-                if (order.getCommodity() instanceof ItemCommodity ic) {
-                    sendItemDetail(player, ic.getId().toString(), "ITEM");
-                } else if (order.getCommodity() instanceof FluidCommodity fc) {
-                    sendItemDetail(player, fc.getId().toString(), "FLUID");
-                } else {
+                try {
+                    OrderManager orderManager = Economy.getOrderManager();
+                    var opt = orderManager.getOrder(pkt.orderId);
+                    if (opt.isEmpty()) {
+                        sendActionResult(player, Action.ACCEPT_ORDER, Result.WARNING, "ui.economy.error.order_stale");
+                        sendItemList(player);
+                        return;
+                    }
+                    Order order = opt.get();
+                    com.nstut.economy.api.MarketIdentity identity;
+                    try { identity = com.nstut.economy.server.MarketWalletSelection.identity(player.getUUID()); }
+                    catch (IllegalStateException denied) {
+                        sendActionResult(player, Action.ACCEPT_ORDER, Result.ERROR, "ui.economy.error.team_permission",
+                                com.nstut.economy.api.EconomyApi.teamEconomy().spendRole().name());
+                        return;
+                    }
+                    IOrder.TransactionResult result = order.execute(identity, player.serverLevel());
+                    sendActionResult(player, Action.ACCEPT_ORDER, result.success ? Result.SUCCESS : Result.ERROR,
+                            result.success ? "ui.economy.toast.order_completed" : "ui.economy.error.transaction_failed");
+                    orderManager.cleanupOrders();
+                    if (order.getCommodity() instanceof ItemCommodity ic) {
+                        sendItemDetail(player, ic.getId().toString(), "ITEM");
+                    } else if (order.getCommodity() instanceof FluidCommodity fc) {
+                        sendItemDetail(player, fc.getId().toString(), "FLUID");
+                    } else {
+                        sendItemList(player);
+                    }
+                } catch (Exception e) {
+                    com.nstut.Economy.LOGGER.warn("Error handling accept packet from {}", player.getName().getString(), e);
+                    sendActionResult(player, Action.ACCEPT_ORDER, Result.ERROR, "ui.economy.error.accept_unexpected");
                     sendItemList(player);
                 }
             });
@@ -856,21 +1042,35 @@ public class MarketNetwork {
                 try {
                     OrderManager orderManager = Economy.getOrderManager();
                     var opt = orderManager.getOrder(pkt.orderId);
-                    if (opt.isPresent() && opt.get().getIdentity().canManage(player.getUUID(), com.nstut.economy.api.EconomyApi.teamEconomy())) {
-                        boolean cancelled = orderManager.cancelOrder(pkt.orderId, player.getUUID(), player.serverLevel());
-                        if (!cancelled) sendActionResult(player, Action.CANCEL_ORDER, Result.WARNING, "ui.economy.error.cancel_storage_full");
-                        else sendActionResult(player, Action.CANCEL_ORDER, Result.SUCCESS, "ui.economy.toast.order_cancelled");
+                    if (opt.isEmpty()) {
+                        sendActionResult(player, Action.CANCEL_ORDER, Result.WARNING, "ui.economy.error.order_stale");
+                        sendActiveOrders(player);
+                        sendItemList(player);
+                        return;
                     }
+                    Order order = opt.get();
+                    if (!order.getIdentity().canManage(player.getUUID(), com.nstut.economy.api.EconomyApi.teamEconomy())) {
+                        sendActionResult(player, Action.CANCEL_ORDER, Result.WARNING, "ui.economy.error.order_permission");
+                        sendActiveOrders(player);
+                        return;
+                    }
+                    boolean cancelled = orderManager.cancelOrder(pkt.orderId, player.getUUID(), player.serverLevel());
+                    if (!cancelled) sendActionResult(player, Action.CANCEL_ORDER, Result.WARNING,
+                            "ui.economy.error.cancel_storage_full");
+                    else sendActionResult(player, Action.CANCEL_ORDER, Result.SUCCESS,
+                            "ui.economy.toast.order_cancelled");
                     sendActiveOrders(player);
-                    if (opt.isPresent() && opt.get().getCommodity() instanceof ItemCommodity ic) {
+                    if (order.getCommodity() instanceof ItemCommodity ic) {
                         sendItemDetail(player, ic.getId().toString(), "ITEM");
-                    } else if (opt.isPresent() && opt.get().getCommodity() instanceof FluidCommodity fc) {
+                    } else if (order.getCommodity() instanceof FluidCommodity fc) {
                         sendItemDetail(player, fc.getId().toString(), "FLUID");
                     } else {
                         sendItemList(player);
                     }
                 } catch (Exception e) {
                     com.nstut.Economy.LOGGER.warn("Error handling cancel packet from {}", player.getName().getString(), e);
+                    sendActionResult(player, Action.CANCEL_ORDER, Result.ERROR, "ui.economy.error.cancel_unexpected");
+                    sendActiveOrders(player);
                 }
             });
         }
@@ -902,31 +1102,44 @@ public class MarketNetwork {
                     ServerLevel level = player.serverLevel();
                     OrderManager orderManager = Economy.getOrderManager();
                     var opt = orderManager.getOrder(pkt.orderId);
-                    boolean fluidOrder = opt.isPresent() && opt.get().getCommodity() instanceof FluidCommodity;
+                    if (opt.isEmpty()) {
+                        sendActionResult(player, Action.EDIT_ORDER, Result.WARNING, "ui.economy.error.order_stale");
+                        sendActiveOrders(player);
+                        return;
+                    }
+                    Order order = opt.get();
+                    if (!order.getIdentity().canManage(player.getUUID(), com.nstut.economy.api.EconomyApi.teamEconomy())) {
+                        sendActionResult(player, Action.EDIT_ORDER, Result.WARNING, "ui.economy.error.order_permission");
+                        sendActiveOrders(player);
+                        return;
+                    }
+                    boolean fluidOrder = order.getCommodity() instanceof FluidCommodity;
                     BigDecimal quotedPrice = parsePrice(pkt.pricePerUnit);
                     BigDecimal price = quotedPrice == null ? null
                             : fluidOrder ? FluidCommodity.pricePerMb(quotedPrice) : quotedPrice;
-                    // Quantity 0 is only meaningful for infinite buy orders
-                    // (price-only edits); everything else needs a real quantity.
-                    boolean isInfiniteBuyEdit = pkt.quantity == 0 && opt.isPresent()
-                            && opt.get().isInfinite()
-                            && opt.get().getType() == com.nstut.economy.api.IOrder.OrderType.BUY;
+                    boolean isInfiniteBuyEdit = pkt.quantity == 0
+                            && order.isInfinite()
+                            && order.getType() == com.nstut.economy.api.IOrder.OrderType.BUY;
                     boolean valid = price != null && (isValidQuantity(pkt.quantity) || isInfiniteBuyEdit);
                     if (!valid) {
                         com.nstut.Economy.LOGGER.warn("Rejected edit packet with invalid quantity/price from {}", player.getName().getString());
+                        sendActionResult(player, Action.EDIT_ORDER, Result.WARNING, "ui.economy.error.edit_invalid_input");
                     } else {
                         boolean edited = orderManager.editOrder(pkt.orderId, player.getUUID(), pkt.quantity, price, pkt.isInfinite, level);
-                        sendActionResult(player, Action.EDIT_ORDER, edited ? Result.SUCCESS : Result.ERROR, edited ? "ui.economy.toast.order_edited" : "ui.economy.error.transaction_failed");
+                        sendActionResult(player, Action.EDIT_ORDER, edited ? Result.SUCCESS : Result.ERROR,
+                                edited ? "ui.economy.toast.order_edited" : "ui.economy.error.transaction_failed");
                     }
                     sendActiveOrders(player);
                     sendItemList(player);
-                    if (opt.isPresent() && opt.get().getCommodity() instanceof ItemCommodity ic) {
+                    if (order.getCommodity() instanceof ItemCommodity ic) {
                         sendItemDetail(player, ic.getId().toString(), "ITEM");
-                    } else if (opt.isPresent() && opt.get().getCommodity() instanceof FluidCommodity fc) {
+                    } else if (order.getCommodity() instanceof FluidCommodity fc) {
                         sendItemDetail(player, fc.getId().toString(), "FLUID");
                     }
                 } catch (Exception e) {
                     com.nstut.Economy.LOGGER.warn("Error handling edit packet from {}", player.getName().getString(), e);
+                    sendActionResult(player, Action.EDIT_ORDER, Result.ERROR, "ui.economy.error.edit_unexpected");
+                    sendActiveOrders(player);
                 }
             });
         }
@@ -1010,7 +1223,11 @@ public class MarketNetwork {
     public static void sendActiveOrders(ServerPlayer player) {
         OrderManager orderManager = Economy.getOrderManager();
         UUID playerId = player.getUUID();
-        List<Order> playerOrders = orderManager.getPlayerOrders(playerId);
+        com.nstut.economy.api.AccountRef selected = selectedMarketAccount(player);
+        List<Order> playerOrders = orderManager.getAllOrders().stream()
+                .filter(o -> o.isValid() && selected.equals(o.getPrincipal()))
+                .sorted(java.util.Comparator.comparing(Order::getCreatedAt).reversed())
+                .toList();
 
         List<ActiveOrderEntry> entries = new ArrayList<>();
         for (Order o : playerOrders) {
@@ -1135,7 +1352,8 @@ public class MarketNetwork {
             }
         }
         ServerLevel level = player.serverLevel();
-        for (var vault : VaultManager.getVaults(level, player.getUUID())) {
+        com.nstut.economy.api.AccountRef selected = selectedMarketAccount(player);
+        for (var vault : VaultManager.getVaults(level, selected)) {
             for (int slot = 0; slot < vault.getContainerSize(); slot++) {
                 ItemStack stack = vault.getItem(slot);
                 if (stack.isEmpty()) continue;
@@ -1209,10 +1427,10 @@ public class MarketNetwork {
         String teamRole = wallet.role().name();
         boolean teamCanDeposit = wallet.canDeposit();
         boolean teamCanSpend = wallet.canSpend();
-        boolean teamCanWithdraw = wallet.canWithdraw();
+        boolean teamCanPayout = wallet.canPayout();
         String teamSpendRole = wallet.spendRole().name();
-        String teamWithdrawRole = wallet.withdrawRole().name();
-        com.nstut.economy.api.AccountRef selectedStorage = com.nstut.economy.server.MarketWalletSelection.selected(player.getUUID());
+        String teamPayoutRole = wallet.payoutRole().name();
+        com.nstut.economy.api.AccountRef selectedStorage = selectedMarketAccount(player);
         String marketPrincipal = selectedStorage.kind().name();
         int vaultCount = VaultManager.getVaultRecords(selectedStorage).size();
 
@@ -1297,7 +1515,7 @@ public class MarketNetwork {
         CHANNEL.sendToPlayer(player, new SyncItemListPacket(
                 balance, vaultCount, cards,
                 teamMode, teamWalletVisible, teamName, teamBalance, teamRole,
-                teamCanDeposit, teamCanSpend, teamCanWithdraw, teamSpendRole, teamWithdrawRole, marketPrincipal));
+                teamCanDeposit, teamCanSpend, teamCanPayout, teamSpendRole, teamPayoutRole, marketPrincipal));
     }
 
     private static void sendItemDetail(ServerPlayer player, String itemId) {
@@ -1307,6 +1525,7 @@ public class MarketNetwork {
     private static void sendItemDetail(ServerPlayer player, String itemId, String commodityType) {
         OrderManager orderManager = Economy.getOrderManager();
         UUID playerId = player.getUUID();
+        com.nstut.economy.api.AccountRef selectedPrincipal = selectedMarketAccount(player);
         com.nstut.economy.api.AccountRef selectedStorage;
         try {
             selectedStorage = com.nstut.economy.server.MarketWalletSelection.identity(playerId).storageAccount();
@@ -1370,7 +1589,7 @@ public class MarketNetwork {
             OrderEntry entry = new OrderEntry(
                 order.getOrderId(), order.getOwner(), sellerName,
                 priceForClient(order.getPricePerUnit(), order.getCommodity() instanceof FluidCommodity),
-                order.getQuantity(), order.getInitialQuantity(), order.getIdentity().canManage(playerId, com.nstut.economy.api.EconomyApi.teamEconomy()), order.isServerOrder(), order.isInfinite(), order.getIdentity());
+                order.getQuantity(), order.getInitialQuantity(), selectedPrincipal.equals(order.getPrincipal()), order.isServerOrder(), order.isInfinite(), order.getIdentity());
 
             if (order.getType() == IOrder.OrderType.SELL) {
                 asks.add(entry);
@@ -1449,11 +1668,12 @@ public class MarketNetwork {
                 com.nstut.economy.data.TradeLedger.getAllTrades();
 
         List<HistoryEntry> entries = new ArrayList<>();
-        // Iterate newest-first
+        com.nstut.economy.api.AccountRef selected = selectedMarketAccount(player);
+        // Iterate newest-first against one authoritative principal snapshot.
         for (int i = all.size() - 1; i >= 0; i--) {
             com.nstut.economy.data.EconomyTradeData.TradeSnapshot t = all.get(i);
-            boolean isBuyer  = canViewTrade(playerId, t.buyerIdentity);
-            boolean isSeller = canViewTrade(playerId, t.sellerIdentity);
+            boolean isBuyer  = tradeMatchesPrincipal(selected, t.buyerIdentity, t.buyer);
+            boolean isSeller = tradeMatchesPrincipal(selected, t.sellerIdentity, t.seller);
             if (!isBuyer && !isSeller) continue;
 
             // Resolve item display name
@@ -1572,16 +1792,16 @@ public class MarketNetwork {
     public static void sendVaultInfo(ServerPlayer player) {
         UUID playerId=player.getUUID();
         List<VaultDetailEntry> entries=new ArrayList<>();
-        com.nstut.economy.api.AccountRef personal=com.nstut.economy.api.AccountRef.player(playerId);
-        boolean canDonate=com.nstut.economy.server.TeamStorageAccess.currentTeamAdminTarget(playerId).isPresent();
-        appendStorageEntries(player, entries, personal, "Personal", canDonate);
-
-        var wallet=com.nstut.economy.api.EconomyApi.teamEconomy()
-                .walletSnapshot(com.nstut.economy.api.EconomyApi.accounts(), playerId);
-        if(wallet.teamVisible()) {
-            var team=wallet.team().orElseThrow();
-            boolean canAdmin=com.nstut.economy.api.EconomyApi.teamEconomy().canAdmin(playerId, team.id());
-            appendStorageEntries(player, entries, team.account(), "Team / " + team.displayName(), canAdmin);
+        com.nstut.economy.api.AccountRef selected=selectedMarketAccount(player);
+        if (selected.kind()==com.nstut.economy.api.AccountKind.TEAM) {
+            var team=com.nstut.economy.api.EconomyApi.teamEconomy().resolveTeam(playerId)
+                    .filter(value -> value.id().equals(selected.id()));
+            String label=team.map(value -> "Team / " + value.displayName()).orElse("Team");
+            boolean canAdmin=com.nstut.economy.api.EconomyApi.teamEconomy().canAdmin(playerId, selected.id());
+            appendStorageEntries(player, entries, selected, label, canAdmin);
+        } else {
+            boolean canDonate=com.nstut.economy.server.TeamStorageAccess.currentTeamAdminTarget(playerId).isPresent();
+            appendStorageEntries(player, entries, selected, "Personal", canDonate);
         }
         CHANNEL.sendToPlayer(player,new SyncVaultInfoPacket(entries));
     }
@@ -1628,27 +1848,38 @@ public class MarketNetwork {
     }
 
     public static class ToggleVaultModePacket {
+        public final String dimension;
         public final net.minecraft.core.BlockPos pos;
 
-        public ToggleVaultModePacket(net.minecraft.core.BlockPos pos) { this.pos = pos; }
+        public ToggleVaultModePacket(net.minecraft.core.BlockPos pos) { this("", pos); }
+        public ToggleVaultModePacket(String dimension, net.minecraft.core.BlockPos pos) {
+            this.dimension = dimension == null ? "" : dimension;
+            this.pos = pos;
+        }
 
-        public static void encode(ToggleVaultModePacket pkt, FriendlyByteBuf buf) { buf.writeBlockPos(pkt.pos); }
-        public static ToggleVaultModePacket decode(FriendlyByteBuf buf) { return new ToggleVaultModePacket(buf.readBlockPos()); }
+        public static void encode(ToggleVaultModePacket pkt, FriendlyByteBuf buf) {
+            buf.writeUtf(pkt.dimension, 128); buf.writeBlockPos(pkt.pos);
+        }
+        public static ToggleVaultModePacket decode(FriendlyByteBuf buf) {
+            return new ToggleVaultModePacket(buf.readUtf(128), buf.readBlockPos());
+        }
 
         public static void handle(ToggleVaultModePacket pkt, Supplier<NetworkManager.PacketContext> ctx) {
             ctx.get().queue(() -> {
                 ServerPlayer player = ctx.get().getPlayer() instanceof ServerPlayer sp ? sp : null;
                 if (player == null) return;
-                if (player.level().getBlockEntity(pkt.pos) instanceof com.nstut.economy.blocks.VaultBlockEntity vault) {
+                ServerLevel level = resolveRecordLevel(player, pkt.dimension);
+                if (level != null && level.getBlockEntity(pkt.pos) instanceof com.nstut.economy.blocks.VaultBlockEntity vault) {
                     boolean allowed = com.nstut.economy.server.TeamStorageAccess.canAdmin(player.getUUID(), vault.getOwnerRef());
                     if (allowed) {
                         vault.cycleMode();
                         if (player.containerMenu instanceof com.nstut.economy.blocks.VaultMenu vm) {
                             vm.setData(0, vault.getMode().id);
                         }
+                        sendVaultInfo(player);
+                    } else {
+                        sendStorageModeDenied(player, vault.getOwnerRef());
                     }
-                    sendActionResult(player, Action.STORAGE, allowed ? Result.SUCCESS : Result.WARNING,
-                            allowed ? "ui.economy.toast.storage_mode_changed" : "ui.economy.toast.storage_mode_rejected");
                 } else {
                     sendActionResult(player, Action.STORAGE, Result.WARNING, "ui.economy.toast.storage_unavailable");
                 }
@@ -1657,27 +1888,38 @@ public class MarketNetwork {
     }
 
     public static class ToggleTankModePacket {
+        public final String dimension;
         public final net.minecraft.core.BlockPos pos;
 
-        public ToggleTankModePacket(net.minecraft.core.BlockPos pos) { this.pos = pos; }
+        public ToggleTankModePacket(net.minecraft.core.BlockPos pos) { this("", pos); }
+        public ToggleTankModePacket(String dimension, net.minecraft.core.BlockPos pos) {
+            this.dimension = dimension == null ? "" : dimension;
+            this.pos = pos;
+        }
 
-        public static void encode(ToggleTankModePacket pkt, FriendlyByteBuf buf) { buf.writeBlockPos(pkt.pos); }
-        public static ToggleTankModePacket decode(FriendlyByteBuf buf) { return new ToggleTankModePacket(buf.readBlockPos()); }
+        public static void encode(ToggleTankModePacket pkt, FriendlyByteBuf buf) {
+            buf.writeUtf(pkt.dimension, 128); buf.writeBlockPos(pkt.pos);
+        }
+        public static ToggleTankModePacket decode(FriendlyByteBuf buf) {
+            return new ToggleTankModePacket(buf.readUtf(128), buf.readBlockPos());
+        }
 
         public static void handle(ToggleTankModePacket pkt, Supplier<NetworkManager.PacketContext> ctx) {
             ctx.get().queue(() -> {
                 ServerPlayer player = ctx.get().getPlayer() instanceof ServerPlayer sp ? sp : null;
                 if (player == null) return;
-                if (player.level().getBlockEntity(pkt.pos) instanceof TankBlockEntity tank) {
+                ServerLevel level = resolveRecordLevel(player, pkt.dimension);
+                if (level != null && level.getBlockEntity(pkt.pos) instanceof TankBlockEntity tank) {
                     boolean allowed = com.nstut.economy.server.TeamStorageAccess.canAdmin(player.getUUID(), tank.getOwnerRef());
                     if (allowed) {
                         tank.cycleMode();
                         if (player.containerMenu instanceof TankMenu tm) {
                             tm.setMode(tank.getMode().id);
                         }
+                        sendVaultInfo(player);
+                    } else {
+                        sendStorageModeDenied(player, tank.getOwnerRef());
                     }
-                    sendActionResult(player, Action.STORAGE, allowed ? Result.SUCCESS : Result.WARNING,
-                            allowed ? "ui.economy.toast.storage_mode_changed" : "ui.economy.toast.storage_mode_rejected");
                 } else {
                     sendActionResult(player, Action.STORAGE, Result.WARNING, "ui.economy.toast.storage_unavailable");
                 }
@@ -1776,10 +2018,11 @@ public class MarketNetwork {
 
     @SuppressWarnings("removal")
     public static void sendPortfolioInfo(ServerPlayer player) {
-        com.nstut.economy.data.EconomyAccountData.recordSnapshot(player.getUUID(), player.serverLevel());
+        com.nstut.economy.api.AccountRef selected = selectedMarketAccount(player);
+        com.nstut.economy.data.EconomyAccountData.recordSnapshot(selected, player.serverLevel());
 
         com.nstut.economy.data.EconomyAccountData accountData = com.nstut.economy.data.EconomyAccountData.get(player.serverLevel());
-        List<com.nstut.economy.data.EconomyAccountData.PortfolioPoint> rawPoints = accountData.getPortfolioHistory(player.getUUID());
+        List<com.nstut.economy.data.EconomyAccountData.PortfolioPoint> rawPoints = accountData.getPortfolioHistory(selected);
 
         List<PortfolioPointData> points = new ArrayList<>();
         for (var pt : rawPoints) {
@@ -1789,7 +2032,7 @@ public class MarketNetwork {
                 exactDecimal(pt.assets)));
         }
 
-        List<com.nstut.economy.blocks.VaultBlockEntity> vaults = com.nstut.economy.blocks.VaultManager.getVaults(player.serverLevel(), player.getUUID());
+        List<com.nstut.economy.blocks.VaultBlockEntity> vaults = com.nstut.economy.blocks.VaultManager.getVaults(player.serverLevel(), selected);
         Map<String, Integer> itemCounts = new HashMap<>();
         for (var v : vaults) {
             for (int s = 0; s < v.getContainerSize(); s++) {
@@ -1802,7 +2045,7 @@ public class MarketNetwork {
                 }
             }
         }
-        for (var tank : TankManager.getTanks(player.serverLevel(), player.getUUID())) {
+        for (var tank : TankManager.getTanks(player.serverLevel(), selected)) {
             var EconomyFluidStack = tank.getFluid();
             if (!EconomyFluidStack.isEmpty()) {
                 String id = BuiltInRegistries.FLUID.getKey(EconomyFluidStack.getFluid()).toString();

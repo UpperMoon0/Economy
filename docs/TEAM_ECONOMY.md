@@ -32,11 +32,11 @@ enabled=true
 viewRole=MEMBER
 depositRole=MEMBER
 spendRole=OFFICER
-withdrawRole=OWNER
+payoutRole=OWNER
 adminRole=OWNER
 ```
 
-Legacy `mode` entries are removed on loading and replaced with `enabled=true` unless an explicit `enabled` value already exists. This includes the previous `PERSONAL_ONLY` default. Administrators who want to keep team economy disabled must set `enabled=false`. Existing files without `withdrawRole` use OWNER. Role thresholds must be MEMBER, OFFICER, or OWNER; NONE is rejected.
+Legacy `mode` entries are removed on loading and replaced with `enabled=true` unless an explicit `enabled` value already exists. This includes the previous `PERSONAL_ONLY` default. Administrators who want to keep team economy disabled must set `enabled=false`. Legacy `withdrawRole` is migrated to `payoutRole`; files without either key use OWNER. Role thresholds must be MEMBER, OFFICER, or OWNER; NONE is rejected.
 
 The Java `TeamEconomyMode` API remains compatible for integrations: enabled configuration maps to `HYBRID`, disabled maps to `PERSONAL_ONLY`, and `TEAM_PRIMARY` remains available programmatically. Clients and servers must use matching Economy builds because the Market protocol includes typed storage and treasury permissions (`market_v3`).
 
@@ -49,7 +49,7 @@ Default minimum roles are:
 | View team balance / treasury | MEMBER |
 | Deposit personal funds to team | MEMBER |
 | Place team market orders | OFFICER |
-| Withdraw/pay team cash | OWNER |
+| Direct Team payout to another player | OWNER |
 | Reassign Team Vault/Tank ownership | OWNER |
 | Change Vault/Tank market I/O mode | OWNER |
 | Team-economy administration | OWNER |
@@ -69,7 +69,7 @@ if (team.isPresent() && teams.canSpend(playerId, team.get().id())) {
 }
 ```
 
-Do not trust a team ID or permission decision supplied by a client. Market spending and treasury extraction are deliberately different permissions: `canSpend(...)` authorizes team market activity (OFFICER by default), while `canWithdraw(...)` authorizes transfers out of the treasury (OWNER by default). Prefer the registry's mutation helpers when treasury money moves:
+Do not trust a team ID or permission decision supplied by a client. Market spending and direct Team payouts are deliberately different permissions: `canSpend(...)` authorizes team market activity (OFFICER by default), while `canPayout(...)` authorizes Team payments to other players (OWNER by default). Ordinary Team -> Personal withdrawal is not supported; Team cash reaches members only through lifecycle settlement when the Team closes. Prefer the registry's mutation helpers when Team money moves:
 
 ```java
 TeamEconomyRegistry teams = EconomyApi.teamEconomy();
@@ -77,13 +77,10 @@ teams.depositFromPlayer(
         EconomyApi.accounts(), playerId, amount,
         TransactionContext.transfer("team deposit", teamId));
 
-teams.withdrawToPlayer(
-        EconomyApi.accounts(), playerId, amount,
-        TransactionContext.transfer("team withdrawal", playerId));
 
 teams.spendFromTeam(
         EconomyApi.accounts(), playerId, AccountRef.player(recipientId), amount,
-        TransactionContext.transfer("team payment", recipientId)); // requires withdrawRole
+        TransactionContext.transfer("team payment", recipientId)); // requires payoutRole; recipient cannot be the actor
 ```
 
 Those helpers resolve the actor's current party and role again immediately before the account transfer, avoiding a stale client-side or cached authorization decision.
@@ -94,11 +91,21 @@ The Market sync builds a fresh server-authoritative wallet snapshot for the view
 
 In `HYBRID`, Personal remains the policy default. In `TEAM_PRIMARY`, a spend-authorized party is the policy default. The UI switcher creates an explicit per-player override without changing the server policy mode. `/economy team use <personal|team|default>` remains a command fallback for the same selection state.
 
-The **Team Treasury** sidebar tab is available whenever the current party is viewable. It shows Personal and Team balances, party name, current role, and permission requirements. Deposit is MEMBER+ by default. Withdraw and Team-to-player payments are OWNER+ by default, independently of the OFFICER+ role used for team market orders.
+The Market principal is centralized and server-authoritative, not local state owned by the balance badge. `MarketWalletSelection` is the server source of truth and the synchronized `MarketClientStore.marketPrincipal` drives New Order, My/Team Orders, Portfolio, Containers, and Pay Player together. Principal-sensitive server responses are filtered before they are sent: Personal mode returns only Personal orders/storage/history/portfolio data, while Team mode returns only the current Team principal. If Team market-spend authorization is lost, the selected Market principal falls back to Personal on the next authoritative refresh.
+
+Command paths that operate on money also expose explicit principals where relevant: `/economy balance personal|team`, `/economy pay personal|team`, and OP `/economy give|take|set personal|team`. Legacy unqualified balance/pay/admin forms remain Personal-only shorthands for compatibility.
+
+The **Team Treasury** sidebar tab is available whenever the current party is viewable. It shows Personal and Team balances, party name, current role, and permission requirements. Deposit is MEMBER+ by default. There is no normal withdrawal control. Direct Team-to-player payouts live in **Pay Player** and require `payoutRole` (OWNER by default), independently of the OFFICER+ role used for team market orders. Self-payment from Team mode is rejected.
 
 The **Containers** tab lists both Personal and current-Team Vaults/Tanks with their owner. Storage ownership reassignment and the Vault/Tank BOTH / INPUT / OUTPUT market mode are storage-administration operations governed by adminRole (OWNER by default), not by the market spendRole. The server revalidates every change and reports denied or stale actions back to the player instead of failing silently. Storage ownership changes are server-authorized; the client never supplies a trusted team ID.
 
 A leave, kick, demotion below the relevant threshold, disabled team economy, missing provider, or incompatible provider is reflected on the next sync. Existing orders retain the persisted account/storage identity they were created with.
+
+## Team closure and settlement
+
+Team closure is a distinct lifecycle operation, not a withdrawal permission. Economy snapshots the final Team membership before the Team disappears, marks the Team wallet closing, rejects new protected Team activity, and first cancels/recovers outstanding Team orders and compensation references. Only after those obligations are clear does cash settlement begin.
+
+Remaining Team cash is split equally across the persisted member snapshot in deterministic UUID order. Settlement progress is persisted after each successful payout, so a restart or vetoed transfer retries only the unpaid recipients instead of duplicating money. Any final rounding remainder goes to the last unpaid recipient. After cash reaches zero, Team-owned Vault/Tank blocks are reassigned to the last recorded owner for physical custody so unloaded storage cannot become orphaned. The closing tombstone remains durable.
 
 ## Market orders
 
@@ -117,7 +124,7 @@ Legacy orders remain compatible. UUID-only orders migrate to `PLAYER:<old-owner>
 
 Matching compares economic principals, so two different members cannot make the same team trade with itself. Every team order revalidates current membership/rank before execution, edit, or cancellation. Leave/kick/demotion invalidates the order lazily even if an FTB lifecycle event is missed; Economy attempts a lossless cancellation and keeps any unrecoverable escrow/compensation record persisted until recovery succeeds.
 
-When an FTB party is deleted, its wallet is tombstoned/closed and new team actions are rejected. Outstanding Team orders are cancelled/recovered first. Once no recovery references remain, remaining cash is transferred once to the last recorded FTB owner and Team-owned Vault/Tank ownership is reassigned to that player without moving the blocks or their contents. A durable storage-settlement marker prevents an unloaded block from changing owner before order recovery completes. Failed or vetoed cash settlement retries before any storage reassignment. Replayed deletion events or restart reconciliation therefore cannot duplicate funds or orphan Team storage.
+When an FTB party is deleted, its wallet is tombstoned/closed and new Team actions are rejected. Economy freezes the last authoritative member snapshot, cancels/recovers outstanding Team orders first, and then splits remaining cash equally across that persisted snapshot. Per-recipient settlement progress is durable, so retries and restarts do not intentionally double-pay already-settled members; the final unpaid recipient receives any deterministic rounding remainder. Only after cash reaches zero are Team-owned Vault/Tank blocks reassigned to the last recorded owner for physical custody, without moving blocks or contents.
 
 ## Development dependencies and compatibility checks
 

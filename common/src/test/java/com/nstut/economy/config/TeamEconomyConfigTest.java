@@ -14,6 +14,8 @@ class TeamEconomyConfigTest {
 
     @AfterEach void restoreDefaults() throws Exception {
         config.loadTeamConfig(directory.resolve("defaults.properties"));
+        config.setTankCapacity(128000);
+        config.setAllowExternalAutomation(false);
     }
 
     @Test void freshConfigEnablesOptionalSupportWithoutRequiringAProvider() throws Exception {
@@ -46,9 +48,19 @@ class TeamEconomyConfigTest {
         config.loadTeamConfig(file);
         assertTrue(config.isTeamEconomyEnabled());
         assertEquals(TeamRole.OWNER, config.getTeamSpendRole());
-        assertEquals(TeamRole.OWNER, config.getTeamWithdrawRole());
+        assertEquals(TeamRole.OWNER, config.getTeamPayoutRole());
         assertTrue(Files.readString(file).contains("enabled=true"));
         assertFalse(Files.readString(file).contains("mode="));
+    }
+
+    @Test void legacyWithdrawRoleMigratesToPayoutRole() throws Exception {
+        Path file = directory.resolve("economy-team.properties");
+        Files.writeString(file, "enabled=true\nwithdrawRole=OFFICER\n");
+        config.loadTeamConfig(file);
+        assertEquals(TeamRole.OFFICER, config.getTeamPayoutRole());
+        String migrated = Files.readString(file);
+        assertTrue(migrated.contains("payoutRole=OFFICER"));
+        assertFalse(migrated.contains("withdrawRole="));
     }
 
     @Test void invalidToggleIsRejected() throws Exception {
@@ -56,4 +68,24 @@ class TeamEconomyConfigTest {
         Files.writeString(file, "enabled=typo\n");
         assertThrows(IllegalArgumentException.class, () -> config.loadTeamConfig(file));
     }
+    @Test void storageConfigControlsTankCapacityAndAutomation() throws Exception {
+        Path file = directory.resolve("economy-storage.properties");
+        Files.writeString(file, "tankCapacity=256000\nallowExternalAutomation=true\n");
+        config.loadStorageConfig(file);
+        assertEquals(256000, config.getTankCapacity());
+        assertTrue(config.isExternalAutomationAllowed());
+    }
+
+    @Test void storageConfigWritesDefaultsAndRejectsInvalidCapacity() throws Exception {
+        Path file = directory.resolve("economy-storage-defaults.properties");
+        config.setTankCapacity(128000);
+        config.setAllowExternalAutomation(false);
+        config.loadStorageConfig(file);
+        String written = Files.readString(file);
+        assertTrue(written.contains("tankCapacity=128000"));
+        assertTrue(written.contains("allowExternalAutomation=false"));
+        Files.writeString(file, "tankCapacity=oops\nallowExternalAutomation=false\n");
+        assertThrows(IllegalArgumentException.class, () -> config.loadStorageConfig(file));
+    }
+
 }

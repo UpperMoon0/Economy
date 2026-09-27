@@ -38,6 +38,11 @@ public final class TeamEconomyCommandGameTests {
         ServerPlayer player = new ServerPlayer(helper.getLevel().getServer(), helper.getLevel(),
                 new GameProfile(UUID.randomUUID(), "test-mock-player"));
         helper.getLevel().getServer().getPlayerList().placeNewPlayer(connection, player);
+        Connection recipientConnection = new Connection(PacketFlow.SERVERBOUND);
+        EmbeddedChannel recipientChannel = new EmbeddedChannel(recipientConnection);
+        ServerPlayer recipient = new ServerPlayer(helper.getLevel().getServer(), helper.getLevel(),
+                new GameProfile(UUID.randomUUID(), "payout-target"));
+        helper.getLevel().getServer().getPlayerList().placeNewPlayer(recipientConnection, recipient);
         UUID actor = player.getUUID();
         UUID teamId = UUID.randomUUID();
         TeamRef team = new TeamRef(teamId, "Command Test Team", actor);
@@ -61,7 +66,7 @@ public final class TeamEconomyCommandGameTests {
         TeamRole previousView = teams.viewRole();
         TeamRole previousDeposit = teams.depositRole();
         TeamRole previousSpend = teams.spendRole();
-        TeamRole previousWithdraw = teams.withdrawRole();
+        TeamRole previousPayout = teams.payoutRole();
         TeamRole previousAdmin = teams.adminRole();
 
         if (previousProvider != null) teams.unregisterProvider(previousProvider);
@@ -70,16 +75,18 @@ public final class TeamEconomyCommandGameTests {
         teams.setViewRole(TeamRole.MEMBER);
         teams.setDepositRole(TeamRole.MEMBER);
         teams.setSpendRole(TeamRole.OFFICER);
-        teams.setWithdrawRole(TeamRole.OWNER);
+        teams.setPayoutRole(TeamRole.OWNER);
         teams.setAdminRole(TeamRole.OWNER);
         MarketWalletSelection.reset(actor);
 
         try {
             var accounts = EconomyApi.accounts();
             var personal = accounts.getOrCreatePlayerAccount(actor);
+            var recipientAccount = accounts.getOrCreatePlayerAccount(recipient.getUUID());
             var teamAccount = accounts.getOrCreateTeamAccount(teamId);
             personal.credit(new BigDecimal("20"), null);
             BigDecimal personalStart = personal.getBalance();
+            BigDecimal recipientStart = recipientAccount.getBalance();
             BigDecimal teamStart = teamAccount.getBalance();
 
             var commands = helper.getLevel().getServer().getCommands();
@@ -109,22 +116,65 @@ public final class TeamEconomyCommandGameTests {
                     "team selection must persist server-side");
 
             helper.assertTrue(commands.performPrefixedCommand(source, "economy team withdraw 3") == 0,
-                    "officer market permission must not allow treasury withdrawal");
-            helper.assertTrue(commands.performPrefixedCommand(source, "economy team pay test-mock-player 2") == 0,
-                    "officer market permission must not allow treasury payments");
+                    "ordinary Team-to-Personal withdraw command must not exist");
+            helper.assertTrue(commands.performPrefixedCommand(source, "economy team pay payout-target 2") == 0,
+                    "officer market permission must not allow direct Team payouts");
             helper.assertTrue(personal.getBalance().compareTo(personalStart.subtract(new BigDecimal("10"))) == 0
+                            && recipientAccount.getBalance().compareTo(recipientStart) == 0
                             && teamAccount.getBalance().compareTo(teamStart.add(new BigDecimal("10"))) == 0,
-                    "denied treasury extraction must not mutate either wallet");
+                    "denied payout must not mutate any wallet");
 
             role[0] = TeamRole.OWNER;
-            helper.assertTrue(commands.performPrefixedCommand(source, "economy team withdraw 3") == 1,
-                    "owner withdrawal must succeed");
-            helper.assertTrue(commands.performPrefixedCommand(source, "economy team pay test-mock-player 2") == 1,
-                    "owner team pay must resolve the Brigadier player argument and succeed");
-            helper.assertTrue(personal.getBalance().compareTo(personalStart.subtract(new BigDecimal("5"))) == 0,
-                    "owner withdraw plus pay-to-self must return five coins to the actor personal wallet");
-            helper.assertTrue(teamAccount.getBalance().compareTo(teamStart.add(new BigDecimal("5"))) == 0,
-                    "owner withdraw plus pay must debit five coins from the team wallet");
+            helper.assertTrue(commands.performPrefixedCommand(source, "economy team withdraw 3") == 0,
+                    "even the owner must not have an ordinary withdrawal path");
+            helper.assertTrue(commands.performPrefixedCommand(source, "economy team pay test-mock-player 2") == 0,
+                    "Team pay must not be usable as a self-withdrawal loophole");
+            helper.assertTrue(commands.performPrefixedCommand(source, "economy team pay payout-target 2") == 1,
+                    "owner direct payout to another online player must succeed");
+            helper.assertTrue(personal.getBalance().compareTo(personalStart.subtract(new BigDecimal("10"))) == 0,
+                    "external Team payout must never credit the acting owner's Personal wallet");
+            helper.assertTrue(recipientAccount.getBalance().compareTo(recipientStart.add(new BigDecimal("2"))) == 0,
+                    "external Team payout must credit only the selected recipient");
+            helper.assertTrue(teamAccount.getBalance().compareTo(teamStart.add(new BigDecimal("8"))) == 0,
+                    "successful external payout must debit exactly two coins from the Team wallet");
+
+            helper.assertTrue(commands.performPrefixedCommand(source, "economy balance personal") == 1,
+                    "root balance command must support explicit Personal principal");
+            helper.assertTrue(commands.performPrefixedCommand(source, "economy balance team") == 1,
+                    "root balance command must support explicit Team principal");
+            BigDecimal personalBeforeExplicitPay = personal.getBalance();
+            BigDecimal teamBeforeExplicitPay = teamAccount.getBalance();
+            BigDecimal recipientBeforeExplicitPay = recipientAccount.getBalance();
+            helper.assertTrue(commands.performPrefixedCommand(source, "economy pay personal payout-target 1") == 1,
+                    "root pay command must support explicit Personal source");
+            helper.assertTrue(commands.performPrefixedCommand(source, "economy pay team payout-target 1") == 1,
+                    "root pay command must support explicit Team source");
+            helper.assertTrue(commands.performPrefixedCommand(source, "economy pay team test-mock-player 1") == 0,
+                    "explicit Team pay must reject paying the acting player");
+            helper.assertTrue(personal.getBalance().compareTo(personalBeforeExplicitPay.subtract(BigDecimal.ONE)) == 0,
+                    "explicit Personal pay must debit only Personal balance");
+            helper.assertTrue(teamAccount.getBalance().compareTo(teamBeforeExplicitPay.subtract(BigDecimal.ONE)) == 0,
+                    "explicit Team pay must debit only Team balance");
+            helper.assertTrue(recipientAccount.getBalance().compareTo(recipientBeforeExplicitPay.add(new BigDecimal("2"))) == 0,
+                    "recipient must receive both explicit principal payments");
+
+            var adminSource = source.withPermission(4);
+            helper.assertTrue(commands.performPrefixedCommand(adminSource, "economy give personal payout-target 1") == 1,
+                    "admin give must support explicit Personal principal");
+            helper.assertTrue(commands.performPrefixedCommand(adminSource, "economy give team test-mock-player 1") == 1,
+                    "admin give must support explicit Team principal");
+            helper.assertTrue(commands.performPrefixedCommand(adminSource, "economy take personal payout-target 1") == 1,
+                    "admin take must support explicit Personal principal");
+            helper.assertTrue(commands.performPrefixedCommand(adminSource, "economy take team test-mock-player 1") == 1,
+                    "admin take must support explicit Team principal");
+            helper.assertTrue(commands.performPrefixedCommand(adminSource, "economy set personal payout-target 5") == 1,
+                    "admin set must support explicit Personal principal");
+            helper.assertTrue(commands.performPrefixedCommand(adminSource, "economy set team test-mock-player 7") == 1,
+                    "admin set must support explicit Team principal");
+            helper.assertTrue(recipientAccount.getBalance().compareTo(new BigDecimal("5")) == 0,
+                    "explicit Personal set must target the Personal account");
+            helper.assertTrue(teamAccount.getBalance().compareTo(new BigDecimal("7")) == 0,
+                    "explicit Team set must target the Team account");
 
             helper.assertTrue(commands.performPrefixedCommand(source, "economy team use personal") == 1,
                     "personal selection must be executable");
@@ -136,8 +186,8 @@ public final class TeamEconomyCommandGameTests {
             role[0] = TeamRole.MEMBER;
             BigDecimal personalBeforeDenied = personal.getBalance();
             BigDecimal teamBeforeDenied = teamAccount.getBalance();
-            helper.assertTrue(commands.performPrefixedCommand(source, "economy team withdraw 1") == 0,
-                    "member below spendRole must not withdraw");
+            helper.assertTrue(commands.performPrefixedCommand(source, "economy team pay payout-target 1") == 0,
+                    "member below payoutRole must not pay from the Team wallet");
             helper.assertTrue(commands.performPrefixedCommand(source, "economy team use team") == 0,
                     "member below spendRole must not select the team market wallet");
             helper.assertTrue(personal.getBalance().compareTo(personalBeforeDenied) == 0
@@ -168,10 +218,12 @@ public final class TeamEconomyCommandGameTests {
             teams.setViewRole(previousView);
             teams.setDepositRole(previousDeposit);
             teams.setSpendRole(previousSpend);
-            teams.setWithdrawRole(previousWithdraw);
+            teams.setPayoutRole(previousPayout);
             teams.setAdminRole(previousAdmin);
             helper.getLevel().getServer().getPlayerList().remove(player);
+            helper.getLevel().getServer().getPlayerList().remove(recipient);
             channel.finishAndReleaseAll();
+            recipientChannel.finishAndReleaseAll();
         }
     }
 

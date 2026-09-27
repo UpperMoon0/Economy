@@ -65,8 +65,9 @@ public class TankScreen extends EconomyUiContainerScreen<TankMenu> {
             modeBtn.tooltip(modeTooltipWithPermission(mode));
         }
         if (ownerBtn != null) {
+            ownerBtn.setVisible(menu.hasTeam());
             ownerBtn.setLabel(storageOwnerLabel());
-            ownerBtn.enabled(menu.getTankBlockEntity() != null);
+            ownerBtn.enabled(menu.hasTeam() && menu.getTankBlockEntity() != null);
         }
         if (modeBtn != null) modeBtn.tooltip(modeTooltipWithPermission(currentMode));
     }
@@ -85,14 +86,15 @@ public class TankScreen extends EconomyUiContainerScreen<TankMenu> {
         for (Slot slot : menu.slots) {
             UiRender.slot(g, x + slot.x - 1, y + slot.y - 1, 18, 18, c);
         }
-        int slotX = x + TankMenu.TRANSFER_SLOT_X;
-        UiRender.text(g, font, Component.translatable("ui.economy.tank.transfer"),
-                slotX, y + TRANSFER_TITLE_Y, c.onSurface());
+        UiRender.text(g, font, Component.translatable("ui.economy.tank.input"),
+                x + TankMenu.INPUT_SLOT_X - 4, y + TRANSFER_TITLE_Y, c.onSurface());
+        UiRender.text(g, font, Component.translatable("ui.economy.tank.output"),
+                x + TankMenu.OUTPUT_SLOT_X - 6, y + TRANSFER_TITLE_Y, c.onSurface());
         String hint = Component.translatable("ui.economy.tank.transfer_hint").getString();
-        int hintX = x + TRANSFER_HINT_X;
+        int hintX = x + TankMenu.INPUT_SLOT_X - 8;
         int hintWidth = Math.max(1, x + imageWidth - 10 - hintX);
         hint = MarketScreen.fitText(font, hint, hintWidth);
-        UiRender.text(g, font, hint, hintX, y + TRANSFER_HINT_Y, c.onSurface());
+        UiRender.text(g, font, hint, hintX, y + TRANSFER_HINT_Y + 21, c.onSurfaceMuted());
     }
 
     @Override
@@ -106,10 +108,11 @@ public class TankScreen extends EconomyUiContainerScreen<TankMenu> {
         HStack header = new HStack().gap(4).align(Alignment.CENTER);
         header.addChild(Ui.text(Component.translatable("ui.economy.tank.title")).style(TextStyle.TITLE));
         header.addChild(Ui.spacer().flex());
-        ownerBtn = Ui.button(storageOwnerLabel(), this::toggleStorageOwner).ghost().small();
+        ownerBtn = EconomyUiComponents.configStateButton(storageOwnerLabel(), this::toggleStorageOwner);
         ownerBtn.tooltip(Component.translatable("ui.economy.container.owner_transfer_tooltip"));
+        ownerBtn.setVisible(menu.hasTeam());
         header.addChild(ownerBtn);
-        modeBtn = Ui.button(modeLabel(currentMode), this::cycleMode).ghost().small();
+        modeBtn = EconomyUiComponents.configStateButton(modeLabel(currentMode), this::cycleMode);
         modeBtn.tooltip(modeTooltipWithPermission(currentMode));
         header.addChild(modeBtn);
         header.addChild(buildCompactThemeToggle());
@@ -181,16 +184,14 @@ public class TankScreen extends EconomyUiContainerScreen<TankMenu> {
     }
 
     private boolean isTeamStorage() {
-        TankBlockEntity storage = menu.getTankBlockEntity();
-        return storage != null && storage.getOwnerRef() != null
-                && "TEAM".equals(storage.getOwnerRef().kind().name());
+        return menu.isTeamOwned();
     }
 
     private Component storageOwnerLabel() {
         Component principal = Component.translatable(isTeamStorage()
                 ? "ui.economy.principal.team"
                 : "ui.economy.principal.personal");
-        return Component.translatable("ui.economy.container.owner", principal);
+        return principal;
     }
 
     private void toggleStorageOwner() {
@@ -198,7 +199,7 @@ public class TankScreen extends EconomyUiContainerScreen<TankMenu> {
         if (storage == null || minecraft == null || minecraft.level == null) return;
         MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.SetStorageOwnerPacket(
                 minecraft.level.dimension().identifier().toString(),
-                storage.getBlockPos(), true, !isTeamStorage()));
+                storage.getBlockPos(), true, !menu.isTeamOwned()));
     }
 
     private void cycleMode() {

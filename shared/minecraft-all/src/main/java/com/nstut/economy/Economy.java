@@ -26,15 +26,17 @@ public final class Economy {
         orderManager = new com.nstut.economy.trading.OrderManager();
 
         EconomyConfig config = EconomyConfig.getInstance();
-        try { config.loadTeamConfig(java.nio.file.Path.of("config", "economy-team.properties")); }
-        catch (java.io.IOException | IllegalArgumentException failure) {
-            throw new IllegalStateException("Could not load config/economy-team.properties", failure);
+        try {
+            config.loadTeamConfig(java.nio.file.Path.of("config", "economy-team.properties"));
+            config.loadStorageConfig(java.nio.file.Path.of("config", "economy-storage.properties"));
+        } catch (java.io.IOException | IllegalArgumentException failure) {
+            throw new IllegalStateException("Could not load Economy server configuration", failure);
         }
         EconomyApi.teamEconomy().setMode(config.getTeamEconomyMode());
         EconomyApi.teamEconomy().setViewRole(config.getTeamViewRole());
         EconomyApi.teamEconomy().setDepositRole(config.getTeamDepositRole());
         EconomyApi.teamEconomy().setSpendRole(config.getTeamSpendRole());
-        EconomyApi.teamEconomy().setWithdrawRole(config.getTeamWithdrawRole());
+        EconomyApi.teamEconomy().setPayoutRole(config.getTeamPayoutRole());
         EconomyApi.teamEconomy().setAdminRole(config.getTeamAdminRole());
 
         ensureApiRegistrations();

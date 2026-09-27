@@ -110,9 +110,20 @@ public class TankBlock extends DirectionalBlock implements EntityBlock  {
                 }
                 sp.openMenu(new SimpleMenuProvider(
                         (id, inv, p) -> new TankMenu(id, inv, tank, new ContainerData() {
-                            @Override public int get(int idx) { return tank.getMode().id; }
-                            @Override public void set(int idx, int val) { tank.setMode(TankBlockEntity.TankMode.byId(val)); }
-                            @Override public int getCount() { return 1; }
+                            @Override public int get(int idx) {
+                                return switch (idx) {
+                                    case TankMenu.DATA_MODE -> tank.getMode().id;
+                                    case TankMenu.DATA_TEAM_OWNED -> tank.getOwnerRef() != null
+                                            && tank.getOwnerRef().kind() == com.nstut.economy.api.AccountKind.TEAM ? 1 : 0;
+                                    case TankMenu.DATA_TEAM_AVAILABLE -> com.nstut.economy.api.EconomyApi.teamEconomy()
+                                            .resolveTeam(p.getUUID()).isPresent() ? 1 : 0;
+                                    default -> 0;
+                                };
+                            }
+                            @Override public void set(int idx, int val) {
+                                if (idx == TankMenu.DATA_MODE) tank.setMode(TankBlockEntity.TankMode.byId(val));
+                            }
+                            @Override public int getCount() { return TankMenu.DATA_COUNT; }
                         }, tank),
                         Component.translatable("block.economy.tank")
                 ));

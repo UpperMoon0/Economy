@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -332,4 +333,58 @@ class MarketPacketTest extends MinecraftTestBase {
         assertEquals("minecraft:diamond", decoded.itemId);
         assertNull(decoded.commodityType);
     }
+    @Test
+    @DisplayName("Pay-player packets preserve the online target and decimal amount")
+    void playerPaymentPacketRoundTrips() {
+        UUID target = UUID.randomUUID();
+        MarketNetwork.PlayerPaymentPacket original = new MarketNetwork.PlayerPaymentPacket(target, "123.4500");
+        FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
+
+        MarketNetwork.PlayerPaymentPacket.encode(original, buffer);
+        MarketNetwork.PlayerPaymentPacket decoded = MarketNetwork.PlayerPaymentPacket.decode(buffer);
+
+        assertEquals(target, decoded.target);
+        assertEquals("123.4500", decoded.amount);
+    }
+
+    @Test
+    @DisplayName("Player search results preserve UUID and display name")
+    void playerTargetDataRoundTrips() {
+        UUID playerId = UUID.randomUUID();
+        MarketNetwork.PlayerTargetData original = new MarketNetwork.PlayerTargetData(playerId, "BuilderTwo");
+        FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
+
+        original.write(buffer);
+        MarketNetwork.PlayerTargetData decoded = MarketNetwork.PlayerTargetData.read(buffer);
+
+        assertEquals(playerId, decoded.playerId);
+        assertEquals("BuilderTwo", decoded.name);
+    }
+
+    @Test
+    @DisplayName("Treasury packets are deposit-only and carry no action or payment target")
+    void treasuryPacketRoundTripsDepositOnlyPayload() {
+        MarketNetwork.TeamTreasuryPacket original = new MarketNetwork.TeamTreasuryPacket("25.5");
+        FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
+
+        MarketNetwork.TeamTreasuryPacket.encode(original, buffer);
+        MarketNetwork.TeamTreasuryPacket decoded = MarketNetwork.TeamTreasuryPacket.decode(buffer);
+
+        assertEquals("25.5", decoded.amount);
+        assertEquals(0, buffer.readableBytes(), "treasury payload must contain only the deposit amount");
+    }
+
+    @Test
+    @DisplayName("Payment action remains appended after all existing serialized actions")
+    void paymentActionOrdinalIsAppendOnly() {
+        assertEquals(0, MarketNetwork.Action.CREATE_ORDER.ordinal());
+        assertEquals(1, MarketNetwork.Action.ACCEPT_ORDER.ordinal());
+        assertEquals(2, MarketNetwork.Action.CANCEL_ORDER.ordinal());
+        assertEquals(3, MarketNetwork.Action.EDIT_ORDER.ordinal());
+        assertEquals(4, MarketNetwork.Action.WALLET.ordinal());
+        assertEquals(5, MarketNetwork.Action.TREASURY.ordinal());
+        assertEquals(6, MarketNetwork.Action.STORAGE.ordinal());
+        assertEquals(7, MarketNetwork.Action.PAYMENT.ordinal());
+    }
+
 }

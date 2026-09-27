@@ -30,6 +30,7 @@ class TeamMarketTest extends MinecraftTestBase {
         public Optional<TeamRef> resolveTeam(UUID player) { return roles.containsKey(player) && !deleted ? getTeam(team) : Optional.empty(); }
         public Optional<TeamRef> getTeam(UUID id) { return team.equals(id) && !deleted ? Optional.of(new TeamRef(team, "Builders", currentOwner)) : Optional.empty(); }
         public TeamRole getRole(UUID player, UUID id) { return roles.getOrDefault(player, TeamRole.NONE); }
+        public Collection<UUID> getMembers(UUID id) { return team.equals(id) && !deleted ? List.copyOf(roles.keySet()) : List.of(); }
         public boolean isAvailable() { return !unavailable; }
         public boolean isTeamDeleted(UUID id) { return !unavailable && deleted && team.equals(id); }
     };
@@ -192,20 +193,46 @@ class TeamMarketTest extends MinecraftTestBase {
                 "legacy PLAYER storage must remain in the UUID-compatible map");
     }
 
-    @Test void disbandPaysLastOwnerOnceAndPersistsTombstoneAcrossRestart() {
+    @Test void disbandSplitsCashAcrossFinalMembersOnceAndPersistsTombstoneAcrossRestart() {
         currentOwner = officer; TeamWalletLifecycle.observe(new TeamRef(team, "Renamed", officer));
         deleted = true;
         TeamWalletLifecycle.reconcile(accounts, orders, null);
-        assertEquals(new BigDecimal("100"), accounts.getOrCreatePlayerAccount(officer).getBalance());
-        assertEquals(BigDecimal.ZERO, accounts.getOrCreateTeamAccount(team).getBalance());
+        assertEquals(new BigDecimal("50.00000000"), accounts.getOrCreatePlayerAccount(officer).getBalance());
+        assertEquals(new BigDecimal("50.00000000"), accounts.getOrCreatePlayerAccount(owner).getBalance());
+        assertEquals(0, accounts.getOrCreateTeamAccount(team).getBalance().compareTo(BigDecimal.ZERO));
         assertTrue(data.getTeamWallets().get(team).closing());
         assertTrue(data.getTeamWallets().get(team).storageSettled());
+        assertEquals(Set.of(owner, officer), data.getTeamWallets().get(team).settledMembers());
         data = EconomyAccountData.load(data.save(new CompoundTag()));
         accounts = new AccountManager(); accounts.loadFrom(data); TeamWalletLifecycle.bind(data);
         TeamWalletLifecycle.deleted(new TeamRef(team, "Replay with old owner", owner));
         TeamWalletLifecycle.reconcile(accounts, orders, null);
-        assertEquals(new BigDecimal("100"), accounts.getOrCreatePlayerAccount(officer).getBalance());
-        assertEquals(BigDecimal.ZERO, accounts.getOrCreatePlayerAccount(owner).getBalance());
+        assertEquals(new BigDecimal("50.00000000"), accounts.getOrCreatePlayerAccount(officer).getBalance());
+        assertEquals(new BigDecimal("50.00000000"), accounts.getOrCreatePlayerAccount(owner).getBalance());
+    }
+
+    @Test void emptyLiveEnumerationDoesNotEraseLastGoodMemberSnapshot() {
+        TeamWalletLifecycle.observe(new TeamRef(team, "Builders", owner));
+        assertEquals(Set.of(owner, officer), Set.copyOf(data.getTeamWallets().get(team).settlementMembers()));
+        TeamWalletLifecycle.observe(new TeamRef(team, "Builders", owner), List.of());
+        assertEquals(Set.of(owner, officer), Set.copyOf(data.getTeamWallets().get(team).settlementMembers()));
+    }
+
+    @Test void closureFreezesMemberSnapshotBeforeSettlement() {
+        UUID third = UUID.randomUUID();
+        roles.put(third, TeamRole.MEMBER);
+        TeamWalletLifecycle.observe(new TeamRef(team, "Builders", owner));
+        TeamWalletLifecycle.deleted(new TeamRef(team, "Builders", owner));
+        roles.remove(third);
+        deleted = true;
+        TeamWalletLifecycle.reconcile(accounts, orders, null);
+        TeamWalletState state = data.getTeamWallets().get(team);
+        assertEquals(Set.of(owner, officer, third), Set.copyOf(state.settlementMembers()));
+        assertEquals(0, accounts.getOrCreateTeamAccount(team).getBalance().compareTo(BigDecimal.ZERO));
+        BigDecimal total = accounts.getOrCreatePlayerAccount(owner).getBalance()
+                .add(accounts.getOrCreatePlayerAccount(officer).getBalance())
+                .add(accounts.getOrCreatePlayerAccount(third).getBalance());
+        assertEquals(0, total.compareTo(new BigDecimal("100")));
     }
     @Test void unavailableProviderDoesNotMeanDeletedAndStaleSelectionNeverChargesPersonal() {
         assertTrue(MarketWalletSelection.selectTeam(officer));
@@ -235,6 +262,7 @@ class TeamMarketTest extends MinecraftTestBase {
         TeamWalletLifecycle.reconcile(accounts, orders, null); // no world for restoring escrow
         assertEquals(new BigDecimal("100"), accounts.getOrCreateTeamAccount(team).getBalance());
         assertEquals(BigDecimal.ZERO, accounts.getOrCreatePlayerAccount(owner).getBalance());
+        assertEquals(BigDecimal.ZERO, accounts.getOrCreatePlayerAccount(officer).getBalance());
         assertTrue(TeamWalletLifecycle.replacementOwner(AccountRef.team(team)).isEmpty());
         data = EconomyAccountData.load(data.save(new CompoundTag()));
         TeamWalletLifecycle.bind(data);
@@ -251,6 +279,8 @@ class TeamMarketTest extends MinecraftTestBase {
         veto.close();
         TeamWalletLifecycle.reconcile(accounts, orders, null);
         TeamWalletLifecycle.reconcile(accounts, orders, null);
-        assertEquals(new BigDecimal("100"), accounts.getOrCreatePlayerAccount(owner).getBalance());
+        assertEquals(new BigDecimal("50.00000000"), accounts.getOrCreatePlayerAccount(owner).getBalance());
+        assertEquals(new BigDecimal("50.00000000"), accounts.getOrCreatePlayerAccount(officer).getBalance());
+        assertEquals(0, accounts.getOrCreateTeamAccount(team).getBalance().compareTo(BigDecimal.ZERO));
     }
 }
