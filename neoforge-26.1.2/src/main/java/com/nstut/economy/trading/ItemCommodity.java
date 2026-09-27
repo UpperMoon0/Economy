@@ -140,6 +140,25 @@ public class ItemCommodity implements ICommodity {
 
     @Deprecated public boolean shouldMatchNBT() { return variant.policy() == ItemMatchPolicy.EXACT; }
 
+    /**
+     * Resolves the canonical market identity for a concrete stack. Plain default stacks keep the
+     * historical base-item id; stacks with components use the exact variant id. Portfolio valuation
+     * and live market holdings must share this path so exact-variant trades price the same identity.
+     */
+    public static ItemCommodity identityFromItemStack(HolderLookup.Provider registries, ItemStack stack,
+                                                      BigDecimal basePrice) {
+        Objects.requireNonNull(registries, "registries");
+        Objects.requireNonNull(stack, "stack");
+        if (stack.isEmpty()) throw new IllegalArgumentException("Cannot resolve an empty item stack");
+        Identifier baseId = BuiltInRegistries.ITEM.getKey(stack.getItem());
+        if (baseId == null)
+            baseId = com.nstut.economy.compat.Compat.rl("minecraft", stack.getItem().toString().toLowerCase().replace(':', '_'));
+        if (com.nstut.economy.compat.Compat.stacksEqual(new ItemStack(stack.getItem()), stack))
+            return new ItemCommodity(baseId, stack.getItem(), basePrice);
+        return new ItemCommodity(baseId, stack.getItem(), basePrice, true,
+                ItemVariant.capture(registries, stack, ItemMatchPolicy.EXACT));
+    }
+
     public static ItemCommodity fromItemStack(ItemStack stack, BigDecimal basePrice) {
         Identifier id = BuiltInRegistries.ITEM.getKey(stack.getItem());
         if (id == null) id = com.nstut.economy.compat.Compat.rl("minecraft", stack.getItem().toString().toLowerCase().replace(':', '_'));

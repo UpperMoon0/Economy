@@ -409,7 +409,7 @@ public class EconomyAccountData extends SavedData implements com.nstut.economy.c
             for (int slot = 0; slot < vault.getContainerSize(); slot++) {
                 net.minecraft.world.item.ItemStack stack = vault.getItem(slot);
                 if (!stack.isEmpty()) {
-                    String itemId = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
+                    String itemId = portfolioCommodityId(level.registryAccess(), stack);
                     itemCounts.put(itemId, itemCounts.getOrDefault(itemId, 0) + stack.getCount());
                 }
             }
@@ -425,21 +425,32 @@ public class EconomyAccountData extends SavedData implements com.nstut.economy.c
         }
 
         com.nstut.economy.data.EconomyTradeData historyData = com.nstut.economy.data.EconomyTradeData.get(level);
-        for (Map.Entry<String, Integer> entry : itemCounts.entrySet()) {
-            String id = entry.getKey();
-            int qty = entry.getValue();
+        assetValue = valueHoldings(itemCounts, historyData.getTrades());
+
+        accountData.addPortfolioPoint(account, balance, assetValue);
+    }
+
+    static String portfolioCommodityId(net.minecraft.core.HolderLookup.Provider registries,
+                                       net.minecraft.world.item.ItemStack stack) {
+        return com.nstut.economy.trading.ItemCommodity
+                .identityFromItemStack(registries, stack, BigDecimal.ZERO)
+                .getId().toString();
+    }
+
+    static BigDecimal valueHoldings(Map<String, Integer> holdings,
+                                    List<com.nstut.economy.data.EconomyTradeData.TradeSnapshot> trades) {
+        BigDecimal total = BigDecimal.ZERO;
+        for (Map.Entry<String, Integer> entry : holdings.entrySet()) {
             BigDecimal unitPrice = BigDecimal.ZERO;
-            List<com.nstut.economy.data.EconomyTradeData.TradeSnapshot> trades = historyData.getTrades();
             for (int i = trades.size() - 1; i >= 0; i--) {
-                if (trades.get(i).itemId.equalsIgnoreCase(id)) {
+                if (trades.get(i).itemId.equalsIgnoreCase(entry.getKey())) {
                     unitPrice = new BigDecimal(trades.get(i).price);
                     break;
                 }
             }
-            assetValue = assetValue.add(unitPrice.multiply(BigDecimal.valueOf(qty)));
+            total = total.add(unitPrice.multiply(BigDecimal.valueOf(entry.getValue())));
         }
-
-        accountData.addPortfolioPoint(account, balance, assetValue);
+        return total;
     }
 
     public CompoundTag save(CompoundTag tag) {

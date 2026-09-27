@@ -1331,12 +1331,7 @@ public class MarketNetwork {
     }
 
     private static ItemCommodity commodityForStack(ServerLevel level, ItemStack stack) {
-        var baseId = BuiltInRegistries.ITEM.getKey(stack.getItem());
-        if (baseId == null) return null;
-        if (com.nstut.economy.compat.Compat.stacksEqual(new ItemStack(stack.getItem()), stack)) {
-            return new ItemCommodity(baseId, stack.getItem(), BigDecimal.ZERO);
-        }
-        return ItemCommodity.exactFromItemStack(level.registryAccess(), stack, BigDecimal.ZERO);
+        return ItemCommodity.identityFromItemStack(level.registryAccess(), stack, BigDecimal.ZERO);
     }
 
     private static String variantData(ItemCommodity commodity) {
