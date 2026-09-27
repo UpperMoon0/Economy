@@ -1,6 +1,6 @@
 package com.nstut.economy.compat;
 
-import com.nstut.economy.api.TeamEconomyProvider;
+import com.nstut.economy.api.internal.FallbackTeamEconomyProvider;
 import com.nstut.economy.api.TeamRef;
 import com.nstut.economy.api.TeamRole;
 
@@ -15,7 +15,7 @@ import java.util.UUID;
  * reflection. Economy therefore has no hard runtime or compile dependency on
  * FTB Teams.
  */
-public final class FtbTeamsTeamEconomyProvider implements TeamEconomyProvider {
+public final class FtbTeamsTeamEconomyProvider implements FallbackTeamEconomyProvider {
     private static final String API_CLASS = "dev.ftb.mods.ftbteams.api.FTBTeamsAPI";
     private static final String MANAGER_CLASS = "dev.ftb.mods.ftbteams.api.TeamManager";
     private static final String TEAM_CLASS = "dev.ftb.mods.ftbteams.api.Team";

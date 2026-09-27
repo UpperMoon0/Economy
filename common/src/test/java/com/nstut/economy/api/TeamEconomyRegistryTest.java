@@ -13,6 +13,27 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class TeamEconomyRegistryTest {
     @Test
+    void customProviderOverridesFallbackAndFallbackResumesAfterUnregister() {
+        TeamEconomyRegistry registry = new TeamEconomyRegistry();
+        FallbackProvider fallback = new FallbackProvider();
+        MutableProvider custom = new MutableProvider();
+        MutableProvider secondCustom = new MutableProvider();
+
+        registry.registerProvider(fallback);
+        assertSame(fallback, registry.provider().orElseThrow());
+
+        registry.registerProvider(custom);
+        assertSame(custom, registry.provider().orElseThrow(),
+                "addon provider must take precedence over Economy's built-in fallback");
+        assertThrows(IllegalStateException.class, () -> registry.registerProvider(secondCustom),
+                "two addon-owned providers must still conflict");
+
+        assertTrue(registry.unregisterProvider(custom));
+        assertSame(fallback, registry.provider().orElseThrow(),
+                "removing the addon provider should reactivate the retained fallback");
+    }
+
+    @Test
     void disabledModeDoesNotExposeTeamEconomy() {
         MutableProvider provider = new MutableProvider();
         TeamEconomyRegistry registry = new TeamEconomyRegistry();
@@ -198,7 +219,7 @@ class TeamEconomyRegistryTest {
                 TeamRole.OFFICER).canPayout());
     }
 
-    private static final class MutableProvider implements TeamEconomyProvider {
+    private static class MutableProvider implements TeamEconomyProvider {
         final UUID playerId = UUID.randomUUID();
         final TeamRef team = new TeamRef(UUID.randomUUID(), "Test Party", playerId);
         TeamRole role = TeamRole.MEMBER;
@@ -223,5 +244,9 @@ class TeamEconomyRegistryTest {
         public boolean isMember(UUID playerId, UUID teamId) {
             return member && this.playerId.equals(playerId) && team.id().equals(teamId);
         }
+    }
+
+    private static final class FallbackProvider extends MutableProvider
+            implements com.nstut.economy.api.internal.FallbackTeamEconomyProvider {
     }
 }

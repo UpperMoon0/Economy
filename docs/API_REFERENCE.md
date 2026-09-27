@@ -121,7 +121,7 @@ Neutral external-team bridge:
 - `boolean isTeamDeleted(UUID teamId)` - authoritative deletion signal; must return false on lookup/provider failure.
 - `boolean isAvailable()`
 
-Economy's built-in FTB Teams bridge is optional and maps only party teams. FTB personal teams and server teams are excluded.
+Economy's built-in FTB Teams bridge is optional and maps only party teams. FTB personal teams and server teams are excluded. It is registered as an internal fallback: an addon-owned provider registered through `registerProvider(...)` takes precedence, and unregistering that custom provider exposes the FTB fallback again. FTB lifecycle events are ignored while a non-FTB provider is active.
 
 `getMembers(...)` is part of the lifecycle safety contract, not a cosmetic convenience. Equal-share disband settlement uses the last authoritative complete member snapshot. An empty/failed member enumeration never degrades to owner-only payout; settlement remains blocked until a valid snapshot exists.
 
@@ -129,7 +129,7 @@ Economy's built-in FTB Teams bridge is optional and maps only party teams. FTB p
 
 Reached through `EconomyApi.teamEconomy()`.
 
-- `provider()` / `registerProvider(...)` / `unregisterProvider(...)`
+- `provider()` / `registerProvider(...)` / `unregisterProvider(...)` - one addon-owned provider may be active; Economy-owned fallback providers do not occupy that addon slot.
 - `mode()` / `setMode(TeamEconomyMode)`
 - `resolveTeam(UUID)`
 - `teamPrincipal(UUID)`
@@ -161,6 +161,14 @@ Describes why a balance operation occurred.
 - `TransactionType getType()` — deprecated legacy classification.
 
 `TransactionType` contains `CREDIT`, `DEBIT`, `TRANSFER`, `TRADE`, `TAX`, `ADMIN_GIVE`, `ADMIN_TAKE`, `STARTING_BALANCE`, and `CUSTOM`.
+
+### `TransactionContexts`
+
+Public immutable context factories for addon code. Use these instead of implementation classes from `com.nstut.economy.core`.
+
+- `transfer(String description, UUID actor)` - standard transfer context attributed to the acting player.
+- `of(EconomyId causeId, String description, String source)` - context with a stable namespaced cause.
+- `of(EconomyId causeId, String description, String source, Map<String,String> metadata)` - context with immutable structured metadata.
 
 ### `TransactionCauses`
 
@@ -526,6 +534,6 @@ Registration changes emit `StorageProviderRegistered` and `StorageProviderUnregi
 
 `TeamWalletSnapshot` exposes separate `canPayout()` and `payoutRole()` state for direct Team-to-other-player payments. The previous constructor and `personalOnly` factory remain available; legacy snapshots conservatively report no payout permission. Ordinary Team-to-Personal withdrawal is intentionally absent. Server mutations always check current permissions independently.
 
-`TeamWalletState` persists the closing member snapshot plus already-settled recipients. This makes equal-share disband settlement retry-safe across crashes/restarts; Vault/Tank custody moves to the last recorded owner only after cash settlement completes.
+Economy persists its Team-closing member snapshot and per-recipient settlement progress as internal state. That persistence type lives under `com.nstut.economy.api.internal` and is deliberately outside the supported addon contract. Equal-share settlement remains retry-safe across crashes/restarts; Vault/Tank custody moves to the last recorded owner only after cash settlement completes.
 
 `IOrderManager.preserveProviderReservation(MarketIdentity, ...)` retains typed recovery attribution. Its default supports Personal identities through the legacy UUID hook; custom order managers must override it for Team recovery. Storage-registry validation failures have no human actor argument, so their quarantine uses the storage owner's UUID as the attribution placeholder while retaining its explicit account kind. Recovery initiated from an order preserves the original human actor.

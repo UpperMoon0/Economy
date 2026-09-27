@@ -52,12 +52,13 @@ public final class Economy {
         if (EconomyApi.commodityTypes().handler(ICommodity.FLUID_TYPE).isEmpty()) FluidCommodity.registerApiType();
         if (EconomyApi.storage().provider(BuiltinContainerStorageProvider.ID).isEmpty()) EconomyApi.storage().register(BUILTIN_STORAGE);
 
-        if (EconomyApi.teamEconomy().provider().isEmpty()) {
-            FtbTeamsTeamEconomyProvider.createIfPresent().ifPresent(provider -> {
-                EconomyApi.teamEconomy().registerProvider(provider);
-                LOGGER.info("FTB Teams detected; optional team-economy provider registered");
-            });
-        }
+        boolean ftbWasActive = EconomyApi.teamEconomy().provider().orElse(null) instanceof FtbTeamsTeamEconomyProvider;
+        FtbTeamsTeamEconomyProvider.createIfPresent().ifPresent(provider -> {
+            EconomyApi.teamEconomy().registerProvider(provider);
+            if (!ftbWasActive && EconomyApi.teamEconomy().provider().orElse(null) instanceof FtbTeamsTeamEconomyProvider) {
+                LOGGER.info("FTB Teams detected; optional team-economy fallback provider registered");
+            }
+        });
     }
 
     public static AccountManager getAccountManager() {

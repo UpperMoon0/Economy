@@ -2,7 +2,7 @@ package com.nstut.economy.data;
 
 import com.nstut.economy.api.AccountKind;
 import com.nstut.economy.api.AccountRef;
-import com.nstut.economy.api.TeamWalletState;
+import com.nstut.economy.api.internal.TeamWalletState;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;

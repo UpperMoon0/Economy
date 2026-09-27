@@ -57,7 +57,7 @@ class TypedAccountPersistence1201Test {
         UUID owner = UUID.randomUUID();
         UUID member = UUID.randomUUID();
         EconomyAccountData data = new EconomyAccountData();
-        data.putTeamWallet(new com.nstut.economy.api.TeamWalletState(
+        data.putTeamWallet(new com.nstut.economy.api.internal.TeamWalletState(
                 teamId, owner, true, false, java.util.List.of(owner, member), java.util.Set.of(owner)));
 
         CompoundTag encoded = data.save(new CompoundTag());

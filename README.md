@@ -143,13 +143,13 @@ Economy exposes a supported addon API in the top-level `com.nstut.economy.api` p
 The public API supports:
 
 - typed player, team, server, and tax accounts with atomic transfers;
-- namespaced transaction causes, metadata, and loader-neutral account events;
+- namespaced transaction causes, public `TransactionContexts` factories, metadata, and loader-neutral account events;
 - order creation/query/edit/cancel operations;
 - immutable market/trade analytics;
 - custom namespaced commodity types with versioned persistence codecs;
 - pluggable durable storage providers and reservations;
 - loader-neutral market events for order and trade integrations;
-- optional team-economy providers, shared-wallet resolution, modes, and fresh role checks.
+- optional team-economy providers, shared-wallet resolution, modes, and fresh role checks; addon providers take precedence over the built-in FTB Teams fallback.
 
 Developer documentation:
 

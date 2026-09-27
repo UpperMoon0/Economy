@@ -51,6 +51,7 @@ public final class FtbTeamsLifecycleHooks {
         }
     }
     private static void handle(Object event, Method unwrap, Class<?> teamType, boolean deleted, boolean nativeEvent) {
+        if (!acceptsEventsFrom(com.nstut.economy.api.EconomyApi.teamEconomy().provider().orElse(null))) return;
         try {
             Object value = unwrap.invoke(event);
             Object team = nativeEvent ? value.getClass().getMethod("team").invoke(value) : value;
@@ -64,6 +65,10 @@ public final class FtbTeamsLifecycleHooks {
             Economy.LOGGER.error("Could not capture FTB Teams lifecycle event", failure);
         }
     }
+    static boolean acceptsEventsFrom(com.nstut.economy.api.TeamEconomyProvider provider) {
+        return provider instanceof FtbTeamsTeamEconomyProvider;
+    }
+
     private static Collection<UUID> teamMembers(Class<?> teamType, Object team) {
         try {
             Object result = teamType.getMethod("getMembers").invoke(team);

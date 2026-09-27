@@ -14,16 +14,11 @@ import java.util.UUID;
  */
 public final class TeamEconomyRegistry {
     private volatile TeamEconomyProvider provider;
-    private volatile java.util.function.Consumer<TeamRef> observer = team -> {};
-    private volatile java.util.function.Predicate<UUID> closing = team -> false;
+    private volatile TeamEconomyProvider fallbackProvider;
 
-    /** Internal server lifecycle hooks; cleared on server shutdown. */
-    public void bindLifecycle(java.util.function.Consumer<TeamRef> observer, java.util.function.Predicate<UUID> closing) {
-        this.observer = Objects.requireNonNull(observer);
-        this.closing = Objects.requireNonNull(closing);
+    public boolean isClosing(UUID teamId) {
+        return com.nstut.economy.api.internal.TeamEconomyLifecycleBridge.isClosing(teamId);
     }
-    public void clearLifecycle() { observer = team -> {}; closing = team -> false; }
-    public boolean isClosing(UUID teamId) { return closing.test(teamId); }
 
     private volatile TeamEconomyMode mode = TeamEconomyMode.HYBRID;
     private volatile TeamRole viewRole = TeamRole.MEMBER;
@@ -33,11 +28,19 @@ public final class TeamEconomyRegistry {
     private volatile TeamRole adminRole = TeamRole.OWNER;
 
     public Optional<TeamEconomyProvider> provider() {
-        return Optional.ofNullable(provider);
+        return Optional.ofNullable(activeProvider());
     }
 
+    /**
+     * Registers the addon-owned Team provider. Economy's built-in FTB Teams integration is retained
+     * separately as a fallback, so installing FTB Teams never prevents an addon from owning this slot.
+     */
     public synchronized void registerProvider(TeamEconomyProvider provider) {
         Objects.requireNonNull(provider, "provider");
+        if (provider instanceof com.nstut.economy.api.internal.FallbackTeamEconomyProvider) {
+            fallbackProvider = provider;
+            return;
+        }
         if (this.provider != null && this.provider != provider) {
             throw new IllegalStateException("A team economy provider is already registered");
         }
@@ -49,7 +52,16 @@ public final class TeamEconomyRegistry {
             this.provider = null;
             return true;
         }
+        if (provider != null && fallbackProvider == provider) {
+            fallbackProvider = null;
+            return true;
+        }
         return false;
+    }
+
+    private TeamEconomyProvider activeProvider() {
+        TeamEconomyProvider current = provider;
+        return current != null ? current : fallbackProvider;
     }
 
     public TeamEconomyMode mode() { return mode; }
@@ -76,13 +88,13 @@ public final class TeamEconomyRegistry {
     /** Returns only party wallets that are currently usable under the configured mode. */
     public Optional<TeamRef> resolveTeam(UUID playerId) {
         if (playerId == null || mode == TeamEconomyMode.PERSONAL_ONLY) return Optional.empty();
-        TeamEconomyProvider current = provider;
+        TeamEconomyProvider current = activeProvider();
         if (current == null || !safeAvailable(current)) return Optional.empty();
         try {
             return current.resolveTeam(playerId)
                     .filter(team -> current.isMember(playerId, team.id()))
-                    .filter(team -> !closing.test(team.id()))
-                    .map(team -> { observer.accept(team); return team; });
+                    .filter(team -> !isClosing(team.id()))
+                    .map(team -> { com.nstut.economy.api.internal.TeamEconomyLifecycleBridge.observe(team); return team; });
         } catch (RuntimeException ignored) {
             return Optional.empty();
         }
@@ -194,14 +206,14 @@ public final class TeamEconomyRegistry {
         if (target.equals(AccountRef.player(actor))) return false;
         Optional<TeamRef> team = resolveTeam(actor);
         if (team.isEmpty() || !canPayout(actor, team.get().id())) return false;
-        if (target.kind() == AccountKind.TEAM && closing.test(target.id())) return false;
+        if (target.kind() == AccountKind.TEAM && isClosing(target.id())) return false;
         return accounts.transfer(team.get().account(), target, amount, context);
     }
 
     /** Fresh server-side membership/rank lookup; never trusts client state. */
     public TeamRole roleFor(UUID playerId, UUID teamId) {
-        if (playerId == null || teamId == null || closing.test(teamId) || mode == TeamEconomyMode.PERSONAL_ONLY) return TeamRole.NONE;
-        TeamEconomyProvider current = provider;
+        if (playerId == null || teamId == null || isClosing(teamId) || mode == TeamEconomyMode.PERSONAL_ONLY) return TeamRole.NONE;
+        TeamEconomyProvider current = activeProvider();
         if (current == null || !safeAvailable(current)) return TeamRole.NONE;
         try {
             Optional<TeamRef> currentTeam = current.resolveTeam(playerId);
@@ -214,7 +226,10 @@ public final class TeamEconomyRegistry {
         }
     }
 
-    public boolean isProviderAvailable() { return provider != null && safeAvailable(provider); }
+    public boolean isProviderAvailable() {
+        TeamEconomyProvider current = activeProvider();
+        return current != null && safeAvailable(current);
+    }
 
     private static boolean safeAvailable(TeamEconomyProvider provider) {
         try {

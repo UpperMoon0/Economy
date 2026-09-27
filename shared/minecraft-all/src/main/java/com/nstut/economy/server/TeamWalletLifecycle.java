@@ -2,6 +2,7 @@ package com.nstut.economy.server;
 
 import com.nstut.Economy;
 import com.nstut.economy.api.*;
+import com.nstut.economy.api.internal.TeamWalletState;
 import com.nstut.economy.core.TransactionContext;
 import com.nstut.economy.data.EconomyAccountData;
 import net.minecraft.server.level.ServerLevel;
@@ -21,12 +22,12 @@ public final class TeamWalletLifecycle {
 
     public static void bind(EconomyAccountData accountData) {
         data = accountData;
-        EconomyApi.teamEconomy().bindLifecycle(TeamWalletLifecycle::observe, TeamWalletLifecycle::isClosing);
+        com.nstut.economy.api.internal.TeamEconomyLifecycleBridge.bind(TeamWalletLifecycle::observe, TeamWalletLifecycle::isClosing);
     }
 
     public static void clear() {
         data = null;
-        EconomyApi.teamEconomy().clearLifecycle();
+        com.nstut.economy.api.internal.TeamEconomyLifecycleBridge.clear();
     }
 
     public static boolean isClosing(UUID teamId) {

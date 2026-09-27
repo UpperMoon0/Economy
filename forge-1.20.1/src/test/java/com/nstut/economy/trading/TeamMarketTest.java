@@ -2,6 +2,7 @@ package com.nstut.economy.trading;
 
 import com.nstut.Economy;
 import com.nstut.economy.api.*;
+import com.nstut.economy.api.internal.TeamWalletState;
 import com.nstut.economy.core.AccountManager;
 import com.nstut.economy.data.*;
 import com.nstut.economy.server.MarketWalletSelection;

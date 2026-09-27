@@ -1,4 +1,4 @@
-package com.nstut.economy.api;
+package com.nstut.economy.api.internal;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -8,7 +8,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 
-/** Durable team closure state saved alongside balances. */
+/** Internal durable team-closure state saved alongside balances. Not addon API. */
 public record TeamWalletState(
         UUID teamId,
         UUID ownerId,

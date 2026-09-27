@@ -24,6 +24,19 @@ class FtbTeamsTeamEconomyProviderTest {
     }
 
     @Test
+    void lifecycleEventsAreIgnoredWhenAnotherProviderIsActive() {
+        FTBTeamsAPI.configure(false, null);
+        var ftb = FtbTeamsTeamEconomyProvider.createIfPresent().orElseThrow();
+        com.nstut.economy.api.TeamEconomyProvider custom = new com.nstut.economy.api.TeamEconomyProvider() {
+            @Override public Optional<com.nstut.economy.api.TeamRef> resolveTeam(UUID playerId) { return Optional.empty(); }
+            @Override public Optional<com.nstut.economy.api.TeamRef> getTeam(UUID teamId) { return Optional.empty(); }
+            @Override public TeamRole getRole(UUID playerId, UUID teamId) { return TeamRole.NONE; }
+        };
+        assertTrue(FtbTeamsLifecycleHooks.acceptsEventsFrom(ftb));
+        assertFalse(FtbTeamsLifecycleHooks.acceptsEventsFrom(custom));
+    }
+
+    @Test
     void reflectsSupportedPublicApiAndIgnoresPersonalTeams() {
         UUID player = UUID.randomUUID();
         FakeTeam personal = new FakeTeam(player, player, "Personal", false);

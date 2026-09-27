@@ -75,12 +75,12 @@ Do not trust a team ID or permission decision supplied by a client. Market spend
 TeamEconomyRegistry teams = EconomyApi.teamEconomy();
 teams.depositFromPlayer(
         EconomyApi.accounts(), playerId, amount,
-        TransactionContext.transfer("team deposit", teamId));
+        TransactionContexts.transfer("team deposit", playerId));
 
 
 teams.spendFromTeam(
         EconomyApi.accounts(), playerId, AccountRef.player(recipientId), amount,
-        TransactionContext.transfer("team payment", recipientId)); // requires payoutRole; recipient cannot be the actor
+        TransactionContexts.transfer("team payment", playerId)); // requires payoutRole; recipient cannot be the actor
 ```
 
 Those helpers resolve the actor's current party and role again immediately before the account transfer, avoiding a stale client-side or cached authorization decision.
@@ -108,6 +108,8 @@ Team closure is a distinct lifecycle operation, not a withdrawal permission. Eco
 Remaining Team cash is split equally across the persisted member snapshot in deterministic UUID order. Settlement progress is persisted after each successful payout, so a restart or vetoed transfer retries only the unpaid recipients instead of duplicating money. Any final rounding remainder goes to the last unpaid recipient. After cash reaches zero, Team-owned Vault/Tank blocks are reassigned to the last recorded owner for physical custody so unloaded storage cannot become orphaned. The closing tombstone remains durable.
 
 Custom `TeamEconomyProvider` integrations must provide a complete `getMembers(teamId)` enumeration if they want Team closure settlement. The default provider method reports enumeration as unsupported by returning an empty collection. If no authoritative member snapshot has ever been captured, Economy refuses to collapse the payout to the owner and leaves the Team wallet preserved until membership can be resolved.
+
+Economy's FTB Teams integration is a fallback provider, not a lock on the provider slot. `registerProvider(customProvider)` takes precedence over the built-in FTB fallback; unregistering the custom provider exposes the fallback again. FTB lifecycle listeners remain installed for compatibility but ignore FTB events while a non-FTB provider is active, so they cannot mutate a custom provider's Team lifecycle state. Only one addon-owned provider may be active at a time.
 
 ## Market orders
 
@@ -146,6 +148,6 @@ The existing reflection-adapter unit tests use behavioral doubles for membership
 
 Automated coverage includes all supported JVM/version suites, published FTB API contracts, typed order/trade/storage migration and UUID collisions, codec boundaries, treasury permission separation, provider/cancel recovery, and deletion/restart settlement. Forge GameTests exercise real Vault-backed Team BUY/SELL, membership invalidation, escrow restoration, open-menu reauthorization, Team storage break permissions, team commands, and real FTB lifecycle-hook registration.
 
-The development-only Forge renderer captures the actual Market screen with deterministic fixtures in wide/narrow layouts and light/dark themes. Run `./gradlew :forge-1.20.1:renderUiPreviews`; the 48-case PNG gallery is generated in `forge-1.20.1/build/ui-previews/index.html`. Cases cover party absence/access loss, Personal/Team selection, treasury permissions, container ownership, order identities, and Team BUY/SELL forms. These fixtures verify presentation, not live multiplayer behavior.
+The development-only Forge renderer captures the actual Market screen with deterministic fixtures in wide/narrow layouts and light/dark themes. Run `./gradlew :forge-1.20.1:renderUiPreviews`; the 64-case PNG gallery is generated in `forge-1.20.1/build/ui-previews/index.html`. Cases cover party absence/access loss, Personal/Team selection, treasury permissions, container ownership, order identities, and Team BUY/SELL forms. These fixtures verify presentation, not live multiplayer behavior.
 
 Before release, repeat treasury actions, storage reassignment, and permission changes with a real party and a second player. Automated permission fixtures do not replace this multiplayer UI check. Other loaders are covered by compilation/JVM tests and matching UI adapters, not a manual visual pass.
