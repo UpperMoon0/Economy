@@ -220,7 +220,7 @@ EconomyEvents.Subscription sub = EconomyEvents.listen(
 - `post(E)` — publishes synchronously; primarily used by Economy and public extension registries.
 - `Subscription.close()` — unregister listener.
 
-Listeners are matched by the event's exact runtime class; registering for a base event interface does not subscribe to every subtype. There is no public global listener reset: retain the returned `Subscription` and call `close()` when your own listener should be removed. Global event-bus reset is internal lifecycle/test machinery.
+Listeners are matched by the event's exact runtime class; registering for a base event interface does not subscribe to every subtype. Retain the returned `Subscription` and call `close()` when your own listener should be removed. `EconomyEvents.clearListeners()` remains as a **deprecated 0.0.13 binary-compatibility shim** because it shipped in the stable top-level API; it clears listeners globally and must not be used by new addons. The implementation delegates to internal lifecycle/test machinery and the public symbol is reserved for removal only in a documented breaking API release.
 
 Account events:
 

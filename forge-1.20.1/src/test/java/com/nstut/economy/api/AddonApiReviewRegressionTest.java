@@ -60,16 +60,16 @@ class AddonApiReviewRegressionTest extends MinecraftTestBase {
     }
 
     @Test
-    @DisplayName("Stable addon API cannot mutate Economy runtime binding or clear global listeners")
-    void stableApiDoesNotExposeGlobalLifecycleMutation() {
+    @DisplayName("Runtime mutators are internal while the 0.0.13 listener-reset symbol remains binary compatible")
+    void stableApiKeepsOnlyTheLegacyGlobalListenerResetShim() throws Exception {
         var economyApiMethods = java.util.Arrays.stream(EconomyApi.class.getMethods())
-                .map(java.lang.reflect.Method::getName).toList();
-        var eventMethods = java.util.Arrays.stream(EconomyEvents.class.getMethods())
                 .map(java.lang.reflect.Method::getName).toList();
 
         assertFalse(economyApiMethods.contains("bindRuntime"));
         assertFalse(economyApiMethods.contains("unbindRuntime"));
-        assertFalse(eventMethods.contains("clearListeners"));
+        var clearListeners = EconomyEvents.class.getMethod("clearListeners");
+        assertTrue(clearListeners.isAnnotationPresent(Deprecated.class),
+                "0.0.13 binary compatibility shim must remain deprecated");
         assertDoesNotThrow(() -> Class.forName("com.nstut.economy.api.internal.EconomyRuntimeBridge"));
         assertDoesNotThrow(() -> Class.forName("com.nstut.economy.api.internal.EconomyEventBridge"));
     }

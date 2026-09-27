@@ -124,6 +124,8 @@ EconomyEvents.Subscription sub = EconomyEvents.listen(
 
 Listeners are registered for an exact event class. Registering a listener for the base `EconomyEvents.Event` interface does not subscribe it to every event subtype.
 
+`EconomyEvents.clearListeners()` is retained and deprecated only for binary compatibility with 0.0.13. It is a process-global reset and can remove other addons' listeners, so extension code should never call it; close the `Subscription` returned from your own `listen(...)` call instead.
+
 Cancellable pre-events currently include:
 
 - `EconomyEvents.BalanceChangePre`

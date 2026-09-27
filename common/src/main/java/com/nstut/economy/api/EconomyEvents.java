@@ -22,6 +22,17 @@ public final class EconomyEvents {
         return com.nstut.economy.api.internal.EconomyEventBridge.post(event);
     }
 
+    /**
+     * @deprecated Compatibility shim retained for addons compiled against Economy 0.0.13.
+     * This clears every listener globally, including listeners owned by other addons. New code must
+     * retain the {@link Subscription} returned by {@link #listen(Class, Consumer)} and close only
+     * its own subscription. Global reset remains internal lifecycle/test machinery.
+     */
+    @Deprecated
+    public static void clearListeners() {
+        com.nstut.economy.api.internal.EconomyEventBridge.clearListeners();
+    }
+
     public static final class BalanceChangePre extends CancellableEvent {
         private final AccountRef accountRef; private final BigDecimal previousBalance; private final BigDecimal delta; private final ITransactionContext context;
         public BalanceChangePre(UUID owner, BigDecimal previousBalance, BigDecimal delta, ITransactionContext context) {

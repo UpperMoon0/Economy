@@ -177,6 +177,8 @@ EconomyEvents.Subscription subscription = EconomyEvents.listen(
 
 Listeners match the exact event class passed to `listen`; subscribing to the base event interface does not subscribe to every subtype. Keep the returned subscription when the listener has a shorter lifetime than the mod itself and call `close()` when it should stop receiving events.
 
+`EconomyEvents.clearListeners()` exists only as a deprecated compatibility shim for addons compiled against Economy 0.0.13. Do not use it in new code: it clears every addon's listeners, not just yours.
+
 Available event families include:
 
 - account balance changes;
