@@ -1,5 +1,7 @@
 package com.nstut.economy.api.internal;
 
+import com.nstut.economy.api.AccountRef;
+
 import com.nstut.economy.blocks.TankManager;
 import com.nstut.economy.blocks.VaultManager;
 import com.nstut.economy.trading.EconomyFluidStack;
@@ -19,6 +21,12 @@ public final class AtomicStorageRestore {
     private AtomicStorageRestore() { }
 
     public static boolean restoreEscrow(ServerLevel level, UUID owner,
+                                        Collection<ItemStack> items,
+                                        Collection<EconomyFluidStack> fluids) {
+        return owner != null && restoreEscrow(level, AccountRef.player(owner), items, fluids);
+    }
+
+    public static boolean restoreEscrow(ServerLevel level, AccountRef owner,
                                         Collection<ItemStack> items,
                                         Collection<EconomyFluidStack> fluids) {
         if (level == null || owner == null) return false;

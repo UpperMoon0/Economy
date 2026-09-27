@@ -39,6 +39,7 @@ public class TankScreen extends EconomyUiContainerScreen<TankMenu> {
     private static final int TRANSFER_SECTION_WIDTH = 90;
 
     private ButtonWidget modeBtn;
+    private ButtonWidget ownerBtn;
     private FluidTankComponent tankComponent;
     private TankBlockEntity.TankMode currentMode;
 
@@ -63,7 +64,14 @@ public class TankScreen extends EconomyUiContainerScreen<TankMenu> {
         if (modeBtn != null && mode != currentMode) {
             currentMode = mode;
             modeBtn.setLabel(modeLabel(mode));
-            modeBtn.tooltip(modeTooltip(mode));
+            modeBtn.tooltip(modeTooltipWithPermission(mode));
+        }
+        if (ownerBtn != null) {
+            ownerBtn.setLabel(storageOwnerLabel());
+            ownerBtn.enabled(menu.getTankBlockEntity() != null);
+        }
+        if (modeBtn != null) {
+            modeBtn.tooltip(modeTooltipWithPermission(currentMode));
         }
     }
 
@@ -102,8 +110,11 @@ public class TankScreen extends EconomyUiContainerScreen<TankMenu> {
         HStack header = new HStack().gap(4).align(Alignment.CENTER);
         header.addChild(Ui.text(Component.translatable("ui.economy.tank.title")).style(TextStyle.TITLE));
         header.addChild(Ui.spacer().flex());
+        ownerBtn = Ui.button(storageOwnerLabel(), this::toggleStorageOwner).ghost().small();
+        ownerBtn.tooltip(Component.translatable("ui.economy.container.owner_transfer_tooltip"));
+        header.addChild(ownerBtn);
         modeBtn = Ui.button(modeLabel(currentMode), this::cycleMode).ghost().small();
-        modeBtn.tooltip(modeTooltip(currentMode));
+        modeBtn.tooltip(modeTooltipWithPermission(currentMode));
         header.addChild(modeBtn);
         header.addChild(buildCompactThemeToggle());
 
@@ -165,6 +176,34 @@ public class TankScreen extends EconomyUiContainerScreen<TankMenu> {
             case INPUT -> "ui.economy.container.tooltip.mode_input";
             case OUTPUT -> "ui.economy.container.tooltip.mode_output";
         });
+    }
+
+
+    private Component modeTooltipWithPermission(TankBlockEntity.TankMode mode) {
+        return modeTooltip(mode).copy()
+                .append("\n")
+                .append(Component.translatable("ui.economy.container.mode_admin_hint"));
+    }
+
+    private boolean isTeamStorage() {
+        TankBlockEntity storage = menu.getTankBlockEntity();
+        return storage != null && storage.getOwnerRef() != null
+                && "TEAM".equals(storage.getOwnerRef().kind().name());
+    }
+
+    private Component storageOwnerLabel() {
+        Component principal = Component.translatable(isTeamStorage()
+                ? "ui.economy.principal.team"
+                : "ui.economy.principal.personal");
+        return Component.translatable("ui.economy.container.owner", principal);
+    }
+
+    private void toggleStorageOwner() {
+        TankBlockEntity storage = menu.getTankBlockEntity();
+        if (storage == null || minecraft == null || minecraft.level == null) return;
+        MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.SetStorageOwnerPacket(
+                minecraft.level.dimension().location().toString(),
+                storage.getBlockPos(), true, !isTeamStorage()));
     }
 
     private void cycleMode() {

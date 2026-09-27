@@ -8,6 +8,7 @@ import com.nstut.economy.server.MarketWalletSelection;
 import com.nstut.economy.server.TeamWalletLifecycle;
 import com.nstut.economy.test.MinecraftTestBase;
 import net.minecraft.core.NonNullList;
+import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
@@ -33,7 +34,7 @@ class TeamMarketTest extends MinecraftTestBase {
         public boolean isTeamDeleted(UUID id) { return !unavailable && deleted && team.equals(id); }
     };
     ItemCommodity commodity() { return new ItemCommodity(new ResourceLocation("minecraft", "iron_ingot"), Items.IRON_INGOT, BigDecimal.ONE); }
-    MarketIdentity teamIdentity(UUID actor) { return new MarketIdentity(AccountRef.team(team), actor, actor); }
+    MarketIdentity teamIdentity(UUID actor) { return new MarketIdentity(AccountRef.team(team), actor, AccountRef.team(team)); }
     @BeforeEach void setup() {
         EconomyApi.unbindRuntime();
         EconomyApi.teamEconomy().provider().ifPresent(EconomyApi.teamEconomy()::unregisterProvider);
@@ -57,6 +58,57 @@ class TeamMarketTest extends MinecraftTestBase {
         Order order = new Order(actor, commodity(), 5, new BigDecimal("2"), IOrder.OrderType.SELL, null, escrow);
         order.setIdentity(identity); return order;
     }
+    @Test void selectedTeamWalletBindsMoneyAndPhysicalStorageToTheTeam() {
+        assertTrue(MarketWalletSelection.selectTeam(officer));
+        MarketIdentity identity = MarketWalletSelection.identity(officer);
+        assertEquals(AccountRef.team(team), identity.principal());
+        assertEquals(AccountRef.team(team), identity.storageAccount());
+        assertEquals(officer, identity.actor());
+        assertEquals(team, identity.storageOwner());
+        assertTrue(identity.authorized(EconomyApi.teamEconomy()));
+    }
+    @Test void legacyTeamOrdersKeepPersonalStorageAndFreshAuthorizationAfterReload() {
+        MarketIdentity legacy = new MarketIdentity(AccountRef.team(team), officer, officer);
+        Order order = sell(officer, legacy);
+        EconomyOrderData saved = new EconomyOrderData(); saved.putOrder(order.toSnapshot());
+        Order restored = Order.fromSnapshot(EconomyOrderData.load(saved.save(new CompoundTag())).getOrders().get(order.getOrderId()));
+        assertEquals(AccountRef.player(officer), restored.getStorageAccount());
+        assertTrue(restored.isAuthorized());
+        assertTrue(restored.executePartial(MarketIdentity.personal(outsider), 1, null).success);
+        roles.remove(officer);
+        assertFalse(restored.isAuthorized());
+    }
+    @Test void collidingPlayerAndTeamStorageRemainDistinctThroughMigration() {
+        MarketIdentity legacy = new MarketIdentity(AccountRef.team(officer), officer, officer);
+        MarketIdentity typed = new MarketIdentity(AccountRef.team(officer), officer, AccountRef.team(officer));
+        assertNotEquals(legacy.storageAccount(), typed.storageAccount());
+        for (MarketIdentity identity : List.of(legacy, typed)) {
+            Order order = sell(officer, identity);
+            EconomyOrderData saved = new EconomyOrderData(); saved.putOrder(order.toSnapshot());
+            CompoundTag tag = saved.save(new CompoundTag());
+            assertEquals(identity, EconomyOrderData.load(tag).getOrders().get(order.getOrderId()).identity);
+            tag.getList("Orders", 10).getCompound(0).remove("StorageAccount");
+            assertEquals(AccountRef.player(officer), EconomyOrderData.load(tag).getOrders().get(order.getOrderId()).identity.storageAccount());
+        }
+    }
+    @Test void providerRecoveryRetainsTeamAttributionAcrossSave() {
+        EconomyOrderData saved = new EconomyOrderData(); orders.loadFrom(saved);
+        StorageReservation reservation = new StorageReservation(EconomyId.parse("test:provider"),
+                EconomyId.parse("minecraft:iron_ingot"), 3, "durable-token", Map.of());
+        orders.preserveProviderReservation(teamIdentity(officer), commodity(), reservation, BigDecimal.ONE, "failed release");
+        orders.saveAll();
+        OrderManager restored = new OrderManager(); restored.loadFrom(EconomyOrderData.load(saved.save(new CompoundTag())));
+        assertTrue(restored.hasTeamRecoveryReferences(team));
+    }
+    @Test void cancelledTeamCreationRetainsTypedRecoveryIdentity() {
+        var escrow = NonNullList.<ItemStack>create(); escrow.add(new ItemStack(Items.IRON_INGOT, 5));
+        var veto = EconomyEvents.listen(MarketEvents.OrderCreatePre.class, event -> event.cancel());
+        try {
+            assertTrue(orders.createSellOrder(teamIdentity(officer), commodity(), 5, BigDecimal.ONE,
+                    escrow, List.of(), null).order().isEmpty());
+            assertTrue(orders.hasTeamRecoveryReferences(team));
+        } finally { veto.close(); }
+    }
     @Test void teamBuyPaysTeamAndPersistsHumanAndStorageAttribution() {
         EconomyTradeData trades = new EconomyTradeData(); TradeLedger.setTradeData(trades);
         Order sell = sell(outsider, MarketIdentity.personal(outsider));
@@ -67,6 +119,7 @@ class TeamMarketTest extends MinecraftTestBase {
         assertEquals(BigDecimal.ZERO, accounts.getOrCreatePlayerAccount(officer).getBalance());
         var roundTrip = EconomyTradeData.load(trades.save(new CompoundTag())).getTrades().get(0);
         assertEquals(teamIdentity(officer), roundTrip.buyerIdentity);
+        assertEquals(AccountRef.team(team), roundTrip.buyerIdentity.storageAccount());
         assertEquals(MarketIdentity.personal(outsider), roundTrip.sellerIdentity);
         assertEquals(officer, roundTrip.buyer);
     }
@@ -123,6 +176,22 @@ class TeamMarketTest extends MinecraftTestBase {
         row.putString("Principal", "BROKEN:identity");
         assertEquals(1, EconomyOrderData.load(legacy).getQuarantinedOrders().size());
     }
+    @Test void typedTeamStorageIndexesRoundTripWithoutReinterpretingLegacyPlayerStorage() {
+        BlockPos teamVault = new BlockPos(11, 64, 12);
+        BlockPos teamTank = new BlockPos(13, 64, 14);
+        BlockPos personalVault = new BlockPos(15, 64, 16);
+        data.addVault(AccountRef.team(team), teamVault, "minecraft:overworld");
+        data.addTank(AccountRef.team(team), teamTank, "minecraft:the_nether");
+        data.addVault(owner, personalVault, "minecraft:overworld");
+
+        EconomyAccountData restored = EconomyAccountData.load(data.save(new CompoundTag()));
+        assertEquals(teamVault, restored.getStorageVaults().get(AccountRef.team(team)).get(0).pos);
+        assertEquals(teamTank, restored.getStorageTanks().get(AccountRef.team(team)).get(0).pos);
+        assertEquals(personalVault, restored.getStorageVaults().get(AccountRef.player(owner)).get(0).pos);
+        assertFalse(restored.getTypedVaults().containsKey(AccountRef.player(owner)),
+                "legacy PLAYER storage must remain in the UUID-compatible map");
+    }
+
     @Test void disbandPaysLastOwnerOnceAndPersistsTombstoneAcrossRestart() {
         currentOwner = officer; TeamWalletLifecycle.observe(new TeamRef(team, "Renamed", officer));
         deleted = true;
@@ -130,6 +199,7 @@ class TeamMarketTest extends MinecraftTestBase {
         assertEquals(new BigDecimal("100"), accounts.getOrCreatePlayerAccount(officer).getBalance());
         assertEquals(BigDecimal.ZERO, accounts.getOrCreateTeamAccount(team).getBalance());
         assertTrue(data.getTeamWallets().get(team).closing());
+        assertTrue(data.getTeamWallets().get(team).storageSettled());
         data = EconomyAccountData.load(data.save(new CompoundTag()));
         accounts = new AccountManager(); accounts.loadFrom(data); TeamWalletLifecycle.bind(data);
         TeamWalletLifecycle.deleted(new TeamRef(team, "Replay with old owner", owner));
@@ -165,6 +235,10 @@ class TeamMarketTest extends MinecraftTestBase {
         TeamWalletLifecycle.reconcile(accounts, orders, null); // no world for restoring escrow
         assertEquals(new BigDecimal("100"), accounts.getOrCreateTeamAccount(team).getBalance());
         assertEquals(BigDecimal.ZERO, accounts.getOrCreatePlayerAccount(owner).getBalance());
+        assertTrue(TeamWalletLifecycle.replacementOwner(AccountRef.team(team)).isEmpty());
+        data = EconomyAccountData.load(data.save(new CompoundTag()));
+        TeamWalletLifecycle.bind(data);
+        assertTrue(TeamWalletLifecycle.replacementOwner(AccountRef.team(team)).isEmpty());
         orders.saveAll();
         assertEquals(5, Order.fromSnapshot(saved.getOrders().get(sell.getOrderId())).getEscrowedItemCount());
     }
@@ -173,6 +247,7 @@ class TeamMarketTest extends MinecraftTestBase {
         var veto = EconomyEvents.listen(EconomyEvents.TransferPre.class, event -> event.cancel());
         TeamWalletLifecycle.reconcile(accounts, orders, null);
         assertEquals(new BigDecimal("100"), accounts.getOrCreateTeamAccount(team).getBalance());
+        assertTrue(TeamWalletLifecycle.replacementOwner(AccountRef.team(team)).isEmpty());
         veto.close();
         TeamWalletLifecycle.reconcile(accounts, orders, null);
         TeamWalletLifecycle.reconcile(accounts, orders, null);

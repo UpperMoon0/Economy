@@ -43,4 +43,11 @@ public interface IOrderManager {
      */
     void preserveProviderReservation(UUID escrowOwner, ICommodity commodity, StorageReservation reservation,
                                      BigDecimal referencePrice, String reason);
+
+    default void preserveProviderReservation(MarketIdentity identity, ICommodity commodity, StorageReservation reservation,
+                                            BigDecimal referencePrice, String reason) {
+        if (!identity.equals(MarketIdentity.personal(identity.actor())))
+            throw new UnsupportedOperationException("Typed provider recovery not supported");
+        preserveProviderReservation(identity.actor(), commodity, reservation, referencePrice, reason);
+    }
 }

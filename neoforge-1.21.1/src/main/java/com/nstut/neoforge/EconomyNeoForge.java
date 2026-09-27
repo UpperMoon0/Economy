@@ -118,16 +118,16 @@ public final class EconomyNeoForge {
         Player player = event.getPlayer();
         if (player == null) return;
         BlockEntity be = level.getBlockEntity(event.getPos());
-        UUID owner = null;
+        com.nstut.economy.api.AccountRef owner = null;
         String messageKey = null;
         if (be instanceof VaultBlockEntity vault) {
-            owner = vault.getOwner();
+            owner = vault.getOwnerRef();
             messageKey = "message.economy.vault.not_owner";
         } else if (be instanceof TankBlockEntity tank) {
-            owner = tank.getOwner();
+            owner = tank.getOwnerRef();
             messageKey = "message.economy.tank.not_owner";
         }
-        if (owner == null || owner.equals(player.getUUID())) return;
+        if (owner == null || com.nstut.economy.server.TeamStorageAccess.canAdmin(player.getUUID(), owner)) return;
         if (player.hasPermissions(2)) return;
         event.setCanceled(true);
         if (player instanceof ServerPlayer serverPlayer && messageKey != null) {

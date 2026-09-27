@@ -23,7 +23,10 @@ public final class MarketWalletSelection {
     public static void reset(UUID actor) { selections.remove(actor); }
     public static void clear() { selections.clear(); }
     public static MarketIdentity identity(UUID actor) {
-        var identity = new MarketIdentity(selected(actor), actor, actor);
+        AccountRef principal = selected(actor);
+        var identity = principal.kind() == AccountKind.TEAM
+                ? new MarketIdentity(principal, actor, principal)
+                : MarketIdentity.personal(actor);
         if (!identity.authorized(EconomyApi.teamEconomy())) throw new IllegalStateException("Selected team wallet unavailable or requires " + EconomyApi.teamEconomy().spendRole());
         return identity;
     }

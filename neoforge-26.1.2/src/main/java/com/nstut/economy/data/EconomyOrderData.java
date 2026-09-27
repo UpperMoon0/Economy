@@ -154,7 +154,10 @@ public class EconomyOrderData extends SavedData {
             return t.getBooleanOr("ServerOrder", false) ? new MarketIdentity(AccountRef.server(com.nstut.economy.core.AccountManager.SERVER_ACCOUNT_ID), owner, owner)
                     : MarketIdentity.personal(owner);
         }
-        return new MarketIdentity(AccountRef.parse(t.getStringOr("Principal", "")), UUID.fromString(t.getStringOr("Actor", "")), UUID.fromString(t.getStringOr("StorageOwner", "")));
+        UUID storageOwner = UUID.fromString(t.getStringOr("StorageOwner", ""));
+        String storageAccount = t.getStringOr("StorageAccount", "");
+        return new MarketIdentity(AccountRef.parse(t.getStringOr("Principal", "")), UUID.fromString(t.getStringOr("Actor", "")), storageOwner,
+                storageAccount.isEmpty() ? AccountRef.player(storageOwner) : AccountRef.parse(storageAccount));
     }
 
     private static NonNullList<ItemStack> readItems(CompoundTag t, HolderLookup.Provider registries) {
@@ -186,6 +189,7 @@ public class EconomyOrderData extends SavedData {
         tag.putString("Principal", s.identity.principal().toString());
         tag.putString("Actor", s.identity.actor().toString());
         tag.putString("StorageOwner", s.identity.storageOwner().toString());
+        tag.putString("StorageAccount", s.identity.storageAccount().toString());
         tag.putString("ItemId", s.itemId); tag.putInt("Quantity", s.quantity); tag.putInt("InitialQuantity", s.initialQuantity);
         tag.putString("PricePerUnit", s.pricePerUnit); tag.putString("Type", s.type); tag.putLong("CreatedAt", s.createdAt); tag.putLong("ExpiresAt", s.expiresAt);
         tag.putBoolean("HasExpiry", s.hasExpiry); tag.putBoolean("ServerOrder", s.isServerOrder); tag.putBoolean("IsInfinite", s.isInfinite);

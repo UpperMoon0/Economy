@@ -203,14 +203,16 @@ public final class EconomyGameTests {
         helper.succeed();
     }
     @GameTest(template = "economy_gametest_empty", timeoutTicks = 100)
-    public static void teamMarketPrincipalUsesPlayerOwnedVaults(GameTestHelper helper) {
+    public static void teamMarketPrincipalUsesTeamOwnedVaults(GameTestHelper helper) {
         helper.assertTrue(EconomyApi.isReady(), "Economy API must be ready for team market coverage");
 
-        UUID actor = UUID.randomUUID();
+        var actingPlayer = helper.makeMockPlayer();
+        UUID actor = actingPlayer.getUUID();
         UUID counterparty = UUID.randomUUID();
         UUID teamId = UUID.randomUUID();
         TeamRef team = new TeamRef(teamId, "GameTest Team", actor);
         boolean[] activeMember = {true};
+        TeamRole[] memberRole = {TeamRole.OFFICER};
         TeamEconomyProvider fake = new TeamEconomyProvider() {
             @Override public java.util.Optional<TeamRef> resolveTeam(UUID playerId) {
                 return activeMember[0] && actor.equals(playerId) ? java.util.Optional.of(team) : java.util.Optional.empty();
@@ -219,7 +221,7 @@ public final class EconomyGameTests {
                 return teamId.equals(id) ? java.util.Optional.of(team) : java.util.Optional.empty();
             }
             @Override public TeamRole getRole(UUID playerId, UUID id) {
-                return activeMember[0] && actor.equals(playerId) && teamId.equals(id) ? TeamRole.OFFICER : TeamRole.NONE;
+                return activeMember[0] && actor.equals(playerId) && teamId.equals(id) ? memberRole[0] : TeamRole.NONE;
             }
         };
 
@@ -239,8 +241,23 @@ public final class EconomyGameTests {
             VaultBlockEntity teamVault = (VaultBlockEntity) helper.getLevel().getBlockEntity(helper.absolutePos(teamVaultPos));
             VaultBlockEntity counterpartyVault = (VaultBlockEntity) helper.getLevel().getBlockEntity(helper.absolutePos(counterpartyVaultPos));
             helper.assertTrue(teamVault != null && counterpartyVault != null, "team market Vaults must exist");
-            teamVault.setOwner(actor);
+            teamVault.setOwner(AccountRef.team(teamId));
             teamVault.setMode(VaultBlockEntity.VaultMode.BOTH);
+            BlockPos absoluteVault = helper.absolutePos(teamVaultPos);
+            actingPlayer.setPos(absoluteVault.getX() + 0.5, absoluteVault.getY() + 0.5, absoluteVault.getZ() + 0.5);
+            helper.assertTrue(teamVault.stillValid(actingPlayer), "current officer can keep team storage open");
+            var officerBreak = new net.minecraftforge.event.level.BlockEvent.BreakEvent(helper.getLevel(), absoluteVault,
+                    teamVault.getBlockState(), actingPlayer);
+            com.nstut.forge.EconomyEvents.onBlockBreak(officerBreak);
+            helper.assertTrue(officerBreak.isCanceled(), "officer cannot break OWNER-controlled team storage");
+            memberRole[0] = TeamRole.OWNER;
+            var ownerBreak = new net.minecraftforge.event.level.BlockEvent.BreakEvent(helper.getLevel(), absoluteVault,
+                    teamVault.getBlockState(), actingPlayer);
+            com.nstut.forge.EconomyEvents.onBlockBreak(ownerBreak);
+            helper.assertTrue(!ownerBreak.isCanceled(), "current team OWNER can break typed team storage");
+            memberRole[0] = TeamRole.OFFICER;
+            helper.assertTrue(AccountRef.team(teamId).equals(teamVault.getOwnerRef()),
+                    "team market Vault must retain typed TEAM ownership");
             counterpartyVault.setOwner(counterparty);
             counterpartyVault.setMode(VaultBlockEntity.VaultMode.BOTH);
             counterpartyVault.setItem(0, new ItemStack(Items.IRON_INGOT, 4));
@@ -254,7 +271,7 @@ public final class EconomyGameTests {
             BigDecimal counterpartyBefore = counterpartyAccount.getBalance();
             teamAccount.credit(new BigDecimal("100"), null);
 
-            MarketIdentity teamIdentity = new MarketIdentity(AccountRef.team(teamId), actor, actor);
+            MarketIdentity teamIdentity = new MarketIdentity(AccountRef.team(teamId), actor, AccountRef.team(teamId));
             OrderManager buyBook = new OrderManager();
             var buyCreated = buyBook.createBuyOrder(teamIdentity, iron, 2, new BigDecimal("3"), false, helper.getLevel());
             helper.assertTrue(buyCreated.accepted() && buyCreated.order().isPresent(), "team BUY order must be accepted");
@@ -263,11 +280,11 @@ public final class EconomyGameTests {
             helper.assertTrue(teamAccount.getBalance().compareTo(new BigDecimal("94")) == 0, "team BUY must debit only the team principal");
             helper.assertTrue(actorAccount.getBalance().compareTo(actorBefore) == 0, "team BUY must not debit the actor personal wallet");
             helper.assertTrue(counterpartyAccount.getBalance().compareTo(counterpartyBefore.add(new BigDecimal("6"))) == 0, "team BUY must credit the seller personal wallet");
-            helper.assertTrue(VaultManager.countItemInVaults(helper.getLevel(), actor, iron) == 2, "team BUY delivery must target the actor storage owner");
+            helper.assertTrue(VaultManager.countItemInVaults(helper.getLevel(), AccountRef.team(teamId), iron) == 2, "team BUY delivery must target TEAM-owned storage");
             helper.assertTrue(VaultManager.countItemInVaults(helper.getLevel(), counterparty, iron) == 2, "team BUY must extract from the seller storage owner");
 
             NonNullList<ItemStack> reserved = NonNullList.create();
-            helper.assertTrue(VaultManager.extractItemFromVaults(helper.getLevel(), actor, iron, 1, reserved), "team SELL must reserve from actor-owned Vault storage");
+            helper.assertTrue(VaultManager.extractItemFromVaults(helper.getLevel(), AccountRef.team(teamId), iron, 1, reserved), "team SELL must reserve from TEAM-owned Vault storage");
             OrderManager sellBook = new OrderManager();
             var sellCreated = sellBook.createSellOrder(teamIdentity, iron, 1, new BigDecimal("4"), reserved, java.util.List.of(), helper.getLevel());
             helper.assertTrue(sellCreated.accepted() && sellCreated.order().isPresent(), "team SELL order must be accepted");
@@ -276,22 +293,23 @@ public final class EconomyGameTests {
             helper.assertTrue(teamAccount.getBalance().compareTo(new BigDecimal("98")) == 0, "team SELL proceeds must credit the team principal");
             helper.assertTrue(actorAccount.getBalance().compareTo(actorBefore) == 0, "team SELL must not credit the actor personal wallet");
             helper.assertTrue(counterpartyAccount.getBalance().compareTo(counterpartyBefore.add(new BigDecimal("2"))) == 0, "team SELL must debit the buyer personal wallet");
-            helper.assertTrue(VaultManager.countItemInVaults(helper.getLevel(), actor, iron) == 1, "team SELL reservation must come from actor storage");
+            helper.assertTrue(VaultManager.countItemInVaults(helper.getLevel(), AccountRef.team(teamId), iron) == 1, "team SELL reservation must come from TEAM storage");
             helper.assertTrue(VaultManager.countItemInVaults(helper.getLevel(), counterparty, iron) == 3, "team SELL delivery must target buyer storage");
 
             NonNullList<ItemStack> invalidatedEscrow = NonNullList.create();
-            helper.assertTrue(VaultManager.extractItemFromVaults(helper.getLevel(), actor, iron, 1, invalidatedEscrow),
-                    "invalidated team SELL must reserve from actor storage before membership changes");
+            helper.assertTrue(VaultManager.extractItemFromVaults(helper.getLevel(), AccountRef.team(teamId), iron, 1, invalidatedEscrow),
+                    "invalidated team SELL must reserve from TEAM storage before membership changes");
             OrderManager invalidatedBook = new OrderManager();
             var invalidated = invalidatedBook.createSellOrder(teamIdentity, iron, 1, new BigDecimal("5"),
                     invalidatedEscrow, java.util.List.of(), helper.getLevel());
             helper.assertTrue(invalidated.accepted() && invalidated.order().isPresent(), "team SELL must exist before leave/kick");
             UUID invalidatedId = invalidated.order().orElseThrow().getOrderId();
             activeMember[0] = false;
+            helper.assertTrue(!teamVault.stillValid(actingPlayer), "leave/kick must invalidate an already-open storage menu");
             invalidatedBook.revalidateTeamOrders(helper.getLevel());
             helper.assertTrue(invalidatedBook.getOrder(invalidatedId).isEmpty(), "leave/kick must remove an invalidated team order");
-            helper.assertTrue(VaultManager.countItemInVaults(helper.getLevel(), actor, iron) == 1,
-                    "invalidated team SELL escrow must return losslessly to the recorded player storage owner");
+            helper.assertTrue(VaultManager.countItemInVaults(helper.getLevel(), AccountRef.team(teamId), iron) == 1,
+                    "invalidated team SELL escrow must return losslessly to the recorded TEAM storage owner");
 
             helper.succeed();
         } finally {

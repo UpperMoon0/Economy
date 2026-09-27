@@ -25,10 +25,11 @@ public final class TeamEconomyRegistry {
     public void clearLifecycle() { observer = team -> {}; closing = team -> false; }
     public boolean isClosing(UUID teamId) { return closing.test(teamId); }
 
-    private volatile TeamEconomyMode mode = TeamEconomyMode.PERSONAL_ONLY;
+    private volatile TeamEconomyMode mode = TeamEconomyMode.HYBRID;
     private volatile TeamRole viewRole = TeamRole.MEMBER;
     private volatile TeamRole depositRole = TeamRole.MEMBER;
     private volatile TeamRole spendRole = TeamRole.OFFICER;
+    private volatile TeamRole withdrawRole = TeamRole.OWNER;
     private volatile TeamRole adminRole = TeamRole.OWNER;
 
     public Optional<TeamEconomyProvider> provider() {
@@ -57,12 +58,20 @@ public final class TeamEconomyRegistry {
     public TeamRole viewRole() { return viewRole; }
     public TeamRole depositRole() { return depositRole; }
     public TeamRole spendRole() { return spendRole; }
+    public TeamRole withdrawRole() { return withdrawRole; }
     public TeamRole adminRole() { return adminRole; }
 
-    public void setViewRole(TeamRole role) { viewRole = Objects.requireNonNull(role, "role"); }
-    public void setDepositRole(TeamRole role) { depositRole = Objects.requireNonNull(role, "role"); }
-    public void setSpendRole(TeamRole role) { spendRole = Objects.requireNonNull(role, "role"); }
-    public void setAdminRole(TeamRole role) { adminRole = Objects.requireNonNull(role, "role"); }
+    public void setViewRole(TeamRole role) { viewRole = requireMemberRole(role); }
+    public void setDepositRole(TeamRole role) { depositRole = requireMemberRole(role); }
+    public void setSpendRole(TeamRole role) { spendRole = requireMemberRole(role); }
+    public void setWithdrawRole(TeamRole role) { withdrawRole = requireMemberRole(role); }
+    public void setAdminRole(TeamRole role) { adminRole = requireMemberRole(role); }
+
+    private static TeamRole requireMemberRole(TeamRole role) {
+        Objects.requireNonNull(role, "role");
+        if (role == TeamRole.NONE) throw new IllegalArgumentException("A permission threshold must require membership");
+        return role;
+    }
 
     /** Returns only party wallets that are currently usable under the configured mode. */
     public Optional<TeamRef> resolveTeam(UUID playerId) {
@@ -117,13 +126,13 @@ public final class TeamEconomyRegistry {
         BigDecimal personalBalance = accounts.getOrCreatePlayerAccount(playerId).getBalance();
         Optional<TeamRef> team = resolveTeam(playerId);
         if (team.isEmpty()) {
-            return TeamWalletSnapshot.personalOnly(mode, personalBalance, spendRole);
+            return TeamWalletSnapshot.personalOnly(mode, personalBalance, spendRole, withdrawRole);
         }
 
         TeamRef current = team.get();
         TeamRole role = roleFor(playerId, current.id());
         if (!role.atLeast(viewRole)) {
-            return TeamWalletSnapshot.personalOnly(mode, personalBalance, spendRole);
+            return TeamWalletSnapshot.personalOnly(mode, personalBalance, spendRole, withdrawRole);
         }
 
         BigDecimal teamBalance = accounts.getOrCreateTeamAccount(current.id()).getBalance();
@@ -135,7 +144,9 @@ public final class TeamEconomyRegistry {
                 role,
                 role.atLeast(depositRole),
                 role.atLeast(spendRole),
-                spendRole);
+                role.atLeast(withdrawRole),
+                spendRole,
+                withdrawRole);
     }
 
     public boolean canView(UUID playerId, UUID teamId) {
@@ -148,6 +159,11 @@ public final class TeamEconomyRegistry {
 
     public boolean canSpend(UUID playerId, UUID teamId) {
         return roleFor(playerId, teamId).atLeast(spendRole);
+    }
+
+    /** Treasury extraction (withdraw/pay) is deliberately stricter than market spending. */
+    public boolean canWithdraw(UUID playerId, UUID teamId) {
+        return roleFor(playerId, teamId).atLeast(withdrawRole);
     }
 
     public boolean canAdmin(UUID playerId, UUID teamId) {
@@ -176,7 +192,7 @@ public final class TeamEconomyRegistry {
         Objects.requireNonNull(accounts, "accounts");
         if (actor == null || target == null || amount == null || amount.signum() <= 0) return false;
         Optional<TeamRef> team = resolveTeam(actor);
-        if (team.isEmpty() || !canSpend(actor, team.get().id())) return false;
+        if (team.isEmpty() || !canWithdraw(actor, team.get().id())) return false;
         if (target.kind() == AccountKind.TEAM && closing.test(target.id())) return false;
         return accounts.transfer(team.get().account(), target, amount, context);
     }

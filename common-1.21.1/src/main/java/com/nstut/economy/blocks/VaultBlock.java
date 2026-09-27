@@ -92,7 +92,7 @@ public class VaultBlock extends DirectionalBlock implements EntityBlock  {
             @NotNull Player player, @NotNull BlockHitResult hit) {
         if (!level.isClientSide && player instanceof ServerPlayer sp) {
             if (level.getBlockEntity(pos) instanceof VaultBlockEntity vault) {
-                if (vault.getOwner() != null && !vault.getOwner().equals(player.getUUID())) {
+                if (!com.nstut.economy.server.TeamStorageAccess.canUse(player.getUUID(), vault.getOwnerRef())) {
                     sp.displayClientMessage(Component.translatable("message.economy.vault.not_owner"), true);
                     return InteractionResult.CONSUME;
                 }

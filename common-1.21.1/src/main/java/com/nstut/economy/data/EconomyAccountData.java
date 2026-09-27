@@ -58,6 +58,8 @@ public class EconomyAccountData extends SavedData implements com.nstut.economy.c
     private final Map<AccountRef, BigDecimal> typedBalances = new HashMap<>();
     private final Map<UUID, List<VaultRecord>> vaults = new HashMap<>();
     private final Map<UUID, List<VaultRecord>> tanks = new HashMap<>();
+    private final Map<AccountRef, List<VaultRecord>> typedVaults = new HashMap<>();
+    private final Map<AccountRef, List<VaultRecord>> typedTanks = new HashMap<>();
     private final Map<UUID, List<PortfolioPoint>> portfolioHistory = new HashMap<>();
 
     public List<PortfolioPoint> getPortfolioHistory(UUID player) {
@@ -120,6 +122,21 @@ public class EconomyAccountData extends SavedData implements com.nstut.economy.c
     }
 
     public Map<UUID, List<VaultRecord>> getVaults() { return vaults; }
+    public Map<AccountRef, List<VaultRecord>> getTypedVaults() { return typedVaults; }
+    public Map<AccountRef, List<VaultRecord>> getStorageVaults() {
+        Map<AccountRef, List<VaultRecord>> result = new HashMap<>();
+        vaults.forEach((id, records) -> result.put(AccountRef.player(id), new ArrayList<>(records)));
+        typedVaults.forEach((owner, records) -> result.put(owner, new ArrayList<>(records)));
+        return result;
+    }
+    public void addVault(AccountRef owner, BlockPos pos, String dimension) {
+        if (owner.kind() == AccountKind.PLAYER) { addVault(owner.id(), pos, dimension); return; }
+        addTypedStorage(typedVaults, owner, pos, dimension);
+    }
+    public void removeVault(AccountRef owner, BlockPos pos, String dimension) {
+        if (owner.kind() == AccountKind.PLAYER) { removeVault(owner.id(), pos, dimension); return; }
+        removeTypedStorage(typedVaults, owner, pos, dimension);
+    }
     public void addVault(UUID owner, BlockPos pos, String dimension) {
         List<VaultRecord> list = vaults.computeIfAbsent(owner, k -> new ArrayList<>());
         BlockPos p = pos.immutable();
@@ -143,6 +160,21 @@ public class EconomyAccountData extends SavedData implements com.nstut.economy.c
     public boolean hasVault(UUID owner) { return vaults.containsKey(owner) && !vaults.get(owner).isEmpty(); }
 
     public Map<UUID, List<VaultRecord>> getTanks() { return tanks; }
+    public Map<AccountRef, List<VaultRecord>> getTypedTanks() { return typedTanks; }
+    public Map<AccountRef, List<VaultRecord>> getStorageTanks() {
+        Map<AccountRef, List<VaultRecord>> result = new HashMap<>();
+        tanks.forEach((id, records) -> result.put(AccountRef.player(id), new ArrayList<>(records)));
+        typedTanks.forEach((owner, records) -> result.put(owner, new ArrayList<>(records)));
+        return result;
+    }
+    public void addTank(AccountRef owner, BlockPos pos, String dimension) {
+        if (owner.kind() == AccountKind.PLAYER) { addTank(owner.id(), pos, dimension); return; }
+        addTypedStorage(typedTanks, owner, pos, dimension);
+    }
+    public void removeTank(AccountRef owner, BlockPos pos, String dimension) {
+        if (owner.kind() == AccountKind.PLAYER) { removeTank(owner.id(), pos, dimension); return; }
+        removeTypedStorage(typedTanks, owner, pos, dimension);
+    }
     public void addTank(UUID owner, BlockPos pos, String dimension) {
         List<VaultRecord> list = tanks.computeIfAbsent(owner, k -> new ArrayList<>());
         BlockPos p = pos.immutable();
@@ -164,6 +196,25 @@ public class EconomyAccountData extends SavedData implements com.nstut.economy.c
         }
     }
     public boolean hasTank(UUID owner) { return tanks.containsKey(owner) && !tanks.get(owner).isEmpty(); }
+
+    private void addTypedStorage(Map<AccountRef, List<VaultRecord>> target, AccountRef owner, BlockPos pos, String dimension) {
+        List<VaultRecord> list = target.computeIfAbsent(owner, k -> new ArrayList<>());
+        BlockPos p = pos.immutable();
+        String dim = dimension != null ? dimension : "minecraft:overworld";
+        for (VaultRecord r : list) if (r.pos.equals(p) && r.dimension.equals(dim)) return;
+        list.add(new VaultRecord(p, dim));
+        setDirty();
+    }
+    private void removeTypedStorage(Map<AccountRef, List<VaultRecord>> target, AccountRef owner, BlockPos pos, String dimension) {
+        List<VaultRecord> list = target.get(owner);
+        if (list == null) return;
+        BlockPos p = pos.immutable();
+        String dim = dimension != null ? dimension : "minecraft:overworld";
+        if (list.removeIf(r -> r.pos.equals(p) && r.dimension.equals(dim))) {
+            if (list.isEmpty()) target.remove(owner);
+            setDirty();
+        }
+    }
 
     private void loadVaultRecords(CompoundTag vaultsTag, Map<UUID, List<VaultRecord>> target) {
         for (String key : vaultsTag.getAllKeys()) {
@@ -189,6 +240,24 @@ public class EconomyAccountData extends SavedData implements com.nstut.economy.c
         }
     }
 
+    private void loadTypedVaultRecords(CompoundTag ownersTag, Map<AccountRef, List<VaultRecord>> target) {
+        for (String key : ownersTag.getAllKeys()) {
+            try {
+                AccountRef owner = AccountRef.parse(key);
+                if (owner.kind() == AccountKind.PLAYER) continue;
+                List<VaultRecord> list = new ArrayList<>();
+                ListTag listTag = ownersTag.getList(key, Tag.TAG_COMPOUND);
+                for (int i = 0; i < listTag.size(); i++) {
+                    CompoundTag posTag = listTag.getCompound(i);
+                    BlockPos pos = new BlockPos(posTag.getInt("X"), posTag.getInt("Y"), posTag.getInt("Z"));
+                    String dim = posTag.contains("Dimension") ? posTag.getString("Dimension") : "minecraft:overworld";
+                    list.add(new VaultRecord(pos, dim));
+                }
+                target.put(owner, list);
+            } catch (RuntimeException ignored) {}
+        }
+    }
+
     public static EconomyAccountData get(net.minecraft.server.level.ServerLevel level) {
         net.minecraft.server.level.ServerLevel target = (level != null && level.getServer() != null) ? level.getServer().overworld() : level;
         return target.getDataStorage().computeIfAbsent(new SavedData.Factory<>(EconomyAccountData::new, EconomyAccountData::load, null), NAME);
@@ -200,7 +269,7 @@ public class EconomyAccountData extends SavedData implements com.nstut.economy.c
             CompoundTag entry = list.getCompound(i);
             UUID team = UUID.fromString(entry.getString("Team"));
             UUID owner = UUID.fromString(entry.getString("Owner"));
-            data.teamWallets.put(team, new TeamWalletState(team, owner, entry.getBoolean("Closing")));
+            data.teamWallets.put(team, new TeamWalletState(team, owner, entry.getBoolean("Closing"), entry.getBoolean("StorageSettled")));
         }
     }
     private void writeTeamWallets(CompoundTag tag) {
@@ -210,6 +279,7 @@ public class EconomyAccountData extends SavedData implements com.nstut.economy.c
             entry.putString("Team", state.teamId().toString());
             entry.putString("Owner", state.ownerId().toString());
             entry.putBoolean("Closing", state.closing());
+            entry.putBoolean("StorageSettled", state.storageSettled());
             list.add(entry);
         }
         tag.put("TeamWallets", list);
@@ -237,6 +307,8 @@ public class EconomyAccountData extends SavedData implements com.nstut.economy.c
         }
         data.loadVaultRecords(tag.getCompound("Vaults"), data.vaults);
         data.loadVaultRecords(tag.getCompound("Tanks"), data.tanks);
+        data.loadTypedVaultRecords(tag.getCompound("TypedVaults"), data.typedVaults);
+        data.loadTypedVaultRecords(tag.getCompound("TypedTanks"), data.typedTanks);
 
         CompoundTag historyTag = tag.getCompound("PortfolioHistory");
         for (String key : historyTag.getAllKeys()) {
@@ -351,6 +423,36 @@ public class EconomyAccountData extends SavedData implements com.nstut.economy.c
             tanksTag.put(e.getKey().toString(), listTag);
         }
         tag.put("Tanks", tanksTag);
+
+        CompoundTag typedVaultsTag = new CompoundTag();
+        for (Map.Entry<AccountRef, List<VaultRecord>> e : typedVaults.entrySet()) {
+            ListTag listTag = new ListTag();
+            for (VaultRecord r : e.getValue()) {
+                CompoundTag posTag = new CompoundTag();
+                posTag.putInt("X", r.pos.getX());
+                posTag.putInt("Y", r.pos.getY());
+                posTag.putInt("Z", r.pos.getZ());
+                posTag.putString("Dimension", r.dimension);
+                listTag.add(posTag);
+            }
+            typedVaultsTag.put(e.getKey().toString(), listTag);
+        }
+        tag.put("TypedVaults", typedVaultsTag);
+
+        CompoundTag typedTanksTag = new CompoundTag();
+        for (Map.Entry<AccountRef, List<VaultRecord>> e : typedTanks.entrySet()) {
+            ListTag listTag = new ListTag();
+            for (VaultRecord r : e.getValue()) {
+                CompoundTag posTag = new CompoundTag();
+                posTag.putInt("X", r.pos.getX());
+                posTag.putInt("Y", r.pos.getY());
+                posTag.putInt("Z", r.pos.getZ());
+                posTag.putString("Dimension", r.dimension);
+                listTag.add(posTag);
+            }
+            typedTanksTag.put(e.getKey().toString(), listTag);
+        }
+        tag.put("TypedTanks", typedTanksTag);
 
         CompoundTag historyTag = new CompoundTag();
         for (Map.Entry<UUID, List<PortfolioPoint>> e : portfolioHistory.entrySet()) {

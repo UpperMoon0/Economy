@@ -61,6 +61,7 @@ public final class TeamEconomyCommandGameTests {
         TeamRole previousView = teams.viewRole();
         TeamRole previousDeposit = teams.depositRole();
         TeamRole previousSpend = teams.spendRole();
+        TeamRole previousWithdraw = teams.withdrawRole();
         TeamRole previousAdmin = teams.adminRole();
 
         if (previousProvider != null) teams.unregisterProvider(previousProvider);
@@ -69,6 +70,7 @@ public final class TeamEconomyCommandGameTests {
         teams.setViewRole(TeamRole.MEMBER);
         teams.setDepositRole(TeamRole.MEMBER);
         teams.setSpendRole(TeamRole.OFFICER);
+        teams.setWithdrawRole(TeamRole.OWNER);
         teams.setAdminRole(TeamRole.OWNER);
         MarketWalletSelection.reset(actor);
 
@@ -106,14 +108,23 @@ public final class TeamEconomyCommandGameTests {
             helper.assertTrue(MarketWalletSelection.selected(actor).equals(AccountRef.team(teamId)),
                     "team selection must persist server-side");
 
+            helper.assertTrue(commands.performPrefixedCommand(source, "economy team withdraw 3") == 0,
+                    "officer market permission must not allow treasury withdrawal");
+            helper.assertTrue(commands.performPrefixedCommand(source, "economy team pay test-mock-player 2") == 0,
+                    "officer market permission must not allow treasury payments");
+            helper.assertTrue(personal.getBalance().compareTo(personalStart.subtract(new BigDecimal("10"))) == 0
+                            && teamAccount.getBalance().compareTo(teamStart.add(new BigDecimal("10"))) == 0,
+                    "denied treasury extraction must not mutate either wallet");
+
+            role[0] = TeamRole.OWNER;
             helper.assertTrue(commands.performPrefixedCommand(source, "economy team withdraw 3") == 1,
-                    "officer withdrawal must succeed");
+                    "owner withdrawal must succeed");
             helper.assertTrue(commands.performPrefixedCommand(source, "economy team pay test-mock-player 2") == 1,
-                    "team pay must resolve the Brigadier player argument and succeed");
+                    "owner team pay must resolve the Brigadier player argument and succeed");
             helper.assertTrue(personal.getBalance().compareTo(personalStart.subtract(new BigDecimal("5"))) == 0,
-                    "withdraw plus pay-to-self must return five coins to the actor personal wallet");
+                    "owner withdraw plus pay-to-self must return five coins to the actor personal wallet");
             helper.assertTrue(teamAccount.getBalance().compareTo(teamStart.add(new BigDecimal("5"))) == 0,
-                    "withdraw plus pay must debit five coins from the team wallet");
+                    "owner withdraw plus pay must debit five coins from the team wallet");
 
             helper.assertTrue(commands.performPrefixedCommand(source, "economy team use personal") == 1,
                     "personal selection must be executable");
@@ -157,6 +168,7 @@ public final class TeamEconomyCommandGameTests {
             teams.setViewRole(previousView);
             teams.setDepositRole(previousDeposit);
             teams.setSpendRole(previousSpend);
+            teams.setWithdrawRole(previousWithdraw);
             teams.setAdminRole(previousAdmin);
             helper.getLevel().getServer().getPlayerList().remove(player);
             channel.finishAndReleaseAll();

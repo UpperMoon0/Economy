@@ -1,0 +1,13 @@
+modLoader="javafml"
+loaderVersion="[47,)"
+license="MIT"
+[[mods]]
+modId="economy_ui_preview"
+version="1.0"
+displayName="Economy UI preview (development only)"
+[[dependencies.economy_ui_preview]]
+modId="economy"
+mandatory=true
+versionRange="[0,)"
+ordering="AFTER"
+side="CLIENT"

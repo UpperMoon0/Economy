@@ -37,11 +37,12 @@ public class EconomyConfig {
     // Ownership: when false, tanks expose no fluid capability to pipes/automation
     private boolean allowExternalAutomation = false;
 
-    // Optional shared team economy. Default remains fully backward-compatible.
-    private TeamEconomyMode teamEconomyMode = TeamEconomyMode.PERSONAL_ONLY;
+    // Enabled by default; without an optional team provider only personal accounts are exposed.
+    private TeamEconomyMode teamEconomyMode = TeamEconomyMode.HYBRID;
     private TeamRole teamViewRole = TeamRole.MEMBER;
     private TeamRole teamDepositRole = TeamRole.MEMBER;
     private TeamRole teamSpendRole = TeamRole.OFFICER;
+    private TeamRole teamWithdrawRole = TeamRole.OWNER;
     private TeamRole teamAdminRole = TeamRole.OWNER;
 
     private EconomyConfig() {}
@@ -59,20 +60,27 @@ public class EconomyConfig {
         if (java.nio.file.Files.exists(path)) {
             try (var input = java.nio.file.Files.newInputStream(path)) { properties.load(input); }
         }
-        teamEconomyMode = TeamEconomyMode.valueOf(properties.getProperty("mode", "PERSONAL_ONLY").trim());
+        String enabled = properties.getProperty("enabled", "true").trim();
+        if (!enabled.equalsIgnoreCase("true") && !enabled.equalsIgnoreCase("false")) {
+            throw new IllegalArgumentException("enabled must be true or false");
+        }
+        teamEconomyMode = Boolean.parseBoolean(enabled) ? TeamEconomyMode.HYBRID : TeamEconomyMode.PERSONAL_ONLY;
         teamViewRole = configuredRole(properties, "viewRole", TeamRole.MEMBER);
         teamDepositRole = configuredRole(properties, "depositRole", TeamRole.MEMBER);
         teamSpendRole = configuredRole(properties, "spendRole", TeamRole.OFFICER);
+        teamWithdrawRole = configuredRole(properties, "withdrawRole", TeamRole.OWNER);
         teamAdminRole = configuredRole(properties, "adminRole", TeamRole.OWNER);
-        if (!java.nio.file.Files.exists(path)) {
+        if (!java.nio.file.Files.exists(path) || !properties.containsKey("enabled") || properties.containsKey("mode")) {
             java.nio.file.Files.createDirectories(path.toAbsolutePath().getParent());
-            properties.setProperty("mode", teamEconomyMode.name());
+            properties.remove("mode");
+            properties.setProperty("enabled", Boolean.toString(isTeamEconomyEnabled()));
             properties.setProperty("viewRole", teamViewRole.name());
             properties.setProperty("depositRole", teamDepositRole.name());
             properties.setProperty("spendRole", teamSpendRole.name());
+            properties.setProperty("withdrawRole", teamWithdrawRole.name());
             properties.setProperty("adminRole", teamAdminRole.name());
             try (var output = java.nio.file.Files.newOutputStream(path)) {
-                properties.store(output, "Economy team wallets. Restart the server after editing. Modes: PERSONAL_ONLY, HYBRID, TEAM_PRIMARY. Roles: MEMBER, OFFICER, OWNER.");
+                properties.store(output, "Economy team wallets. Restart the server after editing. enabled=true activates optional FTB Teams support; false disables team economy. Roles: MEMBER, OFFICER, OWNER.");
             }
         }
     }
@@ -97,10 +105,12 @@ public class EconomyConfig {
     public int getMaxPriceScale() { return maxPriceScale; }
     public int getMaxPriceDigits() { return maxPriceDigits; }
     public boolean isExternalAutomationAllowed() { return allowExternalAutomation; }
+    public boolean isTeamEconomyEnabled() { return teamEconomyMode != TeamEconomyMode.PERSONAL_ONLY; }
     public TeamEconomyMode getTeamEconomyMode() { return teamEconomyMode; }
     public TeamRole getTeamViewRole() { return teamViewRole; }
     public TeamRole getTeamDepositRole() { return teamDepositRole; }
     public TeamRole getTeamSpendRole() { return teamSpendRole; }
+    public TeamRole getTeamWithdrawRole() { return teamWithdrawRole; }
     public TeamRole getTeamAdminRole() { return teamAdminRole; }
 
     // Setters for configuration (would be called during config loading)
@@ -122,5 +132,6 @@ public class EconomyConfig {
     public void setTeamViewRole(TeamRole role) { this.teamViewRole = java.util.Objects.requireNonNull(role, "role"); }
     public void setTeamDepositRole(TeamRole role) { this.teamDepositRole = java.util.Objects.requireNonNull(role, "role"); }
     public void setTeamSpendRole(TeamRole role) { this.teamSpendRole = java.util.Objects.requireNonNull(role, "role"); }
+    public void setTeamWithdrawRole(TeamRole role) { this.teamWithdrawRole = java.util.Objects.requireNonNull(role, "role"); }
     public void setTeamAdminRole(TeamRole role) { this.teamAdminRole = java.util.Objects.requireNonNull(role, "role"); }
 }

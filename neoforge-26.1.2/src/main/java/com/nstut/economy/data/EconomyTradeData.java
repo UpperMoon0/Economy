@@ -79,13 +79,17 @@ public class EconomyTradeData extends SavedData {
         if (!t.contains(prefix + "Principal")) return MarketIdentity.personal(com.nstut.economy.util.NbtCompat.getUuid(t, prefix));
         return new MarketIdentity(AccountRef.parse(identityString(t, prefix + "Principal")),
                 UUID.fromString(identityString(t, prefix + "Actor")),
-                UUID.fromString(identityString(t, prefix + "StorageOwner")));
+                UUID.fromString(identityString(t, prefix + "StorageOwner")),
+                identityString(t, prefix + "StorageAccount").isEmpty()
+                        ? AccountRef.player(UUID.fromString(identityString(t, prefix + "StorageOwner")))
+                        : AccountRef.parse(identityString(t, prefix + "StorageAccount")));
     }
     private static String identityString(CompoundTag t, String key) { return t.getStringOr(key, ""); }
     private static void writeIdentity(CompoundTag t, String prefix, MarketIdentity identity) {
         t.putString(prefix + "Principal", identity.principal().toString());
         t.putString(prefix + "Actor", identity.actor().toString());
         t.putString(prefix + "StorageOwner", identity.storageOwner().toString());
+        t.putString(prefix + "StorageAccount", identity.storageAccount().toString());
     }
 
     public static EconomyTradeData load(CompoundTag tag) {

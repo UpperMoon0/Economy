@@ -13,7 +13,7 @@ class MarketClientStoreTeamWalletTest {
         MarketClientStore.applySyncItemList(new MarketNetwork.SyncItemListPacket(
                 "12.50", 2, List.of(),
                 "HYBRID", true, "Upper Moon", "77.25", "MEMBER",
-                true, false, "OFFICER", "PLAYER"));
+                true, false, false, "OFFICER", "OWNER", "PLAYER"));
 
         assertEquals("12.50", MarketClientStore.balance.get());
         var team = MarketClientStore.teamWallet.get();
@@ -23,7 +23,9 @@ class MarketClientStoreTeamWalletTest {
         assertEquals("MEMBER", team.role());
         assertTrue(team.canDeposit());
         assertFalse(team.canSpend());
+        assertFalse(team.canWithdraw());
         assertEquals("OFFICER", team.spendRole());
+        assertEquals("OWNER", team.withdrawRole());
         assertEquals("PLAYER", MarketClientStore.marketPrincipal.get());
     }
 
@@ -31,19 +33,21 @@ class MarketClientStoreTeamWalletTest {
     void personalOnlyOrLeaveClearsPreviouslyVisibleTeamState() {
         MarketClientStore.applySyncItemList(new MarketNetwork.SyncItemListPacket(
                 "10", 0, List.of(),
-                "HYBRID", true, "Old Party", "90", "OFFICER",
-                true, true, "OFFICER", "PLAYER"));
+                "HYBRID", true, "Old Party", "90", "OWNER",
+                true, true, true, "OFFICER", "OWNER", "PLAYER"));
 
         MarketClientStore.applySyncItemList(new MarketNetwork.SyncItemListPacket(
                 "11", 0, List.of(),
                 "PERSONAL_ONLY", false, "", "0", "NONE",
-                false, false, "OFFICER", "PLAYER"));
+                false, false, false, "OFFICER", "OWNER", "PLAYER"));
 
         var team = MarketClientStore.teamWallet.get();
         assertFalse(team.visible());
         assertEquals("", team.teamName());
         assertEquals("0", team.teamBalance());
         assertEquals("NONE", team.role());
+        assertFalse(team.canWithdraw());
+        assertEquals("OWNER", team.withdrawRole());
         assertEquals("11", MarketClientStore.balance.get());
     }
 }

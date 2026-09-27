@@ -291,7 +291,8 @@ public class Order implements IOrder {
     }
 
     private TransactionResult executeSell(MarketIdentity buyer, int requested, ServerLevel level) {
-        UUID buyerId = buyer.storageOwner();
+        UUID buyerId = buyer.actor();
+        AccountRef buyerStorage = buyer.storageAccount();
         IAccountManager accounts = accounts();
         boolean serverBuyer = buyer.principal().kind() == AccountKind.SERVER;
         IBankAccount sellerAccount = accountFor(getPrincipal());
@@ -315,7 +316,7 @@ public class Order implements IOrder {
                 items = createItemStacks(item, amount, level);
             }
             if (!serverBuyer && level != null) {
-                int space = VaultManager.hasVault(buyerId) ? VaultManager.countMaxAcceptableItems(level, buyerId, items) : 0;
+                int space = VaultManager.hasVault(buyerStorage) ? VaultManager.countMaxAcceptableItems(level, buyerStorage, items) : 0;
                 amount = Math.min(amount, space);
                 if (amount <= 0) return TransactionResult.failure("Buyer has no compatible Vault space");
                 items = serverOrder ? createItemStacks(item, amount, level) : buildItemDelivery(item.getItem(), amount);
@@ -325,8 +326,8 @@ public class Order implements IOrder {
             if (amount <= 0) return TransactionResult.failure("Sell order has no reserved fluid");
             fluids = buildFluidDelivery(fluid.getFluid(), amount);
             if (!serverBuyer && level != null) {
-                int space = TankManager.hasTank(buyerId)
-                        ? TankManager.simulateInsertFluidToTanks(level, buyerId, TankManager.mergeFluids(fluids)) : 0;
+                int space = TankManager.hasTank(buyerStorage)
+                        ? TankManager.simulateInsertFluidToTanks(level, buyerStorage, TankManager.mergeFluids(fluids)) : 0;
                 amount = Math.min(amount, space);
                 if (amount <= 0) return TransactionResult.failure("Buyer has no compatible Tank space");
                 fluids = buildFluidDelivery(fluid.getFluid(), amount);
@@ -342,7 +343,7 @@ public class Order implements IOrder {
         }
 
         int delivered = amount;
-        if (!serverBuyer && level != null) delivered = commitBuiltInDelivery(level, buyerId, items, fluids, amount);
+        if (!serverBuyer && level != null) delivered = commitBuiltInDelivery(level, buyerStorage, items, fluids, amount);
         BigDecimal refundAmount = delivered < amount ? totalFor(amount - delivered) : BigDecimal.ZERO;
         boolean compensated = delivered >= amount
                 || refund(sellerAccount, buyerAccount, buyerId, refundAmount, "Refund - partial delivery");
@@ -357,7 +358,8 @@ public class Order implements IOrder {
 
     private TransactionResult executeReservedProviderSell(MarketIdentity buyer, IBankAccount sellerAccount, IBankAccount buyerAccount,
                                                           int requested, ServerLevel level, boolean serverBuyer) {
-        UUID buyerId = buyer.storageOwner();
+        UUID buyerId = buyer.actor();
+        AccountRef buyerStorage = buyer.storageAccount();
         if (level == null) return TransactionResult.failure("Provider-backed orders require a running server level");
         IStorageProvider provider = EconomyApi.storage().provider(externalReservation.providerId()).orElse(null);
         if (provider == null) return TransactionResult.failure("Storage provider unavailable: " + externalReservation.providerId());
@@ -373,7 +375,7 @@ public class Order implements IOrder {
         StorageDeliveryResult delivery;
         try {
             delivery = provider.deliverReserved(level, beforeDelivery,
-                    serverBuyer ? OrderManager.SERVER_ID : buyerId, amount).validateAgainst(beforeDelivery, amount);
+                    serverBuyer ? AccountRef.server(OrderManager.SERVER_ID) : buyerStorage, amount).validateAgainst(beforeDelivery, amount);
         } catch (RuntimeException providerFailure) {
             boolean compensated = refund(sellerAccount, buyerAccount, buyerId, total, "Refund - provider delivery failed");
             String reason = "provider delivery failed after payment: " + provider.id();
@@ -401,7 +403,8 @@ public class Order implements IOrder {
     }
 
     private TransactionResult executeBuy(MarketIdentity seller, int requested, ServerLevel level) {
-        UUID sellerId = seller.storageOwner();
+        UUID sellerId = seller.actor();
+        AccountRef sellerStorage = seller.storageAccount();
         IAccountManager accounts = accounts();
         IBankAccount buyerAccount = accountFor(getPrincipal());
         IBankAccount sellerAccount = accountFor(seller.principal());
@@ -414,13 +417,13 @@ public class Order implements IOrder {
         }
 
         if (level != null && commodity instanceof ItemCommodity item) {
-            amount = Math.min(amount, VaultManager.countItemInVaults(level, sellerId, item));
-            if (!serverOrder) amount = Math.min(amount, VaultManager.hasVault(getStorageOwner())
-                    ? VaultManager.countMaxAcceptableItems(level, getStorageOwner(), createItemStacks(item, amount, level)) : 0);
+            amount = Math.min(amount, VaultManager.countItemInVaults(level, sellerStorage, item));
+            if (!serverOrder) amount = Math.min(amount, VaultManager.hasVault(getStorageAccount())
+                    ? VaultManager.countMaxAcceptableItems(level, getStorageAccount(), createItemStacks(item, amount, level)) : 0);
         } else if (level != null && commodity instanceof FluidCommodity fluid) {
-            amount = Math.min(amount, TankManager.countFluidInTanks(level, sellerId, fluid.getFluid()));
-            if (!serverOrder) amount = Math.min(amount, TankManager.hasTank(getStorageOwner())
-                    ? TankManager.simulateInsertFluidToTanks(level, getStorageOwner(), new EconomyFluidStack(fluid.getFluid(), amount)) : 0);
+            amount = Math.min(amount, TankManager.countFluidInTanks(level, sellerStorage, fluid.getFluid()));
+            if (!serverOrder) amount = Math.min(amount, TankManager.hasTank(getStorageAccount())
+                    ? TankManager.simulateInsertFluidToTanks(level, getStorageAccount(), new EconomyFluidStack(fluid.getFluid(), amount)) : 0);
         }
         if (amount <= 0) return TransactionResult.failure("Seller lacks goods or buyer lacks storage space");
 
@@ -433,20 +436,20 @@ public class Order implements IOrder {
         int delivered = amount;
         if (level != null && commodity instanceof ItemCommodity item) {
             NonNullList<ItemStack> extracted = NonNullList.create();
-            if (!VaultManager.extractItemFromVaults(level, sellerId, item, amount, extracted)) delivered = 0;
+            if (!VaultManager.extractItemFromVaults(level, sellerStorage, item, amount, extracted)) delivered = 0;
             else if (!serverOrder) {
-                NonNullList<ItemStack> leftover = VaultManager.insertItemStacksToVaults(level, getStorageOwner(), extracted);
+                NonNullList<ItemStack> leftover = VaultManager.insertItemStacksToVaults(level, getStorageAccount(), extracted);
                 delivered = VaultInventoryOps.total(extracted) - VaultInventoryOps.total(leftover);
-                if (!leftover.isEmpty()) VaultManager.insertItemStacksToVaults(level, sellerId, leftover);
+                if (!leftover.isEmpty()) VaultManager.insertItemStacksToVaults(level, sellerStorage, leftover);
             }
         } else if (level != null && commodity instanceof FluidCommodity fluid) {
             List<EconomyFluidStack> extracted = new ArrayList<>();
-            int drained = TankManager.extractFluidFromTanks(level, sellerId, fluid.getFluid(), amount, extracted);
-            if (drained < amount) { for (EconomyFluidStack stack : extracted) TankManager.restoreFluidToTanks(level, sellerId, stack); delivered = 0; }
+            int drained = TankManager.extractFluidFromTanks(level, sellerStorage, fluid.getFluid(), amount, extracted);
+            if (drained < amount) { for (EconomyFluidStack stack : extracted) TankManager.restoreFluidToTanks(level, sellerStorage, stack); delivered = 0; }
             else if (serverOrder) delivered = drained;
             else {
-                delivered = 0; for (EconomyFluidStack stack : extracted) delivered += TankManager.insertFluidToTanks(level, getStorageOwner(), stack);
-                if (delivered < drained) TankManager.restoreFluidToTanks(level, sellerId, new EconomyFluidStack(fluid.getFluid(), drained - delivered));
+                delivered = 0; for (EconomyFluidStack stack : extracted) delivered += TankManager.insertFluidToTanks(level, getStorageAccount(), stack);
+                if (delivered < drained) TankManager.restoreFluidToTanks(level, sellerStorage, new EconomyFluidStack(fluid.getFluid(), drained - delivered));
             }
         }
 
@@ -463,37 +466,38 @@ public class Order implements IOrder {
 
     private TransactionResult executeProviderBuy(MarketIdentity seller, IBankAccount buyerAccount, IBankAccount sellerAccount,
                                                  int requested, ServerLevel level) {
-        UUID sellerId = seller.storageOwner();
+        UUID sellerId = seller.actor();
+        AccountRef sellerStorage = seller.storageAccount();
         if (level == null) return TransactionResult.failure("Custom commodities require a running server level");
-        StorageReservation reservation = EconomyApi.storage().reserve(level, sellerId, commodity, requested).orElse(null);
+        StorageReservation reservation = EconomyApi.storage().reserve(level, sellerStorage, commodity, requested).orElse(null);
         if (reservation == null) return TransactionResult.failure("Seller has no compatible registered storage provider");
         IStorageProvider provider = EconomyApi.storage().provider(reservation.providerId()).orElse(null);
         if (provider == null) {
-            preserveProviderReservation(sellerId, reservation, "provider disappeared after reserve");
+            preserveProviderReservation(seller, reservation, "provider disappeared after reserve");
             return TransactionResult.failure("Storage provider unavailable; reservation quarantined");
         }
         int amount = Math.min(requested, reservation.amount());
         if (amount <= 0) {
-            releaseOrPreserve(provider, level, sellerId, reservation, "release failed for zero-sized provider BUY reservation");
+            releaseOrPreserve(provider, level, seller, reservation, "release failed for zero-sized provider BUY reservation");
             return TransactionResult.failure("Nothing to deliver");
         }
         BigDecimal total = totalFor(amount);
         if (!accounts().transfer(buyerAccount, sellerAccount, total,
                 TransactionContext.transfer("Sale of " + commodity.getDisplayName().getString(), owner))) {
-            releaseOrPreserve(provider, level, sellerId, reservation, "release failed after provider BUY payment rejection");
+            releaseOrPreserve(provider, level, seller, reservation, "release failed after provider BUY payment rejection");
             return TransactionResult.failure("Payment failed");
         }
 
         StorageDeliveryResult delivery;
         try {
             delivery = provider.deliverReserved(level, reservation,
-                    serverOrder ? OrderManager.SERVER_ID : getStorageOwner(), amount).validateAgainst(reservation, amount);
+                    serverOrder ? AccountRef.server(OrderManager.SERVER_ID) : getStorageAccount(), amount).validateAgainst(reservation, amount);
         } catch (RuntimeException providerFailure) {
             boolean compensated = refund(sellerAccount, buyerAccount, sellerId, total, "Refund - provider delivery failed");
             if (!compensated) {
                 quarantineCompensation(sellerAccount.getAccountRef(), buyerAccount.getAccountRef(), total, "provider BUY delivery failed and refund failed: " + provider.id());
             }
-            preserveProviderReservation(sellerId, reservation,
+            preserveProviderReservation(seller, reservation,
                     compensated ? "provider delivery failed after payment"
                             : "provider delivery failed; compensation debt preserved on BUY order");
             Economy.LOGGER.error("Provider {} failed after payment on BUY order {}; payment compensated={}, reservation {} quarantined",
@@ -514,10 +518,10 @@ public class Order implements IOrder {
         var remainingReservation = delivery.remainingReservation();
         if (remainingReservation.isPresent()) {
             if (compensated) {
-                releaseOrPreserve(provider, level, sellerId, remainingReservation.get(),
+                releaseOrPreserve(provider, level, seller, remainingReservation.get(),
                         "provider BUY remainder release failed after partial delivery");
             } else {
-                preserveProviderReservation(sellerId, remainingReservation.get(),
+                preserveProviderReservation(seller, remainingReservation.get(),
                         "provider BUY remainder retained because compensation failed");
             }
         }
@@ -548,7 +552,7 @@ public class Order implements IOrder {
     }
     private void reduceAfterFill(int delivered) { if (!infinite) quantity = Math.max(0, quantity - delivered); }
 
-    private int commitBuiltInDelivery(ServerLevel level, UUID receiver, NonNullList<ItemStack> items,
+    private int commitBuiltInDelivery(ServerLevel level, AccountRef receiver, NonNullList<ItemStack> items,
                                       List<EconomyFluidStack> fluids, int requested) {
         if (!items.isEmpty()) {
             NonNullList<ItemStack> leftover = VaultManager.insertItemStacksToVaults(level, receiver, items);
@@ -573,7 +577,7 @@ public class Order implements IOrder {
         }
     }
 
-    private boolean releaseOrPreserve(IStorageProvider provider, ServerLevel level, UUID escrowOwner,
+    private boolean releaseOrPreserve(IStorageProvider provider, ServerLevel level, MarketIdentity escrowOwner,
                                       StorageReservation reservation, String reason) {
         boolean released = false;
         try {
@@ -585,7 +589,7 @@ public class Order implements IOrder {
         return released;
     }
 
-    private void preserveProviderReservation(UUID escrowOwner, StorageReservation reservation, String reason) {
+    private void preserveProviderReservation(MarketIdentity escrowOwner, StorageReservation reservation, String reason) {
         try {
             if (EconomyApi.isReady() && EconomyApi.orders() instanceof OrderManager manager) {
                 manager.preserveProviderReservation(escrowOwner, commodity, reservation, pricePerUnit, reason);
@@ -595,6 +599,10 @@ public class Order implements IOrder {
             Economy.LOGGER.error("Could not access OrderManager while preserving provider reservation {}", reservation.token(), unavailable);
         }
         externalReservation = reservation;
+        var recoveryMetadata = new HashMap<>(addonMetadata);
+        recoveryMetadata.put("recovery_storage_account", escrowOwner.storageAccount().toString());
+        recoveryMetadata.put("recovery_principal", escrowOwner.principal().toString());
+        setAddonMetadata(recoveryMetadata);
         markQuarantined(reason);
         Economy.LOGGER.error("Attached provider reservation {} to order {} quarantine because no runtime OrderManager was available",
                 reservation.token(), orderId);

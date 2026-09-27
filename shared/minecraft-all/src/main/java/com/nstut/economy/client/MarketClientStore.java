@@ -23,7 +23,9 @@ public final class MarketClientStore {
             String role,
             boolean canDeposit,
             boolean canSpend,
-            String spendRole
+            boolean canWithdraw,
+            String spendRole,
+            String withdrawRole
     ) {
         public TeamWalletState {
             mode = mode == null || mode.isBlank() ? "PERSONAL_ONLY" : mode;
@@ -31,10 +33,11 @@ public final class MarketClientStore {
             teamBalance = teamBalance == null || teamBalance.isBlank() ? "0" : teamBalance;
             role = role == null || role.isBlank() ? "NONE" : role;
             spendRole = spendRole == null || spendRole.isBlank() ? "OFFICER" : spendRole;
+            withdrawRole = withdrawRole == null || withdrawRole.isBlank() ? "OWNER" : withdrawRole;
         }
 
-        public static TeamWalletState hidden(String mode, String spendRole) {
-            return new TeamWalletState(false, mode, "", "0", "NONE", false, false, spendRole);
+        public static TeamWalletState hidden(String mode, String spendRole, String withdrawRole) {
+            return new TeamWalletState(false, mode, "", "0", "NONE", false, false, false, spendRole, withdrawRole);
         }
     }
 
@@ -42,7 +45,7 @@ public final class MarketClientStore {
     /** Personal/player balance. Kept under the legacy name for existing screen code. */
     public static final Signal<String> balance = Signals.of("0");
     public static final Signal<TeamWalletState> teamWallet =
-            Signals.of(TeamWalletState.hidden("PERSONAL_ONLY", "OFFICER"));
+            Signals.of(TeamWalletState.hidden("PERSONAL_ONLY", "OFFICER", "OWNER"));
     /** Server-authoritative economic principal used by new market-order actions. */
     public static final Signal<String> marketPrincipal = Signals.of("PLAYER");
     public static final Signal<Integer> vaultCount = Signals.of(0);
@@ -66,8 +69,10 @@ public final class MarketClientStore {
                             pkt.teamRole,
                             pkt.teamCanDeposit,
                             pkt.teamCanSpend,
-                            pkt.teamSpendRole)
-                    : TeamWalletState.hidden(pkt.teamMode, pkt.teamSpendRole));
+                            pkt.teamCanWithdraw,
+                            pkt.teamSpendRole,
+                            pkt.teamWithdrawRole)
+                    : TeamWalletState.hidden(pkt.teamMode, pkt.teamSpendRole, pkt.teamWithdrawRole));
             marketPrincipal.set(pkt.marketPrincipal);
             vaultCount.set(pkt.vaultCount);
         });

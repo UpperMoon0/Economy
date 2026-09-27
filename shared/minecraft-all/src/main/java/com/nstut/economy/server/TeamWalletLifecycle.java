@@ -23,6 +23,14 @@ public final class TeamWalletLifecycle {
         var state = data == null ? null : data.getTeamWallets().get(teamId);
         return state != null && state.closing();
     }
+    /** Resolves a deleted team's durable storage successor without reviving the team wallet. */
+    public static java.util.Optional<AccountRef> replacementOwner(AccountRef owner) {
+        if (owner == null || owner.kind() != AccountKind.TEAM || data == null) return java.util.Optional.empty();
+        TeamWalletState state = data.getTeamWallets().get(owner.id());
+        return state != null && state.closing() && state.storageSettled()
+                ? java.util.Optional.of(AccountRef.player(state.ownerId()))
+                : java.util.Optional.empty();
+    }
     public static void observe(TeamRef team) {
         if (data != null && !isClosing(team.id())) data.putTeamWallet(new TeamWalletState(team.id(), team.ownerId(), false));
     }
@@ -62,11 +70,18 @@ public final class TeamWalletLifecycle {
             if (!state.closing() || orders.hasTeamRecoveryReferences(state.teamId())) continue;
             var account = accounts.getOrCreateTeamAccount(state.teamId());
             BigDecimal remaining = account.getBalance();
+            AccountRef teamAccount = AccountRef.team(state.teamId());
+            AccountRef ownerAccount = AccountRef.player(state.ownerId());
             if (remaining.signum() > 0) {
-                accounts.transfer(AccountRef.team(state.teamId()), AccountRef.player(state.ownerId()), remaining,
-                        TransactionContext.transfer("Disbanded team wallet settlement", state.ownerId()));
+                if (!accounts.transfer(teamAccount, ownerAccount, remaining,
+                        TransactionContext.transfer("Disbanded team wallet settlement", state.ownerId()))) continue;
             }
-            // Retain the tombstone. A repeated tick/replayed event drains zero, never a remembered original amount.
+            // Enable unloaded-block normalization only after all recovery obligations are gone.
+            data.putTeamWallet(new TeamWalletState(state.teamId(), state.ownerId(), true, true));
+            // Physical team storage follows the same durable last-owner settlement.
+            com.nstut.economy.blocks.VaultManager.reassignOwner(level, teamAccount, ownerAccount);
+            com.nstut.economy.blocks.TankManager.reassignOwner(level, teamAccount, ownerAccount);
+            // Retain the tombstone. A repeated tick/replayed event drains zero and reassigns zero records.
         }
     }
 }

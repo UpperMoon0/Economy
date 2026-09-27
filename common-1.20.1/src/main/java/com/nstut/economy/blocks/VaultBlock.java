@@ -58,9 +58,13 @@ public class VaultBlock extends DirectionalBlock implements EntityBlock {
     @Override
     public @NotNull InteractionResult use(@NotNull BlockState state, Level level, @NotNull BlockPos pos,
                                           @NotNull Player player, @NotNull InteractionHand hand, @NotNull BlockHitResult hit) {
-        if (!level.isClientSide && player instanceof ServerPlayer sp) {
+        if (level.isClientSide) {
+            com.nstut.economy.client.ClientMenuContext.setVaultPos(pos);
+            return InteractionResult.SUCCESS;
+        }
+        if (player instanceof ServerPlayer sp) {
             if (level.getBlockEntity(pos) instanceof VaultBlockEntity vault) {
-                if (vault.getOwner() != null && !vault.getOwner().equals(player.getUUID())) {
+                if (!com.nstut.economy.server.TeamStorageAccess.canUse(player.getUUID(), vault.getOwnerRef())) {
                     sp.displayClientMessage(Component.translatable("message.economy.vault.not_owner"), true);
                     return InteractionResult.CONSUME;
                 }

@@ -54,16 +54,20 @@ public final class StorageProviderRegistry {
      * mirrors {@link #reserve}; reservations are provider-owned and are not split across providers.
      */
     public int available(ServerLevel level, UUID owner, ICommodity commodity) {
+        return available(level, AccountRef.player(owner), commodity);
+    }
+    public int available(ServerLevel level, AccountRef owner, ICommodity commodity) {
         int max = 0;
         for (IStorageProvider provider : providers()) {
-            if (provider.supports(commodity)) {
-                max = Math.max(max, Math.max(0, provider.available(level, owner, commodity)));
-            }
+            if (provider.supports(commodity)) max = Math.max(max, Math.max(0, provider.available(level, owner, commodity)));
         }
         return max;
     }
 
     public int receivable(ServerLevel level, UUID owner, ICommodity commodity, int requested) {
+        return receivable(level, AccountRef.player(owner), commodity, requested);
+    }
+    public int receivable(ServerLevel level, AccountRef owner, ICommodity commodity, int requested) {
         int remaining = Math.max(0, requested);
         int total = 0;
         for (IStorageProvider provider : providers()) {
@@ -76,6 +80,9 @@ public final class StorageProviderRegistry {
     }
 
     public Optional<StorageReservation> reserve(ServerLevel level, UUID owner, ICommodity commodity, int amount) {
+        return reserve(level, AccountRef.player(owner), commodity, amount);
+    }
+    public Optional<StorageReservation> reserve(ServerLevel level, AccountRef owner, ICommodity commodity, int amount) {
         if (amount <= 0) return Optional.empty();
         for (IStorageProvider provider : providers()) {
             if (!provider.supports(commodity) || provider.available(level, owner, commodity) < amount) continue;
@@ -107,13 +114,14 @@ public final class StorageProviderRegistry {
         return Optional.empty();
     }
 
-    private boolean preserveUnreleasedReservation(UUID owner, ICommodity commodity,
+    private boolean preserveUnreleasedReservation(AccountRef owner, ICommodity commodity,
                                                   StorageReservation reservation, String reason,
                                                   IllegalStateException parent) {
         try {
             IOrderManager orders = recoveryOrders.get();
             if (orders == null) return false;
-            orders.preserveProviderReservation(owner, commodity, reservation, null, reason);
+            // No acting player is supplied to this storage-only API; retain the typed owner in quarantine.
+            orders.preserveProviderReservation(new MarketIdentity(owner, owner.id(), owner), commodity, reservation, null, reason);
             return true;
         } catch (RuntimeException preservationFailure) {
             parent.addSuppressed(preservationFailure);
@@ -139,6 +147,9 @@ public final class StorageProviderRegistry {
     }
 
     public StorageDeliveryResult deliver(ServerLevel level, StorageReservation reservation, UUID receiver, int amount) {
+        return deliver(level, reservation, AccountRef.player(receiver), amount);
+    }
+    public StorageDeliveryResult deliver(ServerLevel level, StorageReservation reservation, AccountRef receiver, int amount) {
         IStorageProvider provider = providers.get(reservation.providerId());
         if (provider == null || amount <= 0) return StorageDeliveryResult.unchanged(reservation);
         return provider.deliverReserved(level, reservation, receiver, amount)

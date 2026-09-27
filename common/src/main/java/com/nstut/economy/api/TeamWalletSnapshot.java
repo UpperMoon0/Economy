@@ -16,7 +16,9 @@ public record TeamWalletSnapshot(
         TeamRole role,
         boolean canDeposit,
         boolean canSpend,
-        TeamRole spendRole
+        boolean canWithdraw,
+        TeamRole spendRole,
+        TeamRole withdrawRole
 ) {
     public TeamWalletSnapshot {
         Objects.requireNonNull(mode, "mode");
@@ -25,6 +27,18 @@ public record TeamWalletSnapshot(
         Objects.requireNonNull(teamBalance, "teamBalance");
         Objects.requireNonNull(role, "role");
         Objects.requireNonNull(spendRole, "spendRole");
+        Objects.requireNonNull(withdrawRole, "withdrawRole");
+    }
+
+    /** Legacy snapshots do not grant the newly separate treasury withdrawal permission. */
+    public TeamWalletSnapshot(TeamEconomyMode mode, BigDecimal personalBalance, Optional<TeamRef> team,
+                              BigDecimal teamBalance, TeamRole role, boolean canDeposit, boolean canSpend,
+                              TeamRole spendRole) {
+        this(mode, personalBalance, team, teamBalance, role, canDeposit, canSpend, false, spendRole, TeamRole.OWNER);
+    }
+
+    public static TeamWalletSnapshot personalOnly(TeamEconomyMode mode, BigDecimal balance, TeamRole spendRole) {
+        return personalOnly(mode, balance, spendRole, TeamRole.OWNER);
     }
 
     public boolean teamVisible() {
@@ -32,8 +46,8 @@ public record TeamWalletSnapshot(
     }
 
     public static TeamWalletSnapshot personalOnly(TeamEconomyMode mode, BigDecimal personalBalance,
-                                                  TeamRole spendRole) {
+                                                  TeamRole spendRole, TeamRole withdrawRole) {
         return new TeamWalletSnapshot(mode, personalBalance, Optional.empty(), BigDecimal.ZERO,
-                TeamRole.NONE, false, false, spendRole);
+                TeamRole.NONE, false, false, false, spendRole, withdrawRole);
     }
 }

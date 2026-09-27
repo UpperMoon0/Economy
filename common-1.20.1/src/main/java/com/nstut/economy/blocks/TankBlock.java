@@ -67,7 +67,7 @@ public class TankBlock extends DirectionalBlock implements EntityBlock {
         }
         if (player instanceof ServerPlayer sp) {
             if (level.getBlockEntity(pos) instanceof TankBlockEntity tank) {
-                if (tank.getOwner() != null && !tank.getOwner().equals(player.getUUID())) {
+                if (!com.nstut.economy.server.TeamStorageAccess.canUse(player.getUUID(), tank.getOwnerRef())) {
                     sp.displayClientMessage(Component.translatable("message.economy.tank.not_owner"), true);
                     return InteractionResult.CONSUME;
                 }

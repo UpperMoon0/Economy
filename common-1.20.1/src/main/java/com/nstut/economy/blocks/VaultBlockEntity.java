@@ -1,5 +1,8 @@
 package com.nstut.economy.blocks;
 
+import com.nstut.economy.api.AccountRef;
+import com.nstut.economy.api.AccountKind;
+
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.NonNullList;
@@ -50,6 +53,7 @@ public class VaultBlockEntity extends BlockEntity implements WorldlyContainer {
     private static final int SIZE = 54;
     private NonNullList<ItemStack> items;
     private UUID owner;
+    private AccountKind ownerKind = AccountKind.PLAYER;
     private VaultMode mode = VaultMode.BOTH;
 
     public VaultBlockEntity(BlockPos pos, BlockState state) {
@@ -71,16 +75,23 @@ public class VaultBlockEntity extends BlockEntity implements WorldlyContainer {
         setMode(VaultMode.byId((getMode().id + 1) % VaultMode.values().length));
     }
 
-    public void setOwner(UUID owner) {
-        this.owner = owner;
-        setChanged();
-        if (level != null && !level.isClientSide) {
-            VaultManager.register(owner, worldPosition, level.dimension().location().toString());
-        }
-    }
+    public UUID getOwner() { return owner; }
+    public AccountRef getOwnerRef() { return owner == null ? null : new AccountRef(ownerKind, owner); }
 
-    public UUID getOwner() {
-        return owner;
+    public void setOwner(UUID owner) { setOwner(owner == null ? null : AccountRef.player(owner)); }
+    public void setOwner(AccountRef newOwner) {
+        AccountRef oldOwner = getOwnerRef();
+        if (java.util.Objects.equals(oldOwner, newOwner)) return;
+        if (level != null && oldOwner != null) {
+            VaultManager.unregister(oldOwner, worldPosition, level.dimension().location().toString());
+        }
+        owner = newOwner == null ? null : newOwner.id();
+        ownerKind = newOwner == null ? AccountKind.PLAYER : newOwner.kind();
+        setChanged();
+        if (level != null && newOwner != null) {
+            VaultManager.register(newOwner, worldPosition, level.dimension().location().toString());
+            level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 3);
+        }
     }
 
     @Override
@@ -127,6 +138,7 @@ public class VaultBlockEntity extends BlockEntity implements WorldlyContainer {
     @Override
     public boolean stillValid(@NotNull Player player) {
         if (level == null || level.getBlockEntity(worldPosition) != this) return false;
+        if (!level.isClientSide && !com.nstut.economy.server.TeamStorageAccess.canUse(player.getUUID(), getOwnerRef())) return false;
         return player.distanceToSqr(worldPosition.getX() + 0.5, worldPosition.getY() + 0.5, worldPosition.getZ() + 0.5) <= 64.0;
     }
 
@@ -201,14 +213,21 @@ public class VaultBlockEntity extends BlockEntity implements WorldlyContainer {
     public void setLevel(Level level) {
         super.setLevel(level);
         if (!level.isClientSide && owner != null) {
-            VaultManager.register(owner, worldPosition, level.dimension().location().toString());
+            AccountRef current = getOwnerRef();
+            AccountRef normalized = com.nstut.economy.server.TeamWalletLifecycle.replacementOwner(current).orElse(current);
+            if (!normalized.equals(current)) {
+                owner = normalized.id();
+                ownerKind = normalized.kind();
+                setChanged();
+            }
+            VaultManager.register(normalized, worldPosition, level.dimension().location().toString());
         }
     }
 
     @Override
     public void setRemoved() {
         if (level != null && !level.isClientSide && owner != null) {
-            VaultManager.unregister(owner, worldPosition, level.dimension().location().toString());
+            VaultManager.unregister(getOwnerRef(), worldPosition, level.dimension().location().toString());
         }
         super.setRemoved();
     }
@@ -220,6 +239,11 @@ public class VaultBlockEntity extends BlockEntity implements WorldlyContainer {
         ContainerHelper.loadAllItems(tag, items);
         if (tag.hasUUID("Owner")) {
             owner = tag.getUUID("Owner");
+            ownerKind = AccountKind.PLAYER;
+            if (tag.contains("OwnerKind")) {
+                try { ownerKind = AccountKind.valueOf(tag.getString("OwnerKind")); }
+                catch (RuntimeException ignored) { ownerKind = AccountKind.PLAYER; }
+            }
         }
         if (tag.contains("Mode")) {
             mode = VaultMode.byId(tag.getInt("Mode"));
@@ -232,6 +256,7 @@ public class VaultBlockEntity extends BlockEntity implements WorldlyContainer {
         ContainerHelper.saveAllItems(tag, items);
         if (owner != null) {
             tag.putUUID("Owner", owner);
+            tag.putString("OwnerKind", ownerKind.name());
         }
         tag.putInt("Mode", getMode().id);
     }
@@ -242,6 +267,7 @@ public class VaultBlockEntity extends BlockEntity implements WorldlyContainer {
         ContainerHelper.saveAllItems(tag, items);
         if (owner != null) {
             tag.putUUID("Owner", owner);
+            tag.putString("OwnerKind", ownerKind.name());
         }
         tag.putInt("Mode", getMode().id);
         return tag;

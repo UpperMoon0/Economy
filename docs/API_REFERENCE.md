@@ -46,9 +46,10 @@ Typed attribution for market actions and orders:
 
 - `AccountRef principal()` - economic owner whose balance is debited or credited.
 - `UUID actor()` - player who placed or performed the action.
-- `UUID storageOwner()` - player whose Vault/Tank/provider storage supplies or receives physical goods.
+- `UUID storageOwner()` - persisted UUID projection of the physical storage owner.
+- `AccountRef storageAccount()` - typed physical-storage principal used for Vault/Tank/provider lookup.
 
-These fields may intentionally differ for team orders. Authorization, self-trade checks, and economic auditing should use `principal()` (or the complete `MarketIdentity`) rather than comparing raw UUIDs. `actor()` and `storageOwner()` describe human/storage attribution, not account ownership.
+These values may intentionally differ for team orders. Authorization, self-trade checks, and economic auditing should use `principal()` (or the complete `MarketIdentity`) rather than comparing raw UUIDs. For new Team orders, `principal()` and `storageAccount()` are the same `TEAM:<uuid>` account while `actor()` remains the human player. The UUID constructor retains legacy PLAYER storage; use `new MarketIdentity(principal, actor, storageAccount)` for typed storage. Saves without `StorageAccount` migrate to PLAYER storage, including player/team UUID collisions.
 
 ### `CommodityKey`
 
@@ -139,7 +140,7 @@ Reached through `EconomyApi.teamEconomy()`.
 - `withdrawToPlayer(...)` — convenience team → actor-personal transfer.
 - configurable minimum `TeamRole` thresholds for those actions.
 
-`TeamEconomyMode` contains `PERSONAL_ONLY`, `HYBRID`, and `TEAM_PRIMARY`. Authorization performs fresh provider lookups rather than caching membership/ranks.
+Server configuration uses `enabled=true` by default (optional FTB Teams support), or `enabled=false` to disable team economy. Without a provider, only personal accounts are exposed. The compatible Java `TeamEconomyMode` API retains `PERSONAL_ONLY`, `HYBRID`, and `TEAM_PRIMARY`; the server toggle maps to HYBRID/PERSONAL_ONLY. Authorization performs fresh provider lookups rather than caching membership/ranks.
 
 See [Team Economy](TEAM_ECONOMY.md) for policy and FTB Teams mapping.
 
@@ -364,7 +365,8 @@ Read/operation contract for one order.
 - `MarketIdentity getIdentity()` - preferred principal/actor/storage-owner identity.
 - `AccountRef getPrincipal()`
 - `UUID getActor()`
-- `UUID getStorageOwner()`
+- `UUID getStorageOwner()` - legacy/persisted UUID projection.
+- `AccountRef getStorageAccount()` - preferred typed physical-storage principal.
 - `ICommodity getCommodity()`
 - `int getQuantity()`
 - `BigDecimal getPricePerUnit()`
@@ -378,7 +380,7 @@ Read/operation contract for one order.
 - `TransactionResult execute(UUID trader, ServerLevel level)` / `execute(UUID trader)` - legacy compatibility paths.
 - `TransactionResult execute(MarketIdentity trader, ServerLevel level)` / `execute(MarketIdentity trader)` - typed execution paths.
 
-For team-aware code, `getIdentity()` is the canonical attribution tuple. `getPrincipal()` identifies the economic account, `getActor()` identifies the player who placed the order, and `getStorageOwner()` identifies the player storage used for goods. `getOwner()` is a legacy storage-owner UUID projection and must not be used as an account-authorization key.
+For team-aware code, `getIdentity()` is the canonical attribution tuple. `getPrincipal()` identifies the economic account, `getActor()` identifies the human player who placed the order, and `getStorageAccount()` identifies the typed storage principal used for goods. `getStorageOwner()` and `getOwner()` are UUID projections retained for persistence/source compatibility and must not be used as account-authorization keys.
 
 `cancel` remains on the compatibility interface, but addon code should prefer `IOrderManager` for cancellation/editing so world resolution, current team authorization, escrow restoration, and order-book invariants stay centralized.
 
@@ -420,16 +422,20 @@ Identification:
 
 Side-effect-free simulation:
 
-- `int available(ServerLevel level, UUID owner, ICommodity commodity)`
-- `int receivable(ServerLevel level, UUID owner, ICommodity commodity, int requestedAmount)`
+- `int available(ServerLevel level, UUID owner, ICommodity commodity)` - legacy Personal-owner path.
+- `int receivable(ServerLevel level, UUID owner, ICommodity commodity, int requestedAmount)` - legacy Personal-owner path.
+- `int available(ServerLevel level, AccountRef owner, ICommodity commodity)` - typed owner path.
+- `int receivable(ServerLevel level, AccountRef owner, ICommodity commodity, int requestedAmount)` - typed owner path.
 
 Reservation lifecycle:
 
-- `Optional<StorageReservation> reserve(ServerLevel level, UUID owner, ICommodity commodity, int amount)`
-- `StorageDeliveryResult deliverReserved(ServerLevel level, StorageReservation reservation, UUID receiver, int amount)`
+- `Optional<StorageReservation> reserve(ServerLevel level, UUID owner, ICommodity commodity, int amount)` - legacy Personal-owner path.
+- `Optional<StorageReservation> reserve(ServerLevel level, AccountRef owner, ICommodity commodity, int amount)` - typed owner path.
+- `StorageDeliveryResult deliverReserved(ServerLevel level, StorageReservation reservation, UUID receiver, int amount)` - legacy Personal receiver.
+- `StorageDeliveryResult deliverReserved(ServerLevel level, StorageReservation reservation, AccountRef receiver, int amount)` - typed receiver.
 - `boolean release(ServerLevel level, StorageReservation reservation)`
 
-`reserve` is atomic: empty means no mutation. `deliverReserved` is one provider-owned transition and must return the exact remaining reservation after the actual delivery. `release` is all-or-nothing: `false` means the entire input reservation must still be treated as escrowed.
+`reserve` is atomic: empty means no mutation. `deliverReserved` is one provider-owned transition and must return the exact remaining reservation after the actual delivery. `release` is all-or-nothing: `false` means the entire input reservation must still be treated as escrowed. Existing providers remain compatible because the typed defaults delegate `PLAYER` accounts to the UUID methods; a provider must override the typed methods to support `TEAM` storage.
 
 Diagnostics:
 
@@ -509,3 +515,9 @@ Registration changes emit `StorageProviderRegistered` and `StorageProviderUnregi
 - Persist structured/large escrow in `providerState`, not one string.
 - Keep old commodity payload schema decoders when released worlds may still contain them.
 - Compile/run against the matching Minecraft and loader artifact.
+
+### Team treasury and recovery compatibility
+
+`TeamWalletSnapshot` adds `canWithdraw()` and `withdrawRole()`. The previous constructor and `personalOnly` factory remain available; legacy snapshots conservatively report no withdrawal permission. Server mutations always check current permissions independently.
+
+`IOrderManager.preserveProviderReservation(MarketIdentity, ...)` retains typed recovery attribution. Its default supports Personal identities through the legacy UUID hook; custom order managers must override it for Team recovery. Storage-registry validation failures have no human actor argument, so their quarantine uses the storage owner's UUID as the attribution placeholder while retaining its explicit account kind. Recovery initiated from an order preserves the original human actor.

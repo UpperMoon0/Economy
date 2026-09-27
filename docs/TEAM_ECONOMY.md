@@ -21,21 +21,24 @@ Only **party teams** become shared Economy principals. FTB personal teams are ig
 
 Joining or leaving a party never copies, merges, splits, refunds, or otherwise changes either balance. The party UUID maps to one persistent Economy `TEAM` account.
 
-## Modes
+## Configuration
 
-The default is intentionally backward-compatible:
+Team economy is enabled by default. With FTB Teams installed, party members can use a shared wallet while Personal remains their initial Market selection. Without FTB Teams, Economy continues with personal accounts and hides team controls.
 
-- `PERSONAL_ONLY` — no team wallet is exposed.
-- `HYBRID` — personal remains the default, but a shared team wallet is available.
-- `TEAM_PRIMARY` — the current party wallet is the default principal when the player still has the required role.
+Set `enabled=false` in `config/economy-team.properties` to disable team economy, then restart the server (or the game for singleplayer). The default file is:
 
-The mode is exposed through `EconomyApi.teamEconomy()`:
-
-```java
-EconomyApi.teamEconomy().setMode(TeamEconomyMode.HYBRID);
+```properties
+enabled=true
+viewRole=MEMBER
+depositRole=MEMBER
+spendRole=OFFICER
+withdrawRole=OWNER
+adminRole=OWNER
 ```
 
-Pack/bootstrap code can also configure the matching values on `EconomyConfig` before Economy initialization.
+Legacy `mode` entries are removed on loading and replaced with `enabled=true` unless an explicit `enabled` value already exists. This includes the previous `PERSONAL_ONLY` default. Administrators who want to keep team economy disabled must set `enabled=false`. Existing files without `withdrawRole` use OWNER. Role thresholds must be MEMBER, OFFICER, or OWNER; NONE is rejected.
+
+The Java `TeamEconomyMode` API remains compatible for integrations: enabled configuration maps to `HYBRID`, disabled maps to `PERSONAL_ONLY`, and `TEAM_PRIMARY` remains available programmatically. Clients and servers must use matching Economy builds because the Market protocol includes typed storage and treasury permissions (`market_v3`).
 
 ## Permissions
 
@@ -43,9 +46,12 @@ Default minimum roles are:
 
 | Action | Minimum role |
 | --- | --- |
-| View team balance | MEMBER |
-| Deposit to team | MEMBER |
-| Spend team funds | OFFICER |
+| View team balance / treasury | MEMBER |
+| Deposit personal funds to team | MEMBER |
+| Place team market orders | OFFICER |
+| Withdraw/pay team cash | OWNER |
+| Reassign Team Vault/Tank ownership | OWNER |
+| Change Vault/Tank market I/O mode | OWNER |
 | Team-economy administration | OWNER |
 
 The thresholds are configurable through `TeamEconomyRegistry`. Authorization is never cached: Economy resolves the player's current team and rank again for every check. A leave, kick, or demotion therefore takes effect before the next protected action.
@@ -63,7 +69,7 @@ if (team.isPresent() && teams.canSpend(playerId, team.get().id())) {
 }
 ```
 
-Do not trust a team ID or permission decision supplied by a client. Prefer the registry's mutation helpers when money moves:
+Do not trust a team ID or permission decision supplied by a client. Market spending and treasury extraction are deliberately different permissions: `canSpend(...)` authorizes team market activity (OFFICER by default), while `canWithdraw(...)` authorizes transfers out of the treasury (OWNER by default). Prefer the registry's mutation helpers when treasury money moves:
 
 ```java
 TeamEconomyRegistry teams = EconomyApi.teamEconomy();
@@ -71,34 +77,47 @@ teams.depositFromPlayer(
         EconomyApi.accounts(), playerId, amount,
         TransactionContext.transfer("team deposit", teamId));
 
+teams.withdrawToPlayer(
+        EconomyApi.accounts(), playerId, amount,
+        TransactionContext.transfer("team withdrawal", playerId));
+
 teams.spendFromTeam(
         EconomyApi.accounts(), playerId, AccountRef.player(recipientId), amount,
-        TransactionContext.transfer("team payment", recipientId));
+        TransactionContext.transfer("team payment", recipientId)); // requires withdrawRole
 ```
 
 Those helpers resolve the actor's current party and role again immediately before the account transfer, avoiding a stale client-side or cached authorization decision.
 
 ## Market wallet UI
 
-The Market sync builds a fresh server-authoritative wallet snapshot for the viewing player. `Personal` and `Team` balances are separate values; when a viewable party wallet exists, the UI also shows the FTB team display name, current role, and the configured minimum spend role. A leave, kick, demotion below the view threshold, `PERSONAL_ONLY`, missing provider, or incompatible provider removes the team wallet from the next sync instead of leaving stale client state visible.
+The Market sync builds a fresh server-authoritative wallet snapshot for the viewing player. The balance badge is an account switcher: selecting **Personal** or **Team <party>** changes the principal and storage account used by new orders. The server revalidates the selection; a stale or unauthorized Team selection fails closed rather than silently charging Personal funds.
 
-The Market principal is also shown explicitly. In `HYBRID`, Personal is the default until the player runs `/economy team use team`. In `TEAM_PRIMARY`, the default is resolved from current FTB membership/rank each time, so joining/leaving/changing teams cannot leave a stale implicit default. An explicit Personal or Team override is retained until `/economy team use default`; a stale explicit Team selection fails closed instead of silently charging Personal.
+In `HYBRID`, Personal remains the policy default. In `TEAM_PRIMARY`, a spend-authorized party is the policy default. The UI switcher creates an explicit per-player override without changing the server policy mode. `/economy team use <personal|team|default>` remains a command fallback for the same selection state.
+
+The **Team Treasury** sidebar tab is available whenever the current party is viewable. It shows Personal and Team balances, party name, current role, and permission requirements. Deposit is MEMBER+ by default. Withdraw and Team-to-player payments are OWNER+ by default, independently of the OFFICER+ role used for team market orders.
+
+The **Containers** tab lists both Personal and current-Team Vaults/Tanks with their owner. Storage ownership reassignment and the Vault/Tank BOTH / INPUT / OUTPUT market mode are storage-administration operations governed by adminRole (OWNER by default), not by the market spendRole. The server revalidates every change and reports denied or stale actions back to the player instead of failing silently. Storage ownership changes are server-authorized; the client never supplies a trusted team ID.
+
+A leave, kick, demotion below the relevant threshold, disabled team economy, missing provider, or incompatible provider is reflected on the next sync. Existing orders retain the persisted account/storage identity they were created with.
 
 ## Market orders
 
 Orders persist three identities independently:
 
 ```text
-principal    = AccountRef   // who pays / receives money
-actor        = UUID         // player who placed/performed the action
-storageOwner = UUID         // player whose Vault/Tank/provider storage is used
+principal       = AccountRef   // who pays / receives money
+actor           = UUID         // human player who placed/performed the action
+storageOwner    = UUID         // persisted UUID projection of physical storage
+storageAccount()= AccountRef   // typed Vault/Tank/provider owner used for goods
 ```
 
-For current built-in player placement, `actor == storageOwner`. A team-funded order uses `TEAM:<ftb-team-id>` as its principal while keeping the placing player's UUID for physical storage. Team UUIDs are never passed to Vault/Tank/provider owner lookup. Legacy orders migrate to `PLAYER:<old-owner>` with the old owner as both actor and storage owner.
+For a Personal order, `principal == storageAccount() == PLAYER:<actor>` and `storageOwner == actor`. For a newly created Team order, `principal == storageAccount() == TEAM:<ftb-team-id>`, `actor` remains the player who acted, and `storageOwner` stores the team UUID for persistence/wire compatibility. A separate persisted `StorageAccount` field preserves the storage kind, including when a player and team share the same UUID. Missing `StorageAccount` always migrates to player storage. Team BUYs therefore deliver into Team-owned Vaults/Tanks and Team SELLs reserve from Team-owned storage.
+
+Legacy orders remain compatible. UUID-only orders migrate to `PLAYER:<old-owner>`. Team orders created by older Economy builds that recorded the acting player's UUID as `storageOwner` continue to resolve that storage as `PLAYER:<actor>` instead of being silently rewritten.
 
 Matching compares economic principals, so two different members cannot make the same team trade with itself. Every team order revalidates current membership/rank before execution, edit, or cancellation. Leave/kick/demotion invalidates the order lazily even if an FTB lifecycle event is missed; Economy attempts a lossless cancellation and keeps any unrecoverable escrow/compensation record persisted until recovery succeeds.
 
-When an FTB party is deleted, its wallet is tombstoned/closed, new team actions are rejected, outstanding team orders are cancelled and escrow is restored to their recorded storage owners, and remaining cash is transferred once to the last recorded FTB owner only after no recovery references remain. Replayed deletion events or restart reconciliation therefore cannot duplicate funds.
+When an FTB party is deleted, its wallet is tombstoned/closed and new team actions are rejected. Outstanding Team orders are cancelled/recovered first. Once no recovery references remain, remaining cash is transferred once to the last recorded FTB owner and Team-owned Vault/Tank ownership is reassigned to that player without moving the blocks or their contents. A durable storage-settlement marker prevents an unloaded block from changing owner before order recovery completes. Failed or vetoed cash settlement retries before any storage reassignment. Replayed deletion events or restart reconciliation therefore cannot duplicate funds or orphan Team storage.
 
 ## Development dependencies and compatibility checks
 
@@ -113,3 +132,11 @@ All five loader development environments include FTB Teams and FTB Library on th
 `./gradlew :common:ftbContractTest` resolves the five published Teams jars and their matching FTB Library jars from [FTB Maven](https://maven.ftb.dev/releases/dev/ftb/mods/). It checks every reflected provider method plus both lifecycle-event generations directly from class files: Architectury `TeamEvent` fields on 1.20.1/1.21.1, and NeoForge 26.x event wrappers/data records together with FTB Library's `BaseEventWithData#getEventData`. It uses a separate source set without local FTB doubles or Minecraft class loading. The same task runs automatically with `:common:test` / `check`, including the shared CI lane. Each target resolves separately so Gradle cannot collapse different Minecraft versions into one jar.
 
 The existing reflection-adapter unit tests use behavioral doubles for membership changes, party filtering, and failures; they do not claim artifact compatibility. When upgrading a development pin, run the artifact contract and the corresponding live-join lane.
+
+## Verification and remaining manual checks
+
+Automated coverage includes all supported JVM/version suites, published FTB API contracts, typed order/trade/storage migration and UUID collisions, codec boundaries, treasury permission separation, provider/cancel recovery, and deletion/restart settlement. Forge GameTests exercise real Vault-backed Team BUY/SELL, membership invalidation, escrow restoration, open-menu reauthorization, Team storage break permissions, team commands, and real FTB lifecycle-hook registration.
+
+The development-only Forge renderer captures the actual Market screen with deterministic fixtures in wide/narrow layouts and light/dark themes. Run `./gradlew :forge-1.20.1:renderUiPreviews`; the 48-case PNG gallery is generated in `forge-1.20.1/build/ui-previews/index.html`. Cases cover party absence/access loss, Personal/Team selection, treasury permissions, container ownership, order identities, and Team BUY/SELL forms. These fixtures verify presentation, not live multiplayer behavior.
+
+Before release, repeat treasury actions, storage reassignment, and permission changes with a real party and a second player. Automated permission fixtures do not replace this multiplayer UI check. Other loaders are covered by compilation/JVM tests and matching UI adapters, not a manual visual pass.

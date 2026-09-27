@@ -34,6 +34,7 @@ public final class Economy {
         EconomyApi.teamEconomy().setViewRole(config.getTeamViewRole());
         EconomyApi.teamEconomy().setDepositRole(config.getTeamDepositRole());
         EconomyApi.teamEconomy().setSpendRole(config.getTeamSpendRole());
+        EconomyApi.teamEconomy().setWithdrawRole(config.getTeamWithdrawRole());
         EconomyApi.teamEconomy().setAdminRole(config.getTeamAdminRole());
 
         ensureApiRegistrations();

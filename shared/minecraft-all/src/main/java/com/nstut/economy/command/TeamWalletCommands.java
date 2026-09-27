@@ -50,7 +50,7 @@ public final class TeamWalletCommands {
         if (selection.equals("personal")) MarketWalletSelection.selectPersonal(actor);
         if (selection.equals("default")) MarketWalletSelection.reset(actor);
         source.sendSuccess(() -> Component.literal("Market now uses " + MarketWalletSelection.label(actor)
-                + ". Existing orders keep their original wallet. Goods use the placing player's Vault/Tank."), false);
+                + ". Existing orders keep their original wallet and storage account."), false);
         com.nstut.economy.network.MarketNetwork.sendItemList(player);
         return 1;
     }
@@ -65,8 +65,8 @@ public final class TeamWalletCommands {
         var teams = EconomyApi.teamEconomy();
         UUID actor = player.getUUID();
         var team = teams.resolveTeam(actor);
-        TeamRole required = action.equals("deposit") ? teams.depositRole() : teams.spendRole();
-        if (team.isEmpty() || !(action.equals("deposit") ? teams.canDeposit(actor, team.get().id()) : teams.canSpend(actor, team.get().id())))
+        TeamRole required = action.equals("deposit") ? teams.depositRole() : teams.withdrawRole();
+        if (team.isEmpty() || !(action.equals("deposit") ? teams.canDeposit(actor, team.get().id()) : teams.canWithdraw(actor, team.get().id())))
             return fail(source, "Team wallet unavailable or requires " + required + ".");
         var context = TransactionContext.transfer("Team " + action + " by " + actor, actor);
         boolean success = action.equals("deposit")

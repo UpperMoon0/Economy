@@ -133,60 +133,103 @@ public final class EconomyUiComponents {
      */
     public static UIComponent walletBar(ReadableSignal<String> personalBalance,
                                         ReadableSignal<MarketClientStore.TeamWalletState> teamWallet,
-                                        ReadableSignal<String> marketPrincipal) {
+                                        ReadableSignal<String> marketPrincipal,
+                                        Runnable onSwitchWallet) {
         return new UIComponent() {
             {
                 fillWidth();
                 height(32);
             }
 
-            @Override
-            public int preferredWidth(Font f) {
-                return 100;
-            }
-
-            @Override
-            public int preferredHeight(Font f) {
-                return 32;
-            }
+            @Override public int preferredWidth(Font f) { return 100; }
+            @Override public int preferredHeight(Font f) { return 32; }
 
             @Override
             public void render(GuiGraphicsExtractor g, Font f, int mx, int my, float pt) {
                 ColorScheme c = theme().colors();
                 MarketClientStore.TeamWalletState team = teamWallet.get();
-                int gap = 4;
-                boolean showTeam = team != null && team.visible();
-                int personalWidth = showTeam ? Math.max(1, (width - gap) / 2) : width;
+                boolean selectedTeam = "TEAM".equals(marketPrincipal.get());
+                boolean teamAvailable = team != null && team.visible();
 
-                drawWalletCell(g, f, x, y, personalWidth,
-                        Component.translatable("ui.economy.wallet.personal").getString(),
-                        personalBalance.get(), c);
+                String label = selectedTeam
+                        ? (teamAvailable ? Component.translatable("ui.economy.wallet.team", team.teamName()).getString()
+                        : Component.translatable("ui.economy.wallet.team_unavailable").getString())
+                        : Component.translatable("ui.economy.wallet.personal").getString();
+                String amount = selectedTeam ? (teamAvailable ? team.teamBalance() : "0") : personalBalance.get();
+                drawWalletCell(g, f, x, y, width, label + (teamAvailable || selectedTeam ? "  >" : ""), amount, c);
 
-                if (showTeam) {
-                    int teamX = x + personalWidth + gap;
-                    int teamWidth = Math.max(1, width - personalWidth - gap);
-                    String teamLabel = Component.translatable(
-                            "ui.economy.wallet.team", team.teamName()).getString();
-                    drawWalletCell(g, f, teamX, y, teamWidth, teamLabel, team.teamBalance(), c);
+                String status;
+                if (selectedTeam && !teamAvailable) {
+                    status = Component.translatable("ui.economy.wallet.switch_personal_hint").getString();
+                } else if (!teamAvailable) {
+                    status = Component.translatable("ui.economy.wallet.personal_only").getString();
+                } else if (selectedTeam) {
+                    status = Component.translatable("ui.economy.wallet.team_active", humanizeEnum(team.role())).getString();
+                } else if (team.canSpend()) {
+                    status = Component.translatable("ui.economy.wallet.switch_team_hint", team.teamName()).getString();
+                } else {
+                    status = Component.translatable("ui.economy.wallet.team_spend_requires",
+                            humanizeEnum(team.spendRole())).getString();
                 }
+                UiRender.text(g, f, fitWalletText(f, status, width), x, y + 21, c.onSurfaceMuted());
+            }
 
-                String selected = marketPrincipal.get();
-                if ("PLAYER".equals(selected)) selected = Component.translatable("ui.economy.principal.personal").getString();
-                String market = Component.translatable("ui.economy.wallet.market_principal", selected).getString();
-                UiRender.text(g, f, fitWalletText(f, market, personalWidth), x, y + 21, c.onSurfaceMuted());
-
-                if (showTeam) {
-                    String role = humanizeEnum(team.role());
-                    String permission = team.canSpend()
-                            ? Component.translatable("ui.economy.wallet.team_spend_allowed").getString()
-                            : Component.translatable("ui.economy.wallet.team_spend_requires",
-                                    humanizeEnum(team.spendRole())).getString();
-                    String status = role + " · " + permission;
-                    int teamX = x + personalWidth + gap;
-                    int teamWidth = Math.max(1, width - personalWidth - gap);
-                    UiRender.text(g, f, fitWalletText(f, status, teamWidth),
-                            teamX, y + 21, c.onSurfaceMuted());
+            @Override
+            public boolean mouseClicked(double mx, double my, int button) {
+                MarketClientStore.TeamWalletState team = teamWallet.get();
+                if (button == 0 && ("TEAM".equals(marketPrincipal.get()) || (team != null && team.visible()))
+                        && mx >= x && mx < x + width && my >= y && my < y + height) {
+                    if (onSwitchWallet != null) onSwitchWallet.run();
+                    return true;
                 }
+                return false;
+            }
+        };
+    }
+
+    public static UIComponent walletBadge(ReadableSignal<String> personalBalance,
+                                          ReadableSignal<MarketClientStore.TeamWalletState> teamWallet,
+                                          ReadableSignal<String> marketPrincipal,
+                                          Runnable onSwitchWallet) {
+        return new UIComponent() {
+            { width(104); height(32); }
+            @Override public int preferredWidth(Font f) { return 104; }
+            @Override public int preferredHeight(Font f) { return 32; }
+
+            @Override
+            public void render(GuiGraphicsExtractor g, Font f, int mx, int my, float pt) {
+                ColorScheme c = theme().colors();
+                MarketClientStore.TeamWalletState team = teamWallet.get();
+                boolean selectedTeam = "TEAM".equals(marketPrincipal.get());
+                boolean teamAvailable = team != null && team.visible();
+                boolean clickable = selectedTeam || teamAvailable;
+                boolean hovered = clickable && mx >= x && mx < x + width && my >= y && my < y + height;
+                UiRender.pill(g, x, y, width, height,
+                        hovered ? c.surfaceRaised() : c.input(),
+                        hovered ? c.primary() : c.borderSubtle());
+
+                String label = selectedTeam
+                        ? Component.translatable("ui.economy.principal.team").getString()
+                        : Component.translatable("ui.economy.principal.personal").getString();
+                String amount = formatWalletBalance(selectedTeam
+                        ? (teamAvailable ? team.teamBalance() : "0") : personalBalance.get());
+                UiRender.text(g, f, fitWalletText(f, label, Math.max(0, width - 10)),
+                        x + 5, y + 4, c.onSurfaceMuted());
+                drawCoin(g, x + 5, y + 17);
+                UiRender.text(g, f, fitWalletText(f, amount, Math.max(0, width - 20)),
+                        x + 15, y + 19, c.onSurface());
+            }
+
+            @Override
+            public boolean mouseClicked(double mx, double my, int button) {
+                MarketClientStore.TeamWalletState team = teamWallet.get();
+                if (button == 0
+                        && ("TEAM".equals(marketPrincipal.get()) || (team != null && team.visible()))
+                        && mx >= x && mx < x + width && my >= y && my < y + height) {
+                    if (onSwitchWallet != null) onSwitchWallet.run();
+                    return true;
+                }
+                return false;
             }
         };
     }

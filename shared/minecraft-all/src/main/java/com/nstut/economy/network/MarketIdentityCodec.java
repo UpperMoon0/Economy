@@ -12,9 +12,10 @@ public final class MarketIdentityCodec {
             buffer.writeUtf(identity.principal().toString());
             buffer.writeUUID(identity.actor());
             buffer.writeUUID(identity.storageOwner());
+            buffer.writeUtf(identity.storageAccount().toString());
         }
     }
     public static MarketIdentity read(FriendlyByteBuf buffer) {
-        return buffer.readBoolean() ? new MarketIdentity(AccountRef.parse(buffer.readUtf()), buffer.readUUID(), buffer.readUUID()) : null;
+        return buffer.readBoolean() ? new MarketIdentity(AccountRef.parse(buffer.readUtf()), buffer.readUUID(), buffer.readUUID(), AccountRef.parse(buffer.readUtf())) : null;
     }
 }

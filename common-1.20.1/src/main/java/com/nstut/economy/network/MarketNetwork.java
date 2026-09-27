@@ -42,7 +42,7 @@ import java.util.function.Supplier;
 
 public class MarketNetwork {
     public static final NetworkChannel CHANNEL = NetworkChannel.create(
-            new ResourceLocation(Economy.MOD_ID, "market_v2"));
+            new ResourceLocation(Economy.MOD_ID, "market_v3"));
 
     private static boolean initialized = false;
 
@@ -69,9 +69,12 @@ public class MarketNetwork {
         CHANNEL.register(RequestActiveOrdersPacket.class, RequestActiveOrdersPacket::encode, RequestActiveOrdersPacket::decode, RequestActiveOrdersPacket::handle);
         CHANNEL.register(SyncActiveOrdersPacket.class, SyncActiveOrdersPacket::encode, SyncActiveOrdersPacket::decode, SyncActiveOrdersPacket::handle);
         CHANNEL.register(MarketActionResultPacket.class, MarketActionResultPacket::encode, MarketActionResultPacket::decode, MarketActionResultPacket::handle);
+        CHANNEL.register(SelectMarketWalletPacket.class, SelectMarketWalletPacket::encode, SelectMarketWalletPacket::decode, SelectMarketWalletPacket::handle);
+        CHANNEL.register(TeamTreasuryPacket.class, TeamTreasuryPacket::encode, TeamTreasuryPacket::decode, TeamTreasuryPacket::handle);
+        CHANNEL.register(SetStorageOwnerPacket.class, SetStorageOwnerPacket::encode, SetStorageOwnerPacket::decode, SetStorageOwnerPacket::handle);
     }
 
-    public enum Action { CREATE_ORDER, ACCEPT_ORDER, CANCEL_ORDER, EDIT_ORDER }
+    public enum Action { CREATE_ORDER, ACCEPT_ORDER, CANCEL_ORDER, EDIT_ORDER, WALLET, TREASURY, STORAGE }
     public enum Result { SUCCESS, WARNING, ERROR }
 
     // Enum identity is serialized by ordinal; never reorder or insert constants.
@@ -277,13 +280,16 @@ public class MarketNetwork {
         public final String teamRole;
         public final boolean teamCanDeposit;
         public final boolean teamCanSpend;
+        public final boolean teamCanWithdraw;
         public final String teamSpendRole;
+        public final String teamWithdrawRole;
         public final String marketPrincipal;
 
         public SyncItemListPacket(String balance, int vaultCount, List<ItemCardData> cards,
                                   String teamMode, boolean teamWalletVisible, String teamName,
                                   String teamBalance, String teamRole, boolean teamCanDeposit,
-                                  boolean teamCanSpend, String teamSpendRole, String marketPrincipal) {
+                                  boolean teamCanSpend, boolean teamCanWithdraw, String teamSpendRole,
+                                  String teamWithdrawRole, String marketPrincipal) {
             this.balance = balance;
             this.vaultCount = vaultCount;
             this.cards = cards;
@@ -294,7 +300,9 @@ public class MarketNetwork {
             this.teamRole = teamRole;
             this.teamCanDeposit = teamCanDeposit;
             this.teamCanSpend = teamCanSpend;
+            this.teamCanWithdraw = teamCanWithdraw;
             this.teamSpendRole = teamSpendRole;
+            this.teamWithdrawRole = teamWithdrawRole;
             this.marketPrincipal = marketPrincipal;
         }
 
@@ -311,7 +319,9 @@ public class MarketNetwork {
             buf.writeUtf(pkt.teamRole);
             buf.writeBoolean(pkt.teamCanDeposit);
             buf.writeBoolean(pkt.teamCanSpend);
+            buf.writeBoolean(pkt.teamCanWithdraw);
             buf.writeUtf(pkt.teamSpendRole);
+            buf.writeUtf(pkt.teamWithdrawRole);
             buf.writeUtf(pkt.marketPrincipal);
         }
 
@@ -328,15 +338,158 @@ public class MarketNetwork {
             String teamRole = buf.readUtf();
             boolean teamCanDeposit = buf.readBoolean();
             boolean teamCanSpend = buf.readBoolean();
+            boolean teamCanWithdraw = buf.readBoolean();
             String teamSpendRole = buf.readUtf();
+            String teamWithdrawRole = buf.readUtf();
             String marketPrincipal = buf.readUtf();
             return new SyncItemListPacket(balance, vaultCount, cards, teamMode, teamWalletVisible,
-                    teamName, teamBalance, teamRole, teamCanDeposit, teamCanSpend, teamSpendRole,
-                    marketPrincipal);
+                    teamName, teamBalance, teamRole, teamCanDeposit, teamCanSpend, teamCanWithdraw,
+                    teamSpendRole, teamWithdrawRole, marketPrincipal);
         }
 
         public static void handle(SyncItemListPacket pkt, Supplier<NetworkManager.PacketContext> ctx) {
             ctx.get().queue(() -> com.nstut.economy.client.MarketScreen.handleSyncItemList(pkt));
+        }
+    }
+
+    /** Server-authoritative wallet switch used by the Market account badge. */
+    public static class SelectMarketWalletPacket {
+        public final boolean team;
+        public SelectMarketWalletPacket(boolean team) { this.team = team; }
+        public static void encode(SelectMarketWalletPacket pkt, FriendlyByteBuf buf) { buf.writeBoolean(pkt.team); }
+        public static SelectMarketWalletPacket decode(FriendlyByteBuf buf) { return new SelectMarketWalletPacket(buf.readBoolean()); }
+        public static void handle(SelectMarketWalletPacket pkt, Supplier<NetworkManager.PacketContext> ctx) {
+            ctx.get().queue(() -> {
+                ServerPlayer player = ctx.get().getPlayer() instanceof ServerPlayer sp ? sp : null;
+                if (player == null) return;
+                boolean ok;
+                if (pkt.team) ok = com.nstut.economy.server.MarketWalletSelection.selectTeam(player.getUUID());
+                else { com.nstut.economy.server.MarketWalletSelection.selectPersonal(player.getUUID()); ok = true; }
+                sendActionResult(player, Action.WALLET, ok ? Result.SUCCESS : Result.WARNING,
+                        ok ? "ui.economy.toast.wallet_switched" : "ui.economy.toast.team_wallet_unavailable");
+                sendItemList(player);
+            });
+        }
+    }
+
+    public enum TreasuryAction { DEPOSIT, WITHDRAW, PAY }
+
+    /** UI treasury mutation; permissions and membership are always revalidated on the server. */
+    public static class TeamTreasuryPacket {
+        public final TreasuryAction action;
+        public final String amount;
+        public final String target;
+        public TeamTreasuryPacket(TreasuryAction action, String amount, String target) {
+            this.action = action; this.amount = amount == null ? "" : amount; this.target = target == null ? "" : target;
+        }
+        public static void encode(TeamTreasuryPacket pkt, FriendlyByteBuf buf) {
+            buf.writeEnum(pkt.action); buf.writeUtf(pkt.amount, 32); buf.writeUtf(pkt.target, 64);
+        }
+        public static TeamTreasuryPacket decode(FriendlyByteBuf buf) {
+            return new TeamTreasuryPacket(buf.readEnum(TreasuryAction.class), buf.readUtf(32), buf.readUtf(64));
+        }
+        public static void handle(TeamTreasuryPacket pkt, Supplier<NetworkManager.PacketContext> ctx) {
+            ctx.get().queue(() -> {
+                ServerPlayer player = ctx.get().getPlayer() instanceof ServerPlayer sp ? sp : null;
+                if (player == null) return;
+                java.math.BigDecimal amount;
+                try {
+                    amount = new java.math.BigDecimal(pkt.amount);
+                    if (amount.signum() <= 0 || amount.scale() > 4 || amount.scale() < 0 || amount.precision() > 18)
+                        throw new IllegalArgumentException();
+                } catch (RuntimeException invalid) {
+                    sendActionResult(player, Action.TREASURY, Result.WARNING, "ui.economy.error.invalid_amount");
+                    return;
+                }
+                var teams = com.nstut.economy.api.EconomyApi.teamEconomy();
+                var accounts = com.nstut.economy.api.EconomyApi.accounts();
+                UUID actor = player.getUUID();
+                var team = teams.resolveTeam(actor);
+                if (team.isEmpty()) {
+                    sendActionResult(player, Action.TREASURY, Result.WARNING, "ui.economy.toast.treasury_unavailable");
+                    return;
+                }
+                if (pkt.action == TreasuryAction.DEPOSIT && !teams.canDeposit(actor, team.get().id())) {
+                    sendActionResult(player, Action.TREASURY, Result.WARNING,
+                            "ui.economy.toast.treasury_deposit_permission", teams.depositRole().name());
+                    return;
+                }
+                if ((pkt.action == TreasuryAction.WITHDRAW || pkt.action == TreasuryAction.PAY)
+                        && !teams.canWithdraw(actor, team.get().id())) {
+                    sendActionResult(player, Action.TREASURY, Result.WARNING,
+                            "ui.economy.toast.treasury_withdraw_permission", teams.withdrawRole().name());
+                    return;
+                }
+                boolean success;
+                switch (pkt.action) {
+                    case DEPOSIT -> success = teams.depositFromPlayer(accounts, actor, amount,
+                            com.nstut.economy.core.TransactionContext.transfer("Team deposit from Market UI", actor));
+                    case WITHDRAW -> success = teams.withdrawToPlayer(accounts, actor, amount,
+                            com.nstut.economy.core.TransactionContext.transfer("Team withdrawal from Market UI", actor));
+                    case PAY -> {
+                        ServerPlayer target = player.getServer() == null ? null : player.getServer().getPlayerList().getPlayerByName(pkt.target);
+                        if (target == null) {
+                            sendActionResult(player, Action.TREASURY, Result.WARNING, "ui.economy.toast.treasury_target_missing");
+                            return;
+                        }
+                        success = teams.spendFromTeam(accounts, actor,
+                                com.nstut.economy.api.AccountRef.player(target.getUUID()), amount,
+                                com.nstut.economy.core.TransactionContext.transfer("Team payment from Market UI", actor));
+                    }
+                    default -> success = false;
+                }
+                sendActionResult(player, Action.TREASURY, success ? Result.SUCCESS : Result.WARNING,
+                        success ? "ui.economy.toast.treasury_updated" : "ui.economy.toast.treasury_rejected");
+                sendItemList(player);
+            });
+        }
+    }
+
+    /** Admin-authorized conversion between personal and current-team Vault/Tank ownership. */
+    public static class SetStorageOwnerPacket {
+        public final String dimension;
+        public final net.minecraft.core.BlockPos pos;
+        public final boolean tank;
+        public final boolean team;
+        public SetStorageOwnerPacket(String dimension, net.minecraft.core.BlockPos pos, boolean tank, boolean team) {
+            this.dimension = dimension == null ? "" : dimension; this.pos = pos; this.tank = tank; this.team = team;
+        }
+        public static void encode(SetStorageOwnerPacket pkt, FriendlyByteBuf buf) {
+            buf.writeUtf(pkt.dimension, 256); buf.writeBlockPos(pkt.pos); buf.writeBoolean(pkt.tank); buf.writeBoolean(pkt.team);
+        }
+        public static SetStorageOwnerPacket decode(FriendlyByteBuf buf) {
+            return new SetStorageOwnerPacket(buf.readUtf(256), buf.readBlockPos(), buf.readBoolean(), buf.readBoolean());
+        }
+        public static void handle(SetStorageOwnerPacket pkt, Supplier<NetworkManager.PacketContext> ctx) {
+            ctx.get().queue(() -> {
+                ServerPlayer player = ctx.get().getPlayer() instanceof ServerPlayer sp ? sp : null;
+                if (player == null) return;
+                ServerLevel level = resolveRecordLevel(player, pkt.dimension);
+                if (level == null) {
+                    sendActionResult(player, Action.STORAGE, Result.WARNING, "ui.economy.toast.storage_unavailable");
+                    return;
+                }
+                net.minecraft.world.level.block.entity.BlockEntity be = level.getBlockEntity(pkt.pos);
+                com.nstut.economy.api.AccountRef from;
+                if (pkt.tank && be instanceof TankBlockEntity value) from = value.getOwnerRef();
+                else if (!pkt.tank && be instanceof com.nstut.economy.blocks.VaultBlockEntity value) from = value.getOwnerRef();
+                else {
+                    sendActionResult(player, Action.STORAGE, Result.WARNING, "ui.economy.toast.storage_unavailable");
+                    return;
+                }
+                com.nstut.economy.api.AccountRef to = pkt.team
+                        ? com.nstut.economy.server.TeamStorageAccess.currentTeamAdminTarget(player.getUUID()).orElse(null)
+                        : com.nstut.economy.api.AccountRef.player(player.getUUID());
+                boolean allowed = com.nstut.economy.server.TeamStorageAccess.canReassign(player.getUUID(), from, to);
+                if (allowed) {
+                    if (pkt.tank) ((TankBlockEntity) be).setOwner(to);
+                    else ((com.nstut.economy.blocks.VaultBlockEntity) be).setOwner(to);
+                }
+                sendActionResult(player, Action.STORAGE, allowed ? Result.SUCCESS : Result.WARNING,
+                        allowed ? "ui.economy.toast.storage_owner_changed" : "ui.economy.toast.storage_owner_rejected");
+                sendVaultInfo(player);
+                sendItemList(player);
+            });
         }
     }
 
@@ -608,6 +761,7 @@ public class MarketNetwork {
                                 com.nstut.economy.api.EconomyApi.teamEconomy().spendRole().name());
                         return;
                     }
+                    com.nstut.economy.api.AccountRef storageAccount = identity.storageAccount();
                     com.nstut.economy.trading.CreateOrderResult creation;
 
                     if ("FLUID".equals(pkt.commodityType)) {
@@ -620,16 +774,16 @@ public class MarketNetwork {
                         FluidCommodity commodity = new FluidCommodity(commodityId, fluid, BigDecimal.ZERO);
 
                         if (pkt.isSell) {
-                            if (TankManager.countFluidInTanks(level, player.getUUID(), fluid) < pkt.quantity) {
+                            if (TankManager.countFluidInTanks(level, storageAccount, fluid) < pkt.quantity) {
                                 sendActionResult(player, Action.CREATE_ORDER, Result.WARNING, "ui.economy.error.insufficient_stock");
                                 sendItemDetail(player, pkt.itemId, pkt.commodityType);
                                 return;
                             }
                             List<com.nstut.economy.trading.EconomyFluidStack> reservedFluids = new ArrayList<>();
-                            int drained = TankManager.extractFluidFromTanks(level, player.getUUID(), fluid, pkt.quantity, reservedFluids);
+                            int drained = TankManager.extractFluidFromTanks(level, storageAccount, fluid, pkt.quantity, reservedFluids);
                             if (drained < pkt.quantity) {
                                 for (var reservedFluid : reservedFluids) {
-                                    TankManager.restoreFluidToTanks(level, player.getUUID(), reservedFluid);
+                                    TankManager.restoreFluidToTanks(level, storageAccount, reservedFluid);
                                 }
                                 sendActionResult(player, Action.CREATE_ORDER, Result.WARNING, "ui.economy.error.insufficient_stock");
                                 sendItemDetail(player, pkt.itemId, pkt.commodityType);
@@ -641,7 +795,7 @@ public class MarketNetwork {
                             creation = orderManager.createBuyOrder(identity, commodity, pkt.quantity, price, pkt.isInfinite, level);
                         }
                     } else {
-                        ItemCommodity commodity = resolveItemCommodityForOrder(orderManager, level, player.getUUID(), pkt.itemId);
+                        ItemCommodity commodity = resolveItemCommodityForOrder(orderManager, level, storageAccount, pkt.itemId);
                         if (commodity == null) {
                             sendActionResult(player, Action.CREATE_ORDER, Result.ERROR, "ui.economy.error.commodity_invalid");
                             sendItemList(player);
@@ -650,14 +804,14 @@ public class MarketNetwork {
                         Item item = commodity.getItem();
 
                         if (pkt.isSell) {
-                            if (VaultManager.countItemInVaults(level, player.getUUID(), commodity) < pkt.quantity) {
+                            if (VaultManager.countItemInVaults(level, storageAccount, commodity) < pkt.quantity) {
                                 sendActionResult(player, Action.CREATE_ORDER, Result.WARNING, "ui.economy.error.insufficient_stock");
                                 sendItemDetail(player, pkt.itemId, pkt.commodityType);
                                 return;
                             }
                             net.minecraft.core.NonNullList<net.minecraft.world.item.ItemStack> reserved = net.minecraft.core.NonNullList.create();
-                            if (!VaultManager.extractItemFromVaults(level, player.getUUID(), commodity, pkt.quantity, reserved)) {
-                                VaultManager.insertItemStacksToVaults(level, player.getUUID(), reserved);
+                            if (!VaultManager.extractItemFromVaults(level, storageAccount, commodity, pkt.quantity, reserved)) {
+                                VaultManager.insertItemStacksToVaults(level, storageAccount, reserved);
                                 sendActionResult(player, Action.CREATE_ORDER, Result.WARNING, "ui.economy.error.insufficient_stock");
                                 sendItemDetail(player, pkt.itemId, pkt.commodityType);
                                 return;
@@ -907,8 +1061,8 @@ public class MarketNetwork {
             boolean isSell = o.getType() == IOrder.OrderType.SELL;
 
             entries.add(new ActiveOrderEntry(
-                o.getOrderId(), itemId, displayName + " [" + describePrincipal(o.getIdentity(), o.getActor().toString()) + "]", priceStr, o.getQuantity(), o.getInitialQuantity(),
-                isSell, o.isInfinite(), o.getCreatedAt().toEpochMilli()
+                o.getOrderId(), itemId, displayName, priceStr, o.getQuantity(), o.getInitialQuantity(),
+                isSell, o.isInfinite(), o.getCreatedAt().toEpochMilli(), o.getIdentity()
             ));
         }
 
@@ -947,6 +1101,12 @@ public class MarketNetwork {
 
     public static ItemCommodity resolveItemCommodityForOrder(OrderManager orderManager, ServerLevel level,
                                                               UUID ownerId, String commodityId) {
+        return resolveItemCommodityForOrder(orderManager, level,
+                ownerId == null ? null : com.nstut.economy.api.AccountRef.player(ownerId), commodityId);
+    }
+
+    public static ItemCommodity resolveItemCommodityForOrder(OrderManager orderManager, ServerLevel level,
+                                                              com.nstut.economy.api.AccountRef ownerId, String commodityId) {
         ItemCommodity existing = findItemCommodity(orderManager, commodityId);
         if (existing != null) return existing;
         Item item = resolveItem(commodityId);
@@ -1081,10 +1241,13 @@ public class MarketNetwork {
         String teamRole = wallet.role().name();
         boolean teamCanDeposit = wallet.canDeposit();
         boolean teamCanSpend = wallet.canSpend();
+        boolean teamCanWithdraw = wallet.canWithdraw();
         String teamSpendRole = wallet.spendRole().name();
-        // The label reflects the server-authoritative principal selected for new market actions.
-        String marketPrincipal = com.nstut.economy.server.MarketWalletSelection.label(player.getUUID());
-        int vaultCount = VaultManager.getVaultRecords(player.getUUID()).size();
+        String teamWithdrawRole = wallet.withdrawRole().name();
+        // Sync a stable account kind; display text is composed client-side from the wallet snapshot.
+        com.nstut.economy.api.AccountRef selectedStorage = com.nstut.economy.server.MarketWalletSelection.selected(player.getUUID());
+        String marketPrincipal = selectedStorage.kind().name();
+        int vaultCount = VaultManager.getVaultRecords(selectedStorage).size();
 
         java.util.Set<String> itemIds = new java.util.LinkedHashSet<>();
         java.util.Map<String, Integer> counts = new java.util.HashMap<>();
@@ -1167,7 +1330,7 @@ public class MarketNetwork {
         CHANNEL.sendToPlayer(player, new SyncItemListPacket(
                 balance, vaultCount, cards,
                 teamMode, teamWalletVisible, teamName, teamBalance, teamRole,
-                teamCanDeposit, teamCanSpend, teamSpendRole, marketPrincipal));
+                teamCanDeposit, teamCanSpend, teamCanWithdraw, teamSpendRole, teamWithdrawRole, marketPrincipal));
     }
 
     private static void sendItemDetail(ServerPlayer player, String itemId) {
@@ -1177,13 +1340,19 @@ public class MarketNetwork {
     private static void sendItemDetail(ServerPlayer player, String itemId, String commodityType) {
         OrderManager orderManager = Economy.getOrderManager();
         UUID playerId = player.getUUID();
+        com.nstut.economy.api.AccountRef selectedStorage;
+        try {
+            selectedStorage = com.nstut.economy.server.MarketWalletSelection.identity(playerId).storageAccount();
+        } catch (IllegalStateException staleTeamSelection) {
+            selectedStorage = null;
+        }
 
         ResourceLocation rl = new ResourceLocation(itemId);
         String displayName;
         int vaultCount;
 
         Fluid fluid = BuiltInRegistries.FLUID.get(rl);
-        ItemCommodity resolvedCommodity = resolveItemCommodityForOrder(orderManager, player.serverLevel(), playerId, itemId);
+        ItemCommodity resolvedCommodity = resolveItemCommodityForOrder(orderManager, player.serverLevel(), selectedStorage, itemId);
         Item item = resolveItem(itemId);
 
         // Prefer the explicit commodity type when the client knows it; a mod can
@@ -1195,14 +1364,14 @@ public class MarketNetwork {
                 : inferredFluid;
         if (isFluid) {
             displayName = com.nstut.economy.platform.Services.FLUID.displayName(fluid).getString();
-            vaultCount = TankManager.countFluidInTanks(player.serverLevel(), playerId, fluid);
+            vaultCount = selectedStorage == null ? 0 : TankManager.countFluidInTanks(player.serverLevel(), selectedStorage, fluid);
         } else if (item != net.minecraft.world.item.Items.AIR) {
             displayName = resolvedCommodity != null
                         ? resolvedCommodity.getDisplayName(player.serverLevel().registryAccess()).getString()
                         : new net.minecraft.world.item.ItemStack(item).getHoverName().getString();
             vaultCount = resolvedCommodity != null
-                    ? VaultManager.countItemInVaults(player.serverLevel(), playerId, resolvedCommodity)
-                    : VaultManager.countItemInVaults(player.serverLevel(), playerId, item);
+                    ? selectedStorage == null ? 0 : VaultManager.countItemInVaults(player.serverLevel(), selectedStorage, resolvedCommodity)
+                    : selectedStorage == null ? 0 : VaultManager.countItemInVaults(player.serverLevel(), selectedStorage, item);
         } else {
             sendItemList(player);
             return;
@@ -1226,7 +1395,7 @@ public class MarketNetwork {
             if (order.isServerOrder()) {
                 sellerName = "SERVER";
             } else {
-                var profile = player.server.getProfileCache().get(order.getOwner());
+                var profile = player.server.getProfileCache().get(order.getActor());
                 if (profile.isPresent()) sellerName = profile.get().getName();
             }
 
@@ -1371,29 +1540,37 @@ public class MarketNetwork {
         public final int mode;
         public final boolean tank;
         public final String contentId;
+        public final boolean teamOwned;
+        public final String ownerLabel;
+        public final boolean canReassign;
 
         public VaultDetailEntry(int x, int y, int z, String dimension, int usedSlots, int totalSlots,
                                 int totalItems, int mode, boolean tank, String contentId) {
-            this.x = x; this.y = y; this.z = z; this.dimension = dimension;
-            this.usedSlots = usedSlots; this.totalSlots = totalSlots; this.totalItems = totalItems;
-            this.mode = mode;
-            this.tank = tank;
-            this.contentId = contentId != null ? contentId : "";
+            this(x, y, z, dimension, usedSlots, totalSlots, totalItems, mode, tank, contentId,
+                    false, "Personal", false);
+        }
+
+        public VaultDetailEntry(int x, int y, int z, String dimension, int usedSlots, int totalSlots,
+                                int totalItems, int mode, boolean tank, String contentId,
+                                boolean teamOwned, String ownerLabel, boolean canReassign) {
+            this.x=x; this.y=y; this.z=z; this.dimension=dimension;
+            this.usedSlots=usedSlots; this.totalSlots=totalSlots; this.totalItems=totalItems;
+            this.mode=mode; this.tank=tank; this.contentId=contentId != null ? contentId : "";
+            this.teamOwned=teamOwned; this.ownerLabel=ownerLabel == null ? "" : ownerLabel;
+            this.canReassign=canReassign;
         }
 
         public void write(FriendlyByteBuf buf) {
-            buf.writeInt(x); buf.writeInt(y); buf.writeInt(z);
-            buf.writeUtf(dimension);
-            buf.writeInt(usedSlots); buf.writeInt(totalSlots); buf.writeInt(totalItems);
-            buf.writeInt(mode);
-            buf.writeBoolean(tank);
-            buf.writeUtf(contentId);
+            buf.writeInt(x); buf.writeInt(y); buf.writeInt(z); buf.writeUtf(dimension);
+            buf.writeInt(usedSlots); buf.writeInt(totalSlots); buf.writeInt(totalItems); buf.writeInt(mode);
+            buf.writeBoolean(tank); buf.writeUtf(contentId);
+            buf.writeBoolean(teamOwned); buf.writeUtf(ownerLabel, 128); buf.writeBoolean(canReassign);
         }
 
         public static VaultDetailEntry read(FriendlyByteBuf buf) {
             return new VaultDetailEntry(buf.readInt(), buf.readInt(), buf.readInt(),
-                buf.readUtf(), buf.readInt(), buf.readInt(), buf.readInt(), buf.readInt(),
-                buf.readBoolean(), buf.readUtf());
+                    buf.readUtf(), buf.readInt(), buf.readInt(), buf.readInt(), buf.readInt(),
+                    buf.readBoolean(), buf.readUtf(), buf.readBoolean(), buf.readUtf(128), buf.readBoolean());
         }
     }
 
@@ -1401,7 +1578,6 @@ public class MarketNetwork {
         public RequestVaultInfoPacket() {}
         public static void encode(RequestVaultInfoPacket pkt, FriendlyByteBuf buf) {}
         public static RequestVaultInfoPacket decode(FriendlyByteBuf buf) { return new RequestVaultInfoPacket(); }
-
         public static void handle(RequestVaultInfoPacket pkt, Supplier<NetworkManager.PacketContext> ctx) {
             ctx.get().queue(() -> {
                 ServerPlayer player = ctx.get().getPlayer() instanceof ServerPlayer sp ? sp : null;
@@ -1412,75 +1588,66 @@ public class MarketNetwork {
 
     public static class SyncVaultInfoPacket {
         public final List<VaultDetailEntry> entries;
-
-        public SyncVaultInfoPacket(List<VaultDetailEntry> entries) { this.entries = entries; }
-
+        public SyncVaultInfoPacket(List<VaultDetailEntry> entries) { this.entries=entries; }
         public static void encode(SyncVaultInfoPacket pkt, FriendlyByteBuf buf) {
-            buf.writeInt(pkt.entries.size());
-            for (VaultDetailEntry e : pkt.entries) e.write(buf);
+            buf.writeInt(pkt.entries.size()); for (VaultDetailEntry e:pkt.entries) e.write(buf);
         }
-
         public static SyncVaultInfoPacket decode(FriendlyByteBuf buf) {
-            int count = buf.readInt();
-            List<VaultDetailEntry> entries = new ArrayList<>();
-            for (int i = 0; i < count; i++) entries.add(VaultDetailEntry.read(buf));
+            int count=buf.readInt(); List<VaultDetailEntry> entries=new ArrayList<>();
+            for(int i=0;i<count;i++) entries.add(VaultDetailEntry.read(buf));
             return new SyncVaultInfoPacket(entries);
         }
-
         public static void handle(SyncVaultInfoPacket pkt, Supplier<NetworkManager.PacketContext> ctx) {
             ctx.get().queue(() -> com.nstut.economy.client.MarketScreen.handleSyncVaultInfo(pkt));
         }
     }
 
     public static void sendVaultInfo(ServerPlayer player) {
-        UUID playerId = player.getUUID();
-        List<VaultDetailEntry> entries = new ArrayList<>();
+        UUID playerId=player.getUUID();
+        List<VaultDetailEntry> entries=new ArrayList<>();
+        com.nstut.economy.api.AccountRef personal=com.nstut.economy.api.AccountRef.player(playerId);
+        boolean canDonate=com.nstut.economy.server.TeamStorageAccess.currentTeamAdminTarget(playerId).isPresent();
+        appendStorageEntries(player, entries, personal, "Personal", canDonate);
 
-        for (com.nstut.economy.data.EconomyAccountData.VaultRecord r :
-                com.nstut.economy.blocks.VaultManager.getVaultRecords(playerId)) {
-            int used = 0;
-            int total = 54;
-            int items = 0;
-            int mode = 0;
-            ServerLevel recordLevel = resolveRecordLevel(player, r.dimension);
-            net.minecraft.world.level.block.entity.BlockEntity be =
-                    recordLevel != null ? recordLevel.getBlockEntity(r.pos) : null;
-            if (be instanceof com.nstut.economy.blocks.VaultBlockEntity vault) {
-                total = vault.getContainerSize();
-                mode = vault.getMode().id;
-                for (int slot = 0; slot < total; slot++) {
-                    net.minecraft.world.item.ItemStack stack = vault.getItem(slot);
-                    if (!stack.isEmpty()) {
-                        used++;
-                        items += stack.getCount();
-                    }
+        var wallet=com.nstut.economy.api.EconomyApi.teamEconomy()
+                .walletSnapshot(com.nstut.economy.api.EconomyApi.accounts(), playerId);
+        if(wallet.teamVisible()) {
+            var team=wallet.team().orElseThrow();
+            boolean canAdmin=com.nstut.economy.api.EconomyApi.teamEconomy().canAdmin(playerId, team.id());
+            appendStorageEntries(player, entries, team.account(), "Team / " + team.displayName(), canAdmin);
+        }
+        CHANNEL.sendToPlayer(player,new SyncVaultInfoPacket(entries));
+    }
+
+    private static void appendStorageEntries(ServerPlayer player, List<VaultDetailEntry> entries,
+                                             com.nstut.economy.api.AccountRef owner, String ownerLabel,
+                                             boolean canReassign) {
+        boolean teamOwned=owner.kind()==com.nstut.economy.api.AccountKind.TEAM;
+        for(var r:com.nstut.economy.blocks.VaultManager.getVaultRecords(owner)) {
+            int used=0,total=54,items=0,mode=0;
+            ServerLevel recordLevel=resolveRecordLevel(player,r.dimension);
+            var be=recordLevel!=null ? recordLevel.getBlockEntity(r.pos) : null;
+            if(be instanceof com.nstut.economy.blocks.VaultBlockEntity vault) {
+                total=vault.getContainerSize(); mode=vault.getMode().id;
+                for(int slot=0;slot<total;slot++) {
+                    var stack=vault.getItem(slot);
+                    if(!stack.isEmpty()){used++;items+=stack.getCount();}
                 }
             }
-            entries.add(new VaultDetailEntry(r.pos.getX(), r.pos.getY(), r.pos.getZ(),
-                    r.dimension, used, total, items, mode, false, ""));
+            entries.add(new VaultDetailEntry(r.pos.getX(),r.pos.getY(),r.pos.getZ(),r.dimension,
+                    used,total,items,mode,false,"",teamOwned,ownerLabel,canReassign));
         }
-
-        for (com.nstut.economy.data.EconomyAccountData.VaultRecord r :
-                com.nstut.economy.blocks.TankManager.getTankRecords(playerId)) {
-            int amount = 0;
-            int capacity = TankBlockEntity.DEFAULT_CAPACITY;
-            int mode = 0;
-            String contentId = "";
-            ServerLevel recordLevel = resolveRecordLevel(player, r.dimension);
-            net.minecraft.world.level.block.entity.BlockEntity be =
-                    recordLevel != null ? recordLevel.getBlockEntity(r.pos) : null;
-            if (be instanceof TankBlockEntity tank) {
-                amount = tank.getFluidAmount();
-                capacity = tank.getCapacity();
-                mode = tank.getMode().id;
-                if (!tank.getFluid().isEmpty()) {
-                    contentId = BuiltInRegistries.FLUID.getKey(tank.getFluid().getFluid()).toString();
-                }
+        for(var r:com.nstut.economy.blocks.TankManager.getTankRecords(owner)) {
+            int amount=0,capacity=TankBlockEntity.DEFAULT_CAPACITY,mode=0; String contentId="";
+            ServerLevel recordLevel=resolveRecordLevel(player,r.dimension);
+            var be=recordLevel!=null ? recordLevel.getBlockEntity(r.pos) : null;
+            if(be instanceof TankBlockEntity tank) {
+                amount=tank.getFluidAmount(); capacity=tank.getCapacity(); mode=tank.getMode().id;
+                if(!tank.getFluid().isEmpty()) contentId=BuiltInRegistries.FLUID.getKey(tank.getFluid().getFluid()).toString();
             }
-            entries.add(new VaultDetailEntry(r.pos.getX(), r.pos.getY(), r.pos.getZ(),
-                    r.dimension, amount, capacity, amount, mode, true, contentId));
+            entries.add(new VaultDetailEntry(r.pos.getX(),r.pos.getY(),r.pos.getZ(),r.dimension,
+                    amount,capacity,amount,mode,true,contentId,teamOwned,ownerLabel,canReassign));
         }
-        CHANNEL.sendToPlayer(player, new SyncVaultInfoPacket(entries));
     }
 
     private static ServerLevel resolveRecordLevel(ServerPlayer player, String dimension) {
@@ -1504,13 +1671,19 @@ public class MarketNetwork {
         public static void handle(ToggleVaultModePacket pkt, Supplier<NetworkManager.PacketContext> ctx) {
             ctx.get().queue(() -> {
                 ServerPlayer player = ctx.get().getPlayer() instanceof ServerPlayer sp ? sp : null;
-                if (player != null && player.level().getBlockEntity(pkt.pos) instanceof com.nstut.economy.blocks.VaultBlockEntity vault) {
-                    if (vault.getOwner() != null && vault.getOwner().equals(player.getUUID())) {
+                if (player == null) return;
+                if (player.level().getBlockEntity(pkt.pos) instanceof com.nstut.economy.blocks.VaultBlockEntity vault) {
+                    boolean allowed = com.nstut.economy.server.TeamStorageAccess.canAdmin(player.getUUID(), vault.getOwnerRef());
+                    if (allowed) {
                         vault.cycleMode();
                         if (player.containerMenu instanceof com.nstut.economy.blocks.VaultMenu vm) {
                             vm.setData(0, vault.getMode().id);
                         }
                     }
+                    sendActionResult(player, Action.STORAGE, allowed ? Result.SUCCESS : Result.WARNING,
+                            allowed ? "ui.economy.toast.storage_mode_changed" : "ui.economy.toast.storage_mode_rejected");
+                } else {
+                    sendActionResult(player, Action.STORAGE, Result.WARNING, "ui.economy.toast.storage_unavailable");
                 }
             });
         }
@@ -1527,13 +1700,19 @@ public class MarketNetwork {
         public static void handle(ToggleTankModePacket pkt, Supplier<NetworkManager.PacketContext> ctx) {
             ctx.get().queue(() -> {
                 ServerPlayer player = ctx.get().getPlayer() instanceof ServerPlayer sp ? sp : null;
-                if (player != null && player.level().getBlockEntity(pkt.pos) instanceof TankBlockEntity tank) {
-                    if (tank.getOwner() != null && tank.getOwner().equals(player.getUUID())) {
+                if (player == null) return;
+                if (player.level().getBlockEntity(pkt.pos) instanceof TankBlockEntity tank) {
+                    boolean allowed = com.nstut.economy.server.TeamStorageAccess.canAdmin(player.getUUID(), tank.getOwnerRef());
+                    if (allowed) {
                         tank.cycleMode();
                         if (player.containerMenu instanceof TankMenu tm) {
                             tm.setMode(tank.getMode().id);
                         }
                     }
+                    sendActionResult(player, Action.STORAGE, allowed ? Result.SUCCESS : Result.WARNING,
+                            allowed ? "ui.economy.toast.storage_mode_changed" : "ui.economy.toast.storage_mode_rejected");
+                } else {
+                    sendActionResult(player, Action.STORAGE, Result.WARNING, "ui.economy.toast.storage_unavailable");
                 }
             });
         }

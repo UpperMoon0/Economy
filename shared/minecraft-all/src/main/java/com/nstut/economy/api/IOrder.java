@@ -14,6 +14,8 @@ public interface IOrder {
     default AccountRef getPrincipal() { return getIdentity().principal(); }
     default UUID getActor() { return getIdentity().actor(); }
     default UUID getStorageOwner() { return getIdentity().storageOwner(); }
+    /** Typed storage principal; use this instead of getStorageOwner() for team-aware storage. */
+    default AccountRef getStorageAccount() { return getIdentity().storageAccount(); }
     ICommodity getCommodity();
     int getQuantity();
     BigDecimal getPricePerUnit();
