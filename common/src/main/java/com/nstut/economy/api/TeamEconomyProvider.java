@@ -18,9 +18,14 @@ public interface TeamEconomyProvider {
         return getRole(playerId, teamId).atLeast(TeamRole.MEMBER);
     }
 
-    /** Current team members used to snapshot deterministic disband settlement recipients. */
+    /**
+     * Current complete team membership used to snapshot deterministic disband settlement recipients.
+     * Returning an empty collection means membership enumeration is unsupported or unavailable; Economy
+     * will preserve the team wallet instead of guessing recipients. Providers that support Team wallets
+     * should override this and return every current member, including the owner.
+     */
     default Collection<UUID> getMembers(UUID teamId) {
-        return getTeam(teamId).map(team -> List.of(team.ownerId())).orElseGet(List::of);
+        return List.of();
     }
 
     /** True only after an authoritative successful lookup confirms deletion, never on lookup failure. */

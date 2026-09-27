@@ -117,10 +117,13 @@ Neutral external-team bridge:
 - `Optional<TeamRef> getTeam(UUID teamId)`
 - `TeamRole getRole(UUID playerId, UUID teamId)`
 - `boolean isMember(UUID playerId, UUID teamId)`
+- `Collection<UUID> getMembers(UUID teamId)` - complete current membership for deterministic Team-closure settlement. Providers that support Team wallets should override this and return every member, including the owner. The default returns an empty collection to mean enumeration is unsupported/unavailable; Economy then preserves the Team wallet and blocks closure settlement rather than guessing recipients.
 - `boolean isTeamDeleted(UUID teamId)` - authoritative deletion signal; must return false on lookup/provider failure.
 - `boolean isAvailable()`
 
 Economy's built-in FTB Teams bridge is optional and maps only party teams. FTB personal teams and server teams are excluded.
+
+`getMembers(...)` is part of the lifecycle safety contract, not a cosmetic convenience. Equal-share disband settlement uses the last authoritative complete member snapshot. An empty/failed member enumeration never degrades to owner-only payout; settlement remains blocked until a valid snapshot exists.
 
 ### `TeamEconomyRegistry`
 

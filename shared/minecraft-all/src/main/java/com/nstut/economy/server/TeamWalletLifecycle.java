@@ -52,8 +52,8 @@ public final class TeamWalletLifecycle {
         TeamWalletState previous = data.getTeamWallets().get(team.id());
         Collection<UUID> snapshot = members;
         if (snapshot == null || snapshot.isEmpty()) {
-            snapshot = previous != null && !previous.settlementMembers().isEmpty()
-                    ? previous.settlementMembers() : List.of(team.ownerId());
+            if (previous == null || previous.settlementMembers().isEmpty()) return;
+            snapshot = previous.settlementMembers();
         }
         data.putTeamWallet(new TeamWalletState(team.id(), team.ownerId(), false, false,
                 java.util.List.copyOf(snapshot), java.util.Set.of()));
@@ -63,6 +63,10 @@ public final class TeamWalletLifecycle {
         if (data == null || team == null) return;
         TeamWalletState previous = data.getTeamWallets().get(team.id());
         Collection<UUID> members = previous != null ? previous.settlementMembers() : liveMembers(team);
+        if (members == null || members.isEmpty()) {
+            Economy.LOGGER.error("Refusing to settle deleted team {} without an authoritative final member snapshot", team.id());
+            return;
+        }
         deleted(team, members);
     }
 
@@ -73,7 +77,11 @@ public final class TeamWalletLifecycle {
         if (previous != null && previous.closing()) return;
         Collection<UUID> recipients = members;
         if (recipients == null || recipients.isEmpty()) {
-            recipients = previous != null ? previous.settlementMembers() : List.of(team.ownerId());
+            recipients = previous != null ? previous.settlementMembers() : List.of();
+        }
+        if (recipients.isEmpty()) {
+            Economy.LOGGER.error("Refusing to settle deleted team {} without an authoritative final member snapshot", team.id());
+            return;
         }
         data.putTeamWallet(new TeamWalletState(team.id(), team.ownerId(), true, false, java.util.List.copyOf(recipients), java.util.Set.of()));
     }
@@ -90,7 +98,7 @@ public final class TeamWalletLifecycle {
                 Economy.LOGGER.warn("Could not snapshot members for team {}", team.id(), failure);
             }
         }
-        return List.of(team.ownerId());
+        return List.of();
     }
 
     public static void tick(ServerLevel level) {

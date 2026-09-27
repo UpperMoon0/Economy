@@ -107,6 +107,8 @@ Team closure is a distinct lifecycle operation, not a withdrawal permission. Eco
 
 Remaining Team cash is split equally across the persisted member snapshot in deterministic UUID order. Settlement progress is persisted after each successful payout, so a restart or vetoed transfer retries only the unpaid recipients instead of duplicating money. Any final rounding remainder goes to the last unpaid recipient. After cash reaches zero, Team-owned Vault/Tank blocks are reassigned to the last recorded owner for physical custody so unloaded storage cannot become orphaned. The closing tombstone remains durable.
 
+Custom `TeamEconomyProvider` integrations must provide a complete `getMembers(teamId)` enumeration if they want Team closure settlement. The default provider method reports enumeration as unsupported by returning an empty collection. If no authoritative member snapshot has ever been captured, Economy refuses to collapse the payout to the owner and leaves the Team wallet preserved until membership can be resolved.
+
 ## Market orders
 
 Orders persist three identities independently:

@@ -103,7 +103,7 @@ public class EconomyCommands {
                                 return 0;
                             }
                             if (senderAccount.transferTo(receiverAccount, amount,
-                                TransactionContext.transfer("Payment from " + sender.getName().getString(), receiver.getUUID()))) {
+                                TransactionContext.transfer("Payment from " + sender.getName().getString(), sender.getUUID()))) {
                                 String amtStr = com.nstut.economy.util.EconomyFormatUtil.formatMoney(amount);
                                 if (isSelf) {
                                     context.getSource().sendSuccess(() ->
@@ -271,21 +271,30 @@ public class EconomyCommands {
             context.getSource().sendFailure(Component.literal(team ? "Team funds cannot be paid to your own Personal account." : "You cannot pay yourself.")); return 0;
         }
         BigDecimal amount = BigDecimal.valueOf(DoubleArgumentType.getDouble(context, "amount"));
+        com.nstut.economy.api.AccountRef sourcePrincipal;
         boolean success;
         if (team) {
+            sourcePrincipal = com.nstut.economy.api.EconomyApi.teamEconomy().teamPrincipal(sender.getUUID()).orElse(null);
+            if (sourcePrincipal == null) {
+                context.getSource().sendFailure(Component.literal("No current Team wallet is available."));
+                return 0;
+            }
             success = com.nstut.economy.api.EconomyApi.teamEconomy().spendFromTeam(
                     IAccountManager.getInstance(), sender.getUUID(), com.nstut.economy.api.AccountRef.player(receiver.getUUID()), amount,
-                    TransactionContext.transfer("Team command payment from " + sender.getName().getString(), receiver.getUUID()));
+                    TransactionContext.transfer("Team command payment from " + sender.getName().getString(), sender.getUUID()));
         } else {
+            sourcePrincipal = com.nstut.economy.api.AccountRef.player(sender.getUUID());
             success = IAccountManager.getInstance().transfer(
-                    com.nstut.economy.api.AccountRef.player(sender.getUUID()), com.nstut.economy.api.AccountRef.player(receiver.getUUID()), amount,
-                    TransactionContext.transfer("Personal command payment from " + sender.getName().getString(), receiver.getUUID()));
+                    sourcePrincipal, com.nstut.economy.api.AccountRef.player(receiver.getUUID()), amount,
+                    TransactionContext.transfer("Personal command payment from " + sender.getName().getString(), sender.getUUID()));
         }
         if (!success) { context.getSource().sendFailure(Component.literal(team ? "Team payment rejected: check Team balance and payout permission." : "Personal payment rejected: insufficient balance or transaction rule.")); return 0; }
         String sourceLabel = team ? "Team" : "Personal";
         context.getSource().sendSuccess(() -> Component.literal(sourceLabel + " payment: ")
                 .append(CoinText.amount(amount)).append(Component.literal(" to " + receiver.getName().getString())), false);
-        com.nstut.economy.data.EconomyAccountData.recordSnapshot(com.nstut.economy.api.AccountRef.player(receiver.getUUID()), receiver.serverLevel());
+        com.nstut.economy.data.EconomyAccountData.recordSnapshot(sourcePrincipal, sender.serverLevel());
+        com.nstut.economy.data.EconomyAccountData.recordSnapshot(
+                com.nstut.economy.api.AccountRef.player(receiver.getUUID()), receiver.serverLevel());
         return 1;
     }
 

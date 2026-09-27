@@ -58,6 +58,9 @@ public final class TeamEconomyCommandGameTests {
             @Override public TeamRole getRole(UUID playerId, UUID id) {
                 return actor.equals(playerId) && teamId.equals(id) ? role[0] : TeamRole.NONE;
             }
+            @Override public java.util.Collection<UUID> getMembers(UUID id) {
+                return teamId.equals(id) && role[0] != TeamRole.NONE ? java.util.List.of(actor) : java.util.List.of();
+            }
         };
 
         var teams = EconomyApi.teamEconomy();

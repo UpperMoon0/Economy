@@ -432,6 +432,12 @@ public class MarketNetwork {
 
                     boolean success = teams.depositFromPlayer(accounts, actor, amount,
                             com.nstut.economy.core.TransactionContext.transfer("Team deposit from Market UI", actor));
+                    if (success) {
+                        com.nstut.economy.data.EconomyAccountData.recordSnapshot(
+                                com.nstut.economy.api.AccountRef.player(actor), player.level());
+                        com.nstut.economy.data.EconomyAccountData.recordSnapshot(
+                                com.nstut.economy.api.AccountRef.team(team.get().id()), player.level());
+                    }
                     sendActionResult(player, Action.TREASURY, success ? Result.SUCCESS : Result.WARNING,
                             success ? "ui.economy.toast.treasury_updated" : "ui.economy.toast.treasury_blocked");
                     sendItemList(player);
@@ -558,7 +564,7 @@ public class MarketNetwork {
                         }
                         success = accounts.transfer(source,
                                 com.nstut.economy.api.AccountRef.player(target.getUUID()), amount,
-                                com.nstut.economy.core.TransactionContext.transfer("Player payment from Market UI", target.getUUID()));
+                                com.nstut.economy.core.TransactionContext.transfer("Player payment from Market UI", actor));
                     } else {
                         com.nstut.economy.server.MarketWalletSelection.selectPersonal(actor);
                         sendActionResult(player, Action.PAYMENT, Result.ERROR, "ui.economy.toast.payment_source_invalid");
@@ -567,6 +573,9 @@ public class MarketNetwork {
                     }
 
                     if (success) {
+                        com.nstut.economy.data.EconomyAccountData.recordSnapshot(source, player.level());
+                        com.nstut.economy.data.EconomyAccountData.recordSnapshot(
+                                com.nstut.economy.api.AccountRef.player(target.getUUID()), target.level());
                         sendActionResult(player, Action.PAYMENT, Result.SUCCESS, "ui.economy.toast.payment_sent",
                                 target.getName().getString(), exactDecimal(amount));
                         target.sendSystemMessage(net.minecraft.network.chat.Component.translatable(
@@ -1830,11 +1839,16 @@ public class MarketNetwork {
         }
     }
 
+    static Identifier tryParseDimensionId(String dimension) {
+        return dimension == null ? null : Identifier.tryParse(dimension);
+    }
+
     private static ServerLevel resolveRecordLevel(ServerPlayer player, String dimension) {
         if (player.level().getServer() == null || dimension == null || dimension.isEmpty()) {
             return player.level();
         }
-        Identifier dimensionId = Identifier.parse(dimension);
+        Identifier dimensionId = tryParseDimensionId(dimension);
+        if (dimensionId == null) return null;
         net.minecraft.resources.ResourceKey<Level> key =
                 net.minecraft.resources.ResourceKey.create(net.minecraft.core.registries.Registries.DIMENSION, dimensionId);
         return player.level().getServer().getLevel(key);

@@ -59,6 +59,17 @@ class TeamMarketTest extends MinecraftTestBase {
         Order order = new Order(actor, commodity(), 5, new BigDecimal("2"), IOrder.OrderType.SELL, null, escrow);
         order.setIdentity(identity); return order;
     }
+    @Test void completedTradesSnapshotEconomicAndStoragePrincipalsInsteadOfActors() {
+        MarketIdentity teamStorage = teamIdentity(officer);
+        MarketIdentity personal = MarketIdentity.personal(outsider);
+        assertEquals(Set.of(AccountRef.team(team), AccountRef.player(outsider)),
+                Order.affectedPortfolioAccounts(teamStorage, personal));
+
+        MarketIdentity legacyTeamWithPersonalStorage = new MarketIdentity(AccountRef.team(team), officer, officer);
+        assertEquals(Set.of(AccountRef.team(team), AccountRef.player(officer), AccountRef.player(outsider)),
+                Order.affectedPortfolioAccounts(legacyTeamWithPersonalStorage, personal));
+    }
+
     @Test void selectedTeamWalletBindsMoneyAndPhysicalStorageToTheTeam() {
         assertTrue(MarketWalletSelection.selectTeam(officer));
         MarketIdentity identity = MarketWalletSelection.identity(officer);
@@ -209,6 +220,41 @@ class TeamMarketTest extends MinecraftTestBase {
         TeamWalletLifecycle.reconcile(accounts, orders, null);
         assertEquals(new BigDecimal("50.00000000"), accounts.getOrCreatePlayerAccount(officer).getBalance());
         assertEquals(new BigDecimal("50.00000000"), accounts.getOrCreatePlayerAccount(owner).getBalance());
+    }
+
+    @Test void providerWithoutMemberEnumerationNeverFallsBackToOwnerOnlySettlement() {
+        TeamWalletLifecycle.clear();
+        assertTrue(EconomyApi.teamEconomy().unregisterProvider(provider));
+        TeamEconomyProvider incomplete = new TeamEconomyProvider() {
+            public Optional<TeamRef> resolveTeam(UUID player) {
+                return roles.containsKey(player) ? Optional.of(new TeamRef(team, "Incomplete", owner)) : Optional.empty();
+            }
+            public Optional<TeamRef> getTeam(UUID id) {
+                return team.equals(id) ? Optional.of(new TeamRef(team, "Incomplete", owner)) : Optional.empty();
+            }
+            public TeamRole getRole(UUID player, UUID id) { return roles.getOrDefault(player, TeamRole.NONE); }
+        };
+        EconomyApi.teamEconomy().registerProvider(incomplete);
+        EconomyAccountData isolated = new EconomyAccountData();
+        AccountManager isolatedAccounts = new AccountManager();
+        isolatedAccounts.loadFrom(isolated);
+        TeamWalletLifecycle.bind(isolated);
+        isolatedAccounts.getOrCreateTeamAccount(team).credit(new BigDecimal("100"), null);
+        try {
+            TeamRef ref = new TeamRef(team, "Incomplete", owner);
+            TeamWalletLifecycle.observe(ref);
+            assertFalse(isolated.getTeamWallets().containsKey(team),
+                    "missing membership enumeration must not create an owner-only settlement snapshot");
+            TeamWalletLifecycle.deleted(ref);
+            assertFalse(isolated.getTeamWallets().containsKey(team),
+                    "closure must remain blocked rather than guessing the owner as the only recipient");
+            assertEquals(0, isolatedAccounts.getOrCreateTeamAccount(team).getBalance().compareTo(new BigDecimal("100")));
+        } finally {
+            TeamWalletLifecycle.clear();
+            EconomyApi.teamEconomy().unregisterProvider(incomplete);
+            EconomyApi.teamEconomy().registerProvider(provider);
+            TeamWalletLifecycle.bind(data);
+        }
     }
 
     @Test void emptyLiveEnumerationDoesNotEraseLastGoodMemberSnapshot() {

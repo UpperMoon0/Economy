@@ -30,8 +30,10 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /** Internal default implementation of the stable {@link IOrder} contract. */
@@ -535,10 +537,27 @@ public class Order implements IOrder {
         notifyPlayerTrade(level, buyer.actor(), seller.actor(), true, commodity.getDisplayName().getString(), fluidLike, delivered, pricePerUnit, total);
         notifyPlayerTrade(level, seller.actor(), buyer.actor(), false, commodity.getDisplayName().getString(), fluidLike, delivered, pricePerUnit, total);
         if (level != null) {
-            com.nstut.economy.data.EconomyAccountData.recordSnapshot(buyer.actor(), level);
-            com.nstut.economy.data.EconomyAccountData.recordSnapshot(seller.actor(), level);
+            recordPortfolioSnapshots(level, buyer, seller);
         }
         return TransactionResult.success(type == OrderType.SELL ? "Purchase successful" : "Sale successful", total, delivered);
+    }
+
+    static Set<AccountRef> affectedPortfolioAccounts(MarketIdentity... identities) {
+        Set<AccountRef> affected = new LinkedHashSet<>();
+        for (MarketIdentity identity : identities) {
+            if (identity == null) continue;
+            if (identity.principal().kind() == AccountKind.PLAYER || identity.principal().kind() == AccountKind.TEAM)
+                affected.add(identity.principal());
+            if (identity.storageAccount().kind() == AccountKind.PLAYER || identity.storageAccount().kind() == AccountKind.TEAM)
+                affected.add(identity.storageAccount());
+        }
+        return Set.copyOf(affected);
+    }
+
+    private static void recordPortfolioSnapshots(ServerLevel level, MarketIdentity... identities) {
+        for (AccountRef account : affectedPortfolioAccounts(identities)) {
+            com.nstut.economy.data.EconomyAccountData.recordSnapshot(account, level);
+        }
     }
 
     private IBankAccount accountFor(AccountRef principal) {
