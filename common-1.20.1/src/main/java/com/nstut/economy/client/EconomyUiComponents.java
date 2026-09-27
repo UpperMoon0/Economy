@@ -214,11 +214,26 @@ public final class EconomyUiComponents {
                         : Component.translatable("ui.economy.principal.personal").getString();
                 String amount = formatWalletBalance(selectedTeam
                         ? (teamAvailable ? team.teamBalance() : "0") : personalBalance.get());
-                UiRender.text(g, f, fitWalletText(f, label, Math.max(0, width - 10)),
-                        x + 5, y + 4, c.onSurfaceMuted());
-                drawCoin(g, x + 5, y + 17);
-                UiRender.text(g, f, fitWalletText(f, amount, Math.max(0, width - 20)),
-                        x + 15, y + 19, c.onSurface());
+                // A tall pill curves inward near the top/bottom; keep both rows inside its safe inset.
+                int inset = 12;
+                int iconSpace = clickable ? 12 : 0;
+                UiRender.text(g, f, fitWalletText(f, label, Math.max(0, width - inset * 2 - iconSpace)),
+                        x + inset, y + 6, c.onSurfaceMuted());
+                if (clickable) {
+                    // Two opposing pixel arrows avoid font-dependent Unicode glyphs.
+                    int sx = x + width - inset - 9;
+                    int sy = y + 7;
+                    int color = hovered ? c.primary() : c.onSurfaceMuted();
+                    g.fill(sx, sy + 1, sx + 8, sy + 2, color);
+                    g.fill(sx + 6, sy, sx + 7, sy + 3, color);
+                    g.fill(sx + 7, sy + 1, sx + 9, sy + 2, color);
+                    g.fill(sx + 1, sy + 5, sx + 9, sy + 6, color);
+                    g.fill(sx + 2, sy + 4, sx + 3, sy + 7, color);
+                    g.fill(sx, sy + 5, sx + 2, sy + 6, color);
+                }
+                drawCoin(g, x + inset, y + 17);
+                UiRender.text(g, f, fitWalletText(f, amount, Math.max(0, width - inset * 2 - 10)),
+                        x + inset + 10, y + 19, c.onSurface());
             }
 
             @Override
