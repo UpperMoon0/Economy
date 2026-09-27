@@ -1,6 +1,6 @@
 # Getting started with Economy addons
 
-Economy exposes a loader-neutral addon API for accounts, orders, market data, events, commodity types, and storage providers. New integrations should use only the top-level `com.nstut.economy.api` package unless this documentation explicitly says otherwise. The `com.nstut.economy.api.internal` subpackage is implementation detail and is not part of the supported compatibility surface.
+Economy exposes a loader-neutral addon API for accounts, orders, market data, events, commodity types, storage providers, and optional Team-economy providers. New integrations should use only the top-level `com.nstut.economy.api` package unless this documentation explicitly says otherwise. The `com.nstut.economy.api.internal` subpackage is implementation detail and is not part of the supported compatibility surface.
 
 The runtime implementation lives behind `EconomyApi`; addon code should not reach into `com.nstut.economy.core`, `trading`, `data`, `api.internal`, blocks, menus, networking, or loader internals.
 
@@ -44,7 +44,7 @@ Then add the dependency normally:
 
 ```groovy
 dependencies {
-    modImplementation "com.nstut:economy-fabric-1.21.1:0.0.11"
+    modImplementation "com.nstut:economy-fabric-1.21.1:0.0.14"
 }
 ```
 
@@ -87,7 +87,30 @@ EconomyApi.storage();
 
 Register addon types/providers once during your mod's common initialization, not once per world load.
 
-## 3. Read and create orders
+## 3. Integrate Team economy when needed
+
+`EconomyApi.teamEconomy()` is the supported entry point for shared-Team wallets and authorization. Addons that only consume Economy can resolve the current Team and check server-authoritative roles without depending on FTB Teams directly:
+
+```java
+TeamEconomyRegistry teams = EconomyApi.teamEconomy();
+Optional<TeamRef> team = teams.resolveTeam(playerId);
+
+if (team.isPresent() && teams.canSpend(playerId, team.get().id())) {
+    // Perform a Team-authorized market action.
+}
+```
+
+If your addon supplies its own party/guild system, implement `TeamEconomyProvider` and register it once during common initialization:
+
+```java
+EconomyApi.teamEconomy().registerProvider(new MyTeamEconomyProvider());
+```
+
+An addon-owned provider takes precedence over Economy's built-in FTB Teams fallback. Only one addon-owned provider may be active. Providers that support Team-wallet closure must return the complete current membership from `getMembers(teamId)` so Economy can settle a deleted Team safely; an unavailable member enumeration fails closed instead of guessing recipients.
+
+For provider contracts, permissions, Team storage, Treasury/Pay Player behavior, and deletion settlement, read [Team Economy](TEAM_ECONOMY.md).
+
+## 4. Read and create orders
 
 ```java
 IOrderManager orders = EconomyApi.orders();
@@ -117,7 +140,7 @@ The compatibility-shaped `createServerBuyOrder` and `createServerSellOrder` meth
 
 Use `cancelOrder` and `editOrder` on the manager so ownership, escrow, persistence, and market invariants are enforced centrally.
 
-## 4. Read market analytics
+## 5. Read market analytics
 
 Commodity identity is **type + commodity ID**. Never key addon analytics by commodity ID alone: two registered types are allowed to use the same product ID.
 
@@ -141,7 +164,7 @@ CommodityKey key = CommodityKey.of(commodity);
 
 Prefer `EconomyId`/`CommodityKey` over Minecraft's version-specific identifier classes in persistent addon state and cross-version source.
 
-## 5. Listen for Economy events
+## 6. Listen for Economy events
 
 Economy has a loader-neutral synchronous event bus. You do not need separate Fabric/Forge/NeoForge adapters for these API events.
 
@@ -164,7 +187,7 @@ Available event families include:
 
 Pre-events such as `BalanceChangePre`, `TransferPre`, and `OrderCreatePre` are cancellable. `OrderCreatePre` is posted before Economy creates a new provider reservation; a cancelled order must not enter the order book or create new escrow. Event delivery is synchronous, so listeners should return quickly and must not perform blocking work on the server thread.
 
-## 6. Use transaction context for money movement
+## 7. Use transaction context for money movement
 
 Account transfers accept an `ITransactionContext`. New addons should provide a non-null context with a namespaced cause such as `myaddon:salary`, rather than relying on the deprecated legacy transaction enum.
 
@@ -181,13 +204,13 @@ The transfer contract is atomic: a rejected or failing target credit must not le
 
 See [Extending Economy](EXTENDING_ECONOMY.md) for custom transaction causes, commodity codecs, storage providers, persistence rules, and lifecycle requirements.
 
-## 7. Understand multi-provider storage dispatch
+## 8. Understand multi-provider storage dispatch
 
 One sell-order reservation is never split across storage providers. `EconomyApi.storage().available(...)` reports the largest amount that a single supporting provider can reserve atomically, and `reserve(...)` walks providers by priority until one provider can own the full reservation. Receiving capacity is different: `receivable(...)` may aggregate capacity across providers up to the requested amount.
 
 Once a reservation exists, delivery and release always route to the `providerId` stored in that reservation. Economy does not move escrow ownership to another provider when the original provider is unavailable.
 
-## 8. Verify an addon
+## 9. Verify an addon
 
 Before publishing an addon:
 
@@ -222,4 +245,4 @@ python3 tools/live_join_test.py --target forge-1.20.1
 
 `testAllVersions` does not replace the GameTest or live client/server smoke. CI runs the Forge 1.20.1 GameTest and a real client/server join for every supported loader target. On a headless Linux machine, the live-join script uses `xvfb-run` when `DISPLAY` is unset, so install Xvfb locally if your environment does not already provide it.
 
-For the complete public surface, see [API Reference](API_REFERENCE.md). For custom commodity/storage implementations and escrow invariants, continue with [Extending Economy](EXTENDING_ECONOMY.md).
+For the complete public surface, see [API Reference](API_REFERENCE.md). For custom commodity/storage implementations and escrow invariants, continue with [Extending Economy](EXTENDING_ECONOMY.md). For Team-provider integrations and lifecycle rules, see [Team Economy](TEAM_ECONOMY.md).

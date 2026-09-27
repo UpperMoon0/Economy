@@ -18,14 +18,14 @@ class BankAccountTest {
 
     @BeforeEach
     void setUp() {
-        EconomyEvents.clearListeners();
+        com.nstut.economy.api.internal.EconomyEventBridge.clearListeners();
         alice = new BankAccount(UUID.randomUUID(), new BigDecimal("500.00"));
         bob = new BankAccount(UUID.randomUUID(), new BigDecimal("100.00"));
     }
 
     @AfterEach
     void tearDown() {
-        EconomyEvents.clearListeners();
+        com.nstut.economy.api.internal.EconomyEventBridge.clearListeners();
     }
 
     @Test

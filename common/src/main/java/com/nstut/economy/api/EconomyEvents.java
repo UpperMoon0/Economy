@@ -3,14 +3,10 @@ package com.nstut.economy.api;
 import java.math.BigDecimal;
 import java.util.Objects;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
 
 /** Loader-neutral synchronous account/transaction event bus. */
 public final class EconomyEvents {
-    private static final ConcurrentHashMap<Class<?>, CopyOnWriteArrayList<Consumer<?>>> LISTENERS = new ConcurrentHashMap<>();
-    private static final System.Logger LOGGER = System.getLogger(EconomyEvents.class.getName());
     private EconomyEvents() { }
     public interface Event { }
     public abstract static class CancellableEvent implements Event {
@@ -20,27 +16,11 @@ public final class EconomyEvents {
     }
     @FunctionalInterface public interface Subscription extends AutoCloseable { @Override void close(); }
     public static <E extends Event> Subscription listen(Class<E> eventType, Consumer<E> listener) {
-        Objects.requireNonNull(eventType); Objects.requireNonNull(listener);
-        CopyOnWriteArrayList<Consumer<?>> listeners = LISTENERS.computeIfAbsent(eventType, ignored -> new CopyOnWriteArrayList<>());
-        listeners.add(listener);
-        return () -> { listeners.remove(listener); if (listeners.isEmpty()) LISTENERS.remove(eventType, listeners); };
+        return com.nstut.economy.api.internal.EconomyEventBridge.listen(eventType, listener);
     }
-    @SuppressWarnings("unchecked")
     public static <E extends Event> E post(E event) {
-        Objects.requireNonNull(event);
-        for (Consumer<?> raw : LISTENERS.getOrDefault(event.getClass(), new CopyOnWriteArrayList<>())) {
-            try {
-                ((Consumer<E>) raw).accept(event);
-            } catch (RuntimeException failure) {
-                LOGGER.log(System.Logger.Level.ERROR,
-                        "Economy event listener failed for " + event.getClass().getName(), failure);
-                // Pre-events are fail-closed: a broken veto listener must never allow the mutation to commit.
-                if (event instanceof CancellableEvent cancellable) cancellable.cancel();
-            }
-        }
-        return event;
+        return com.nstut.economy.api.internal.EconomyEventBridge.post(event);
     }
-    public static void clearListeners() { LISTENERS.clear(); }
 
     public static final class BalanceChangePre extends CancellableEvent {
         private final AccountRef accountRef; private final BigDecimal previousBalance; private final BigDecimal delta; private final ITransactionContext context;

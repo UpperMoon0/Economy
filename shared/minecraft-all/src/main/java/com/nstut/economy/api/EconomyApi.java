@@ -13,33 +13,22 @@ public final class EconomyApi {
     private static final StorageProviderRegistry STORAGE = new StorageProviderRegistry();
     private static final TeamEconomyRegistry TEAM_ECONOMY = new TeamEconomyRegistry();
 
-    private static volatile IAccountManager accounts;
-    private static volatile IOrderManager orders;
-    private static volatile IMarketDataService marketData;
-    private static volatile ServerLevel serverLevel;
-
     private EconomyApi() { }
 
     public static boolean isReady() {
-        return accounts != null && orders != null && marketData != null && serverLevel != null;
+        return com.nstut.economy.api.internal.EconomyRuntimeBridge.isReady();
     }
 
     public static IAccountManager accounts() {
-        IAccountManager value = accounts;
-        if (value == null) throw new IllegalStateException("Economy API is not bound to a running server");
-        return value;
+        return com.nstut.economy.api.internal.EconomyRuntimeBridge.accounts();
     }
 
     public static IOrderManager orders() {
-        IOrderManager value = orders;
-        if (value == null) throw new IllegalStateException("Economy API is not bound to a running server");
-        return value;
+        return com.nstut.economy.api.internal.EconomyRuntimeBridge.orders();
     }
 
     public static IMarketDataService marketData() {
-        IMarketDataService value = marketData;
-        if (value == null) throw new IllegalStateException("Economy API is not bound to a running server");
-        return value;
+        return com.nstut.economy.api.internal.EconomyRuntimeBridge.marketData();
     }
 
     public static CommodityTypeRegistry commodityTypes() { return COMMODITY_TYPES; }
@@ -47,25 +36,7 @@ public final class EconomyApi {
     public static TeamEconomyRegistry teamEconomy() { return TEAM_ECONOMY; }
 
     /** Read-only lifecycle visibility for providers that need the active overworld. */
-    public static Optional<ServerLevel> serverLevel() { return Optional.ofNullable(serverLevel); }
-
-    /** Internal bootstrap hook; not part of the supported addon surface. */
-    public static void bindRuntime(IAccountManager accountService, IOrderManager orderService,
-                                   IMarketDataService marketDataService, ServerLevel level) {
-        if (accountService == null || orderService == null || marketDataService == null || level == null) {
-            throw new IllegalArgumentException("Economy runtime services cannot be null");
-        }
-        accounts = accountService;
-        orders = orderService;
-        marketData = marketDataService;
-        serverLevel = level;
-    }
-
-    /** Internal lifecycle hook; registries intentionally survive server restarts. */
-    public static void unbindRuntime() {
-        serverLevel = null;
-        marketData = null;
-        orders = null;
-        accounts = null;
+    public static Optional<ServerLevel> serverLevel() {
+        return com.nstut.economy.api.internal.EconomyRuntimeBridge.serverLevel();
     }
 }

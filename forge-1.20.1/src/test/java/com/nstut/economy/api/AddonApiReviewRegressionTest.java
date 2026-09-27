@@ -44,7 +44,7 @@ class AddonApiReviewRegressionTest extends MinecraftTestBase {
 
     @BeforeEach
     void setUp() {
-        EconomyEvents.clearListeners();
+        com.nstut.economy.api.internal.EconomyEventBridge.clearListeners();
         TradeLedger.clearTradeData();
         EconomyApi.commodityTypes().unregister(ADDON_TYPE);
         EconomyApi.storage().unregister(ADDON_PROVIDER);
@@ -53,10 +53,25 @@ class AddonApiReviewRegressionTest extends MinecraftTestBase {
 
     @AfterEach
     void tearDown() {
-        EconomyEvents.clearListeners();
+        com.nstut.economy.api.internal.EconomyEventBridge.clearListeners();
         TradeLedger.clearTradeData();
         EconomyApi.commodityTypes().unregister(ADDON_TYPE);
         EconomyApi.storage().unregister(ADDON_PROVIDER);
+    }
+
+    @Test
+    @DisplayName("Stable addon API cannot mutate Economy runtime binding or clear global listeners")
+    void stableApiDoesNotExposeGlobalLifecycleMutation() {
+        var economyApiMethods = java.util.Arrays.stream(EconomyApi.class.getMethods())
+                .map(java.lang.reflect.Method::getName).toList();
+        var eventMethods = java.util.Arrays.stream(EconomyEvents.class.getMethods())
+                .map(java.lang.reflect.Method::getName).toList();
+
+        assertFalse(economyApiMethods.contains("bindRuntime"));
+        assertFalse(economyApiMethods.contains("unbindRuntime"));
+        assertFalse(eventMethods.contains("clearListeners"));
+        assertDoesNotThrow(() -> Class.forName("com.nstut.economy.api.internal.EconomyRuntimeBridge"));
+        assertDoesNotThrow(() -> Class.forName("com.nstut.economy.api.internal.EconomyEventBridge"));
     }
 
     @Test

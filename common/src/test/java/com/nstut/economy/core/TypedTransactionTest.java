@@ -21,7 +21,7 @@ class TypedTransactionTest {
     private final BankAccount team = new BankAccount(teamRef, BigDecimal.TEN);
     private final ITransactionContext context = TransactionContext.adminGive("test");
 
-    @AfterEach void cleanup() { EconomyEvents.clearListeners(); }
+    @AfterEach void cleanup() { com.nstut.economy.api.internal.EconomyEventBridge.clearListeners(); }
 
     @Test void standaloneMutationsExposeTypedPreAndPostEvents() {
         List<AccountRef> before = new ArrayList<>();

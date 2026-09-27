@@ -19,7 +19,7 @@ Stable static facade for runtime services and extension registries.
 - `TeamEconomyRegistry teamEconomy()` — process-level optional team provider and shared-wallet policy.
 - `Optional<ServerLevel> serverLevel()` — currently bound server overworld, when available.
 
-`bindRuntime` and `unbindRuntime` are internal lifecycle hooks even though they are public Java methods. Addons must not call them.
+Runtime binding/unbinding is owned entirely by `com.nstut.economy.api.internal`; the stable `EconomyApi` facade exposes read-only service access and lifecycle visibility only.
 
 ## Identifiers
 
@@ -220,7 +220,7 @@ EconomyEvents.Subscription sub = EconomyEvents.listen(
 - `post(E)` — publishes synchronously; primarily used by Economy and public extension registries.
 - `Subscription.close()` — unregister listener.
 
-Listeners are matched by the event's exact runtime class; registering for a base event interface does not subscribe to every subtype. Addon code should not call `clearListeners()` during normal operation because it clears listeners globally.
+Listeners are matched by the event's exact runtime class; registering for a base event interface does not subscribe to every subtype. There is no public global listener reset: retain the returned `Subscription` and call `close()` when your own listener should be removed. Global event-bus reset is internal lifecycle/test machinery.
 
 Account events:
 

@@ -38,7 +38,7 @@ class TeamMarketTest extends MinecraftTestBase {
     ItemCommodity commodity() { return new ItemCommodity(new ResourceLocation("minecraft", "iron_ingot"), Items.IRON_INGOT, BigDecimal.ONE); }
     MarketIdentity teamIdentity(UUID actor) { return new MarketIdentity(AccountRef.team(team), actor, AccountRef.team(team)); }
     @BeforeEach void setup() {
-        EconomyApi.unbindRuntime();
+        com.nstut.economy.api.internal.EconomyRuntimeBridge.unbind();
         EconomyApi.teamEconomy().provider().ifPresent(EconomyApi.teamEconomy()::unregisterProvider);
         EconomyApi.teamEconomy().registerProvider(provider);
         EconomyApi.teamEconomy().setMode(TeamEconomyMode.HYBRID);
@@ -52,7 +52,7 @@ class TeamMarketTest extends MinecraftTestBase {
         accounts.getOrCreatePlayerAccount(outsider).credit(new BigDecimal("100"), null);
     }
     @AfterEach void cleanup() {
-        TeamWalletLifecycle.clear(); MarketWalletSelection.clear(); TradeLedger.clearTradeData(); EconomyEvents.clearListeners();
+        TeamWalletLifecycle.clear(); MarketWalletSelection.clear(); TradeLedger.clearTradeData(); com.nstut.economy.api.internal.EconomyEventBridge.clearListeners();
         EconomyApi.teamEconomy().unregisterProvider(provider); EconomyApi.teamEconomy().setMode(TeamEconomyMode.PERSONAL_ONLY);
     }
     Order sell(UUID actor, MarketIdentity identity) {

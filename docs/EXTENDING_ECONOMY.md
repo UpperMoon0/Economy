@@ -1,6 +1,6 @@
 # Extending Economy
 
-This guide covers the parts of Economy intended for addon authors who need more than balance and order access: custom transaction causes, commodity types, persistence codecs, storage backends, market events, and compatibility rules.
+This guide covers the parts of Economy intended for addon authors who need more than balance and order access: custom transaction causes, Team-economy providers, commodity types, persistence codecs, storage backends, market events, and compatibility rules.
 
 Read [Getting Started](GETTING_STARTED.md) first. The supported compatibility boundary is the top-level `com.nstut.economy.api` package. The `com.nstut.economy.api.internal` subpackage is implementation detail and is not supported for addon use.
 
@@ -25,6 +25,44 @@ Do not claim IDs in the `economy` namespace.
 `EconomyApi.commodityTypes()` and `EconomyApi.storage()` are process-level registries and intentionally survive server restarts. Register addon handlers/providers during common mod initialization and do not register duplicate instances for every world load.
 
 Use `EconomyApi.isReady()` before work that requires runtime services.
+
+## Team-economy providers
+
+`EconomyApi.teamEconomy()` exposes the stable `TeamEconomyRegistry`. Most addons only need its read/authorization surface (`resolveTeam`, `roleFor`, `canView`, `canSpend`, `canPayout`, and related helpers). Addons that own a separate party/guild system can bridge it into Economy by implementing `TeamEconomyProvider` and registering one provider during common initialization.
+
+```java
+public final class MyTeamProvider implements TeamEconomyProvider {
+    @Override
+    public Optional<TeamRef> resolveTeam(UUID playerId) {
+        // Resolve the player's current team from your own authoritative data.
+        ...
+    }
+
+    @Override
+    public Optional<TeamRef> getTeam(UUID teamId) {
+        ...
+    }
+
+    @Override
+    public TeamRole getRole(UUID playerId, UUID teamId) {
+        ...
+    }
+
+    @Override
+    public Collection<UUID> getMembers(UUID teamId) {
+        // Return every current member, including the owner, for safe closure settlement.
+        ...
+    }
+}
+
+EconomyApi.teamEconomy().registerProvider(new MyTeamProvider());
+```
+
+The built-in FTB Teams adapter is an internal fallback and does not consume the addon-owned provider slot. A custom provider therefore takes precedence when registered; removing it exposes the fallback again. Only one addon-owned provider may be active at a time. Economy re-resolves membership/ranks for protected actions rather than trusting cached/client state.
+
+`getMembers(teamId)` is part of the lifecycle-safety contract. If a Team can close/delete and the provider cannot enumerate the complete final membership, Economy preserves the wallet and blocks settlement rather than paying an arbitrary subset. Do not depend on Economy's internal Team lifecycle/persistence classes to work around this contract.
+
+See [Team Economy](TEAM_ECONOMY.md) for the complete permission model, server configuration, FTB mapping, typed Team storage, Treasury/Pay Player flows, and deletion/recovery semantics.
 
 ## Custom transaction causes
 
@@ -389,4 +427,4 @@ Avoid dependencies on:
 
 If an addon cannot be implemented without one of those internals, open an issue describing the missing capability. The correct fix is usually to extend the public API rather than normalize an internal dependency.
 
-For a catalog of the supported public types, continue with [API Reference](API_REFERENCE.md).
+For a catalog of the supported public types, continue with [API Reference](API_REFERENCE.md). For Team provider policy and lifecycle details, continue with [Team Economy](TEAM_ECONOMY.md).

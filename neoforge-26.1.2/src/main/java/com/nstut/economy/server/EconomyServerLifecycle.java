@@ -1,7 +1,7 @@
 package com.nstut.economy.server;
 
 import com.nstut.Economy;
-import com.nstut.economy.api.EconomyApi;
+import com.nstut.economy.api.internal.EconomyRuntimeBridge;
 import com.nstut.economy.api.internal.DefaultMarketDataService;
 import com.nstut.economy.blocks.TankManager;
 import com.nstut.economy.blocks.VaultManager;
@@ -34,7 +34,7 @@ public final class EconomyServerLifecycle {
         TradeLedger.setTradeData(tradeData);
         VaultManager.setAccountData(accountData);
         TankManager.setAccountData(accountData);
-        EconomyApi.bindRuntime(Economy.getAccountManager(), orderManager,
+        EconomyRuntimeBridge.bind(Economy.getAccountManager(), orderManager,
                 new DefaultMarketDataService(orderManager), overworld);
         Economy.LOGGER.info("Economy data loaded for dimension {}", overworld.dimension().identifier());
     }
@@ -50,7 +50,7 @@ public final class EconomyServerLifecycle {
         } finally {
             TeamWalletLifecycle.clear();
             MarketWalletSelection.clear();
-            EconomyApi.unbindRuntime();
+            EconomyRuntimeBridge.unbind();
         }
     }
 
