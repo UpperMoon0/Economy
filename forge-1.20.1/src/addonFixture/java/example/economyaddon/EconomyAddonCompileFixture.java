@@ -10,10 +10,14 @@ import com.nstut.economy.api.MarketEvents;
 import com.nstut.economy.api.OrderCreateResult;
 import com.nstut.economy.api.StorageDeliveryResult;
 import com.nstut.economy.api.StorageReservation;
+import com.nstut.economy.api.TeamRole;
+import com.nstut.economy.api.TeamRef;
+import com.nstut.economy.api.TeamEconomyProvider;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.level.ServerLevel;
 
 import java.math.BigDecimal;
+import java.util.Collection;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -51,6 +55,15 @@ public final class EconomyAddonCompileFixture {
         OrderCreateResult result = EconomyApi.orders().createBuyOrder(
                 playerId, commodity, 1, BigDecimal.ONE);
         result.order().ifPresent(order -> EconomyApi.orders().cancelOrder(order.getOrderId(), playerId));
+    }
+
+    private static final class FixtureTeamProvider implements TeamEconomyProvider {
+        private static final EconomyId ID = EconomyId.of("fixtureaddon", "guilds");
+        @Override public EconomyId providerId() { return ID; }
+        @Override public Optional<TeamRef> resolveTeam(UUID playerId) { return Optional.empty(); }
+        @Override public Optional<TeamRef> getTeam(UUID teamId) { return Optional.empty(); }
+        @Override public TeamRole getRole(UUID playerId, UUID teamId) { return TeamRole.NONE; }
+        @Override public Collection<UUID> getMembers(UUID teamId) { return java.util.List.of(); }
     }
 
     private static final class FixtureStorageProvider implements IStorageProvider {

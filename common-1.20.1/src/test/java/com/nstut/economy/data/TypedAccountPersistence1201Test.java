@@ -57,16 +57,24 @@ class TypedAccountPersistence1201Test {
         UUID owner = UUID.randomUUID();
         UUID member = UUID.randomUUID();
         EconomyAccountData data = new EconomyAccountData();
+        var providerId = com.nstut.economy.api.EconomyId.of("test", "durable_team_provider");
         data.putTeamWallet(new com.nstut.economy.api.internal.TeamWalletState(
-                teamId, owner, true, false, java.util.List.of(owner, member), java.util.Set.of(owner)));
+                teamId, owner, providerId, true, false, java.util.List.of(owner, member), java.util.Set.of(owner)));
 
         CompoundTag encoded = data.save(new CompoundTag());
         EconomyAccountData decoded = EconomyAccountData.load(encoded);
         var state = decoded.getTeamWallets().get(teamId);
+        assertEquals(providerId, state.providerId());
         assertEquals(java.util.Set.of(owner, member), java.util.Set.copyOf(state.settlementMembers()));
         assertEquals(java.util.Set.of(owner), state.settledMembers());
         assertEquals(true, state.closing());
         assertEquals(false, state.storageSettled());
+
+        CompoundTag legacy = encoded.copy();
+        legacy.getList("TeamWallets", 10).getCompound(0).remove("Provider");
+        EconomyAccountData legacyDecoded = EconomyAccountData.load(legacy);
+        assertEquals(com.nstut.economy.api.internal.TeamWalletState.UNKNOWN_PROVIDER_ID,
+                legacyDecoded.getTeamWallets().get(teamId).providerId());
     }
 
 }

@@ -4,6 +4,7 @@ import com.mojang.authlib.GameProfile;
 import com.nstut.Economy;
 import com.nstut.economy.api.AccountRef;
 import com.nstut.economy.api.EconomyApi;
+import com.nstut.economy.api.EconomyId;
 import com.nstut.economy.api.TeamEconomyMode;
 import com.nstut.economy.api.TeamEconomyProvider;
 import com.nstut.economy.api.TeamRef;
@@ -49,6 +50,7 @@ public final class TeamEconomyCommandGameTests {
         TeamRole[] role = {TeamRole.OFFICER};
 
         TeamEconomyProvider fake = new TeamEconomyProvider() {
+            @Override public EconomyId providerId() { return EconomyId.of("test", "team_command_gametest"); }
             @Override public Optional<TeamRef> resolveTeam(UUID playerId) {
                 return actor.equals(playerId) && role[0] != TeamRole.NONE ? Optional.of(team) : Optional.empty();
             }

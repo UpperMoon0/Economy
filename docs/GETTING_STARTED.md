@@ -100,13 +100,17 @@ if (team.isPresent() && teams.canSpend(playerId, team.get().id())) {
 }
 ```
 
-If your addon supplies its own party/guild system, implement `TeamEconomyProvider` and register it once during common initialization:
+If your addon supplies its own party/guild system, implement `TeamEconomyProvider` and register it once during common initialization. Every provider must expose a durable namespaced id that stays unchanged across restarts and addon versions:
 
 ```java
+public EconomyId providerId() {
+    return EconomyId.of("myaddon", "guilds");
+}
+
 EconomyApi.teamEconomy().registerProvider(new MyTeamEconomyProvider());
 ```
 
-An addon-owned provider takes precedence over Economy's built-in FTB Teams fallback. Only one addon-owned provider may be active. Providers that support Team-wallet closure must return the complete current membership from `getMembers(teamId)` so Economy can settle a deleted Team safely; an unavailable member enumeration fails closed instead of guessing recipients.
+An addon-owned provider takes precedence over Economy's built-in FTB Teams fallback. Only one addon-owned provider may be active. Economy persists `providerId()` with Team lifecycle state, so switching to another provider never lets that provider reinterpret or delete wallets it does not own; missing owners preserve their cash/storage fail-closed. Providers that support Team-wallet closure must also return the complete current membership from `getMembers(teamId)` so Economy can settle a deleted Team safely; an unavailable member enumeration fails closed instead of guessing recipients.
 
 For provider contracts, permissions, Team storage, Treasury/Pay Player behavior, and deletion settlement, read [Team Economy](TEAM_ECONOMY.md).
 

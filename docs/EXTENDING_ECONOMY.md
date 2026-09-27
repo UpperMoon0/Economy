@@ -33,6 +33,12 @@ Use `EconomyApi.isReady()` before work that requires runtime services.
 ```java
 public final class MyTeamProvider implements TeamEconomyProvider {
     @Override
+    public EconomyId providerId() {
+        // Durable ownership key for persisted Team-wallet lifecycle state. Never rename this id.
+        return EconomyId.of("myaddon", "guilds");
+    }
+
+    @Override
     public Optional<TeamRef> resolveTeam(UUID playerId) {
         // Resolve the player's current team from your own authoritative data.
         ...
@@ -60,7 +66,9 @@ EconomyApi.teamEconomy().registerProvider(new MyTeamProvider());
 
 The built-in FTB Teams adapter is an internal fallback and does not consume the addon-owned provider slot. A custom provider therefore takes precedence when registered; removing it exposes the fallback again. Only one addon-owned provider may be active at a time. Economy re-resolves membership/ranks for protected actions rather than trusting cached/client state.
 
-`getMembers(teamId)` is part of the lifecycle-safety contract. If a Team can close/delete and the provider cannot enumerate the complete final membership, Economy preserves the wallet and blocks settlement rather than paying an arbitrary subset. Do not depend on Economy's internal Team lifecycle/persistence classes to work around this contract.
+`providerId()` is durable data ownership. Economy writes it beside every Team-wallet lifecycle record and only that provider may later reconcile/delete/settle the record. If your provider is temporarily absent after a restart, another provider cannot claim its UUIDs: the wallet, cash, and Team storage remain preserved until the original provider returns. Never rename/reuse a provider id for a different Team system. Legacy records without provenance are claimed only after a positive `getTeam(...)` result.
+
+`getMembers(teamId)` is the second lifecycle-safety contract. If a Team can close/delete and the provider cannot enumerate the complete final membership, Economy preserves the wallet and blocks settlement rather than paying an arbitrary subset. Do not depend on Economy's internal Team lifecycle/persistence classes to work around these contracts.
 
 See [Team Economy](TEAM_ECONOMY.md) for the complete permission model, server configuration, FTB mapping, typed Team storage, Treasury/Pay Player flows, and deletion/recovery semantics.
 

@@ -77,7 +77,7 @@ Authorized Team administrators can reassign storage ownership between themselves
 
 ## Optional Team Wallets
 
-Economy supports shared Team principals. With **FTB Teams** installed, party teams are supported automatically; Personal and server teams are not turned into duplicate Economy wallets. Addons may register a custom `TeamEconomyProvider`; a custom provider takes precedence over the built-in FTB Teams fallback.
+Economy supports shared Team principals. With **FTB Teams** installed, party teams are supported automatically; Personal and server teams are not turned into duplicate Economy wallets. Addons may register a custom `TeamEconomyProvider`; a custom provider takes precedence over the built-in FTB Teams fallback. Team-wallet lifecycle records persist the provider's stable id, so removing a custom integration cannot make the FTB fallback reinterpret or settle its wallets.
 
 Team economy is enabled by default when a usable provider exists and can be disabled with `enabled=false` in `config/economy-team.properties`.
 

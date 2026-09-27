@@ -285,6 +285,7 @@ public class EconomyAccountData extends SavedData implements com.nstut.economy.c
                 java.util.List<UUID> members = readUuidKeys(entry.getCompound("SettlementMembers"));
                 java.util.Set<UUID> settled = java.util.Set.copyOf(readUuidKeys(entry.getCompound("SettledMembers")));
                 data.teamWallets.put(team, new TeamWalletState(team, owner,
+                        TeamWalletState.readProviderId(entry.getString("Provider")),
                         entry.getBoolean("Closing"), entry.getBoolean("StorageSettled"), members, settled));
             } catch (RuntimeException ignored) {}
         }
@@ -311,6 +312,7 @@ public class EconomyAccountData extends SavedData implements com.nstut.economy.c
             CompoundTag entry = new CompoundTag();
             entry.putString("Team", state.teamId().toString());
             entry.putString("Owner", state.ownerId().toString());
+            entry.putString("Provider", state.providerId().toString());
             entry.putBoolean("Closing", state.closing());
             entry.putBoolean("StorageSettled", state.storageSettled());
             entry.put("SettlementMembers", writeUuidKeys(state.settlementMembers()));

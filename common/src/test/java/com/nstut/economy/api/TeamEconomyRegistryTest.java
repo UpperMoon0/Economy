@@ -34,6 +34,25 @@ class TeamEconomyRegistryTest {
     }
 
     @Test
+    void providerIdsMustBeUniqueAndCannotUseTheLegacyUnknownMarker() {
+        TeamEconomyRegistry registry = new TeamEconomyRegistry();
+        FallbackProvider fallback = new FallbackProvider();
+        registry.registerProvider(fallback);
+
+        MutableProvider colliding = new MutableProvider() {
+            @Override public EconomyId providerId() { return fallback.providerId(); }
+        };
+        assertThrows(IllegalStateException.class, () -> registry.registerProvider(colliding));
+
+        MutableProvider reserved = new MutableProvider() {
+            @Override public EconomyId providerId() {
+                return com.nstut.economy.api.internal.TeamWalletState.UNKNOWN_PROVIDER_ID;
+            }
+        };
+        assertThrows(IllegalArgumentException.class, () -> new TeamEconomyRegistry().registerProvider(reserved));
+    }
+
+    @Test
     void disabledModeDoesNotExposeTeamEconomy() {
         MutableProvider provider = new MutableProvider();
         TeamEconomyRegistry registry = new TeamEconomyRegistry();
@@ -221,6 +240,7 @@ class TeamEconomyRegistryTest {
 
     private static class MutableProvider implements TeamEconomyProvider {
         final UUID playerId = UUID.randomUUID();
+        @Override public EconomyId providerId() { return EconomyId.of("test", "mutable_team_provider"); }
         final TeamRef team = new TeamRef(UUID.randomUUID(), "Test Party", playerId);
         TeamRole role = TeamRole.MEMBER;
         boolean member = true;
@@ -248,5 +268,6 @@ class TeamEconomyRegistryTest {
 
     private static final class FallbackProvider extends MutableProvider
             implements com.nstut.economy.api.internal.FallbackTeamEconomyProvider {
+        @Override public EconomyId providerId() { return EconomyId.of("test", "fallback_team_provider"); }
     }
 }

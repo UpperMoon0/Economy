@@ -5,6 +5,7 @@ import com.nstut.economy.api.MarketIdentity;
 import com.nstut.economy.api.AccountKind;
 import com.nstut.economy.api.EconomyApi;
 import com.nstut.economy.api.EconomyEvents;
+import com.nstut.economy.api.EconomyId;
 import com.nstut.economy.api.ICommodity;
 import com.nstut.economy.api.IOrder;
 import com.nstut.economy.api.AccountRef;
@@ -590,8 +591,16 @@ public class OrderManager implements IOrderManager {
     public void revalidateTeamOrders(net.minecraft.server.level.ServerLevel level) {
         var teams = EconomyApi.teamEconomy();
         if (!teams.isProviderAvailable()) return;
+        var provider = teams.provider().orElse(null);
+        if (provider == null) return;
+        EconomyId providerId = provider.providerId();
         for (Order order : List.copyOf(orders.values())) {
-            if (order.getPrincipal().kind() == AccountKind.TEAM && !order.isAuthorized()) {
+            if (order.getPrincipal().kind() != AccountKind.TEAM) continue;
+            // Provider disappearance/switching must not mutate another Team domain's durable orders.
+            // Unknown pre-provenance orders are preserved until a provider positively resolves and claims the wallet.
+            if (!com.nstut.economy.api.internal.TeamEconomyLifecycleBridge.ownsProvider(
+                    providerId, order.getPrincipal().id())) continue;
+            if (!order.isAuthorized()) {
                 // If storage cannot accept escrow, keep the order and retry on the next tick.
                 // Execution always checks fresh authorization independently of this sweep.
                 cancelForRecovery(order, level);

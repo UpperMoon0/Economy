@@ -37,14 +37,29 @@ public final class TeamEconomyRegistry {
      */
     public synchronized void registerProvider(TeamEconomyProvider provider) {
         Objects.requireNonNull(provider, "provider");
+        EconomyId providerId = requireProviderId(provider);
         if (provider instanceof com.nstut.economy.api.internal.FallbackTeamEconomyProvider) {
+            if (this.provider != null && providerId.equals(requireProviderId(this.provider))) {
+                throw new IllegalStateException("Team provider id is already used by the addon provider: " + providerId);
+            }
             fallbackProvider = provider;
             return;
         }
         if (this.provider != null && this.provider != provider) {
             throw new IllegalStateException("A team economy provider is already registered");
         }
+        if (fallbackProvider != null && providerId.equals(requireProviderId(fallbackProvider))) {
+            throw new IllegalStateException("Team provider id is already used by the fallback provider: " + providerId);
+        }
         this.provider = provider;
+    }
+
+    private static EconomyId requireProviderId(TeamEconomyProvider provider) {
+        EconomyId id = Objects.requireNonNull(provider.providerId(), "TeamEconomyProvider.providerId()");
+        if (com.nstut.economy.api.internal.TeamWalletState.UNKNOWN_PROVIDER_ID.equals(id)) {
+            throw new IllegalArgumentException("Reserved Team provider id: " + id);
+        }
+        return id;
     }
 
     public synchronized boolean unregisterProvider(TeamEconomyProvider provider) {
@@ -91,10 +106,12 @@ public final class TeamEconomyRegistry {
         TeamEconomyProvider current = activeProvider();
         if (current == null || !safeAvailable(current)) return Optional.empty();
         try {
+            EconomyId providerId = requireProviderId(current);
             return current.resolveTeam(playerId)
                     .filter(team -> current.isMember(playerId, team.id()))
                     .filter(team -> !isClosing(team.id()))
-                    .map(team -> { com.nstut.economy.api.internal.TeamEconomyLifecycleBridge.observe(team); return team; });
+                    .filter(team -> com.nstut.economy.api.internal.TeamEconomyLifecycleBridge.allowsProvider(providerId, team.id()))
+                    .map(team -> { com.nstut.economy.api.internal.TeamEconomyLifecycleBridge.observe(providerId, team); return team; });
         } catch (RuntimeException ignored) {
             return Optional.empty();
         }
@@ -216,9 +233,12 @@ public final class TeamEconomyRegistry {
         TeamEconomyProvider current = activeProvider();
         if (current == null || !safeAvailable(current)) return TeamRole.NONE;
         try {
+            EconomyId providerId = requireProviderId(current);
             Optional<TeamRef> currentTeam = current.resolveTeam(playerId);
             if (currentTeam.isEmpty() || !currentTeam.get().id().equals(teamId)) return TeamRole.NONE;
+            if (!com.nstut.economy.api.internal.TeamEconomyLifecycleBridge.allowsProvider(providerId, teamId)) return TeamRole.NONE;
             if (!current.isMember(playerId, teamId)) return TeamRole.NONE;
+            com.nstut.economy.api.internal.TeamEconomyLifecycleBridge.observe(providerId, currentTeam.get());
             TeamRole role = current.getRole(playerId, teamId);
             return role == null ? TeamRole.NONE : role;
         } catch (RuntimeException ignored) {

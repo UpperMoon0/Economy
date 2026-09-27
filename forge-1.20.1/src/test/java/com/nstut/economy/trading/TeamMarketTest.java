@@ -28,6 +28,7 @@ class TeamMarketTest extends MinecraftTestBase {
     OrderManager orders;
     EconomyAccountData data;
     final TeamEconomyProvider provider = new TeamEconomyProvider() {
+        public EconomyId providerId() { return EconomyId.of("test", "team_market"); }
         public Optional<TeamRef> resolveTeam(UUID player) { return roles.containsKey(player) && !deleted ? getTeam(team) : Optional.empty(); }
         public Optional<TeamRef> getTeam(UUID id) { return team.equals(id) && !deleted ? Optional.of(new TeamRef(team, "Builders", currentOwner)) : Optional.empty(); }
         public TeamRole getRole(UUID player, UUID id) { return roles.getOrDefault(player, TeamRole.NONE); }
@@ -37,6 +38,30 @@ class TeamMarketTest extends MinecraftTestBase {
     };
     ItemCommodity commodity() { return new ItemCommodity(new ResourceLocation("minecraft", "iron_ingot"), Items.IRON_INGOT, BigDecimal.ONE); }
     MarketIdentity teamIdentity(UUID actor) { return new MarketIdentity(AccountRef.team(team), actor, AccountRef.team(team)); }
+    TeamEconomyProvider deletingFallbackProvider() {
+        return new com.nstut.economy.api.internal.FallbackTeamEconomyProvider() {
+            public EconomyId providerId() { return EconomyId.of("test", "ftb_like_fallback"); }
+            public Optional<TeamRef> resolveTeam(UUID player) { return Optional.empty(); }
+            public Optional<TeamRef> getTeam(UUID id) { return Optional.empty(); }
+            public TeamRole getRole(UUID player, UUID id) { return TeamRole.NONE; }
+            public boolean isTeamDeleted(UUID id) { return true; }
+        };
+    }
+    TeamEconomyProvider collidingFallbackProvider() {
+        return new com.nstut.economy.api.internal.FallbackTeamEconomyProvider() {
+            public EconomyId providerId() { return EconomyId.of("test", "colliding_ftb_like_fallback"); }
+            public Optional<TeamRef> resolveTeam(UUID player) {
+                return outsider.equals(player) ? Optional.of(new TeamRef(team, "Collision", outsider)) : Optional.empty();
+            }
+            public Optional<TeamRef> getTeam(UUID id) {
+                return team.equals(id) ? Optional.of(new TeamRef(team, "Collision", outsider)) : Optional.empty();
+            }
+            public TeamRole getRole(UUID player, UUID id) {
+                return outsider.equals(player) && team.equals(id) ? TeamRole.OWNER : TeamRole.NONE;
+            }
+            public Collection<UUID> getMembers(UUID id) { return team.equals(id) ? List.of(outsider) : List.of(); }
+        };
+    }
     @BeforeEach void setup() {
         com.nstut.economy.api.internal.EconomyRuntimeBridge.unbind();
         EconomyApi.teamEconomy().provider().ifPresent(EconomyApi.teamEconomy()::unregisterProvider);
@@ -216,6 +241,7 @@ class TeamMarketTest extends MinecraftTestBase {
         assertTrue(data.getTeamWallets().get(team).storageSettled());
         assertEquals(Set.of(owner, officer), data.getTeamWallets().get(team).settledMembers());
         data = EconomyAccountData.load(data.save(new CompoundTag()));
+        assertEquals(provider.providerId(), data.getTeamWallets().get(team).providerId());
         accounts = new AccountManager(); accounts.loadFrom(data); TeamWalletLifecycle.bind(data);
         TeamWalletLifecycle.deleted(new TeamRef(team, "Replay with old owner", owner));
         TeamWalletLifecycle.reconcile(accounts, orders, null);
@@ -227,6 +253,7 @@ class TeamMarketTest extends MinecraftTestBase {
         TeamWalletLifecycle.clear();
         assertTrue(EconomyApi.teamEconomy().unregisterProvider(provider));
         TeamEconomyProvider incomplete = new TeamEconomyProvider() {
+            public EconomyId providerId() { return EconomyId.of("test", "incomplete_team_provider"); }
             public Optional<TeamRef> resolveTeam(UUID player) {
                 return roles.containsKey(player) ? Optional.of(new TeamRef(team, "Incomplete", owner)) : Optional.empty();
             }
@@ -244,10 +271,13 @@ class TeamMarketTest extends MinecraftTestBase {
         try {
             TeamRef ref = new TeamRef(team, "Incomplete", owner);
             TeamWalletLifecycle.observe(ref);
-            assertFalse(isolated.getTeamWallets().containsKey(team),
-                    "missing membership enumeration must not create an owner-only settlement snapshot");
+            TeamWalletState tracked = isolated.getTeamWallets().get(team);
+            assertNotNull(tracked, "provider provenance must persist even without a member snapshot");
+            assertEquals(incomplete.providerId(), tracked.providerId());
+            assertTrue(tracked.settlementMembers().isEmpty(),
+                    "missing membership enumeration must not synthesize an owner-only settlement snapshot");
             TeamWalletLifecycle.deleted(ref);
-            assertFalse(isolated.getTeamWallets().containsKey(team),
+            assertFalse(isolated.getTeamWallets().get(team).closing(),
                     "closure must remain blocked rather than guessing the owner as the only recipient");
             assertEquals(0, isolatedAccounts.getOrCreateTeamAccount(team).getBalance().compareTo(new BigDecimal("100")));
         } finally {
@@ -281,6 +311,158 @@ class TeamMarketTest extends MinecraftTestBase {
                 .add(accounts.getOrCreatePlayerAccount(third).getBalance());
         assertEquals(0, total.compareTo(new BigDecimal("100")));
     }
+    @Test void customWalletIsNotDeletedWhenFtbLikeFallbackBecomesActive() {
+        BlockPos vault = new BlockPos(31, 70, 31);
+        BlockPos tank = new BlockPos(32, 70, 32);
+        data.addVault(AccountRef.team(team), vault, "minecraft:overworld");
+        data.addTank(AccountRef.team(team), tank, "minecraft:the_nether");
+        var teamOrder = orders.createBuyOrder(teamIdentity(officer), commodity(), 2, BigDecimal.ONE, false, null)
+                .order().orElseThrow();
+        TeamEconomyProvider fallback = deletingFallbackProvider();
+        EconomyApi.teamEconomy().registerProvider(fallback);
+        assertEquals(provider.providerId(), data.getTeamWallets().get(team).providerId());
+        assertTrue(EconomyApi.teamEconomy().unregisterProvider(provider));
+        try {
+            assertSame(fallback, EconomyApi.teamEconomy().provider().orElseThrow());
+            TeamWalletLifecycle.reconcile(accounts, orders, null);
+            TeamWalletState state = data.getTeamWallets().get(team);
+            assertEquals(provider.providerId(), state.providerId());
+            assertFalse(state.closing(), "fallback provider must not delete a custom-provider wallet");
+            assertEquals(0, accounts.getOrCreateTeamAccount(team).getBalance().compareTo(new BigDecimal("100")));
+            assertEquals(0, accounts.getOrCreatePlayerAccount(owner).getBalance().compareTo(BigDecimal.ZERO));
+            assertEquals(0, accounts.getOrCreatePlayerAccount(officer).getBalance().compareTo(BigDecimal.ZERO));
+            assertEquals(vault, data.getStorageVaults().get(AccountRef.team(team)).get(0).pos);
+            assertEquals(tank, data.getStorageTanks().get(AccountRef.team(team)).get(0).pos);
+            assertFalse(data.getStorageVaults().containsKey(AccountRef.player(owner)));
+            assertFalse(data.getStorageTanks().containsKey(AccountRef.player(owner)));
+            assertTrue(orders.getOrder(teamOrder.getOrderId()).isPresent(),
+                    "foreign fallback provider must not cancel the custom provider's Team order");
+        } finally {
+            EconomyApi.teamEconomy().unregisterProvider(fallback);
+            EconomyApi.teamEconomy().registerProvider(provider);
+        }
+    }
+
+    @Test void fallbackUuidCollisionCannotAccessOrCancelCustomProviderState() {
+        var buy = orders.createBuyOrder(teamIdentity(officer), commodity(), 2, BigDecimal.ONE, false, null)
+                .order().orElseThrow();
+        TeamEconomyProvider fallback = collidingFallbackProvider();
+        EconomyApi.teamEconomy().registerProvider(fallback);
+        assertTrue(EconomyApi.teamEconomy().unregisterProvider(provider));
+        try {
+            assertSame(fallback, EconomyApi.teamEconomy().provider().orElseThrow());
+            assertTrue(EconomyApi.teamEconomy().resolveTeam(outsider).isEmpty(),
+                    "fallback must not expose a colliding UUID owned by another provider");
+            assertFalse(EconomyApi.teamEconomy().canSpend(outsider, team));
+            TeamWalletLifecycle.reconcile(accounts, orders, null);
+            assertTrue(orders.getOrder(buy.getOrderId()).isPresent(),
+                    "provider switch must not cancel durable orders owned by the missing provider");
+            assertEquals(provider.providerId(), data.getTeamWallets().get(team).providerId());
+            assertFalse(data.getTeamWallets().get(team).closing());
+            assertEquals(0, accounts.getOrCreateTeamAccount(team).getBalance().compareTo(new BigDecimal("100")));
+        } finally {
+            EconomyApi.teamEconomy().unregisterProvider(fallback);
+            EconomyApi.teamEconomy().registerProvider(provider);
+        }
+    }
+
+    @Test void missingCustomProviderAfterRestartPreservesPersistedWalletProvenance() {
+        CompoundTag saved = data.save(new CompoundTag());
+        EconomyAccountData restored = EconomyAccountData.load(saved);
+        assertEquals(provider.providerId(), restored.getTeamWallets().get(team).providerId());
+
+        TeamEconomyProvider fallback = deletingFallbackProvider();
+        EconomyApi.teamEconomy().registerProvider(fallback);
+        assertTrue(EconomyApi.teamEconomy().unregisterProvider(provider));
+        TeamWalletLifecycle.clear();
+        AccountManager restoredAccounts = new AccountManager();
+        restoredAccounts.loadFrom(restored);
+        TeamWalletLifecycle.bind(restored);
+        try {
+            assertSame(fallback, EconomyApi.teamEconomy().provider().orElseThrow());
+            TeamWalletLifecycle.reconcile(restoredAccounts, orders, null);
+            TeamWalletState state = restored.getTeamWallets().get(team);
+            assertEquals(provider.providerId(), state.providerId());
+            assertFalse(state.closing(), "missing owning provider must preserve the wallet fail-closed");
+            assertEquals(0, restoredAccounts.getOrCreateTeamAccount(team).getBalance().compareTo(new BigDecimal("100")));
+            assertTrue(TeamWalletLifecycle.replacementOwner(AccountRef.team(team)).isEmpty());
+        } finally {
+            TeamWalletLifecycle.clear();
+            EconomyApi.teamEconomy().unregisterProvider(fallback);
+            EconomyApi.teamEconomy().registerProvider(provider);
+            TeamWalletLifecycle.bind(data);
+        }
+    }
+
+    @Test void closingCustomWalletDoesNotContinueSettlementUnderFallbackAfterRestart() {
+        TeamWalletLifecycle.deleted(new TeamRef(team, "Builders", owner));
+        TeamWalletState beforeRestart = data.getTeamWallets().get(team);
+        assertTrue(beforeRestart.closing());
+        assertEquals(provider.providerId(), beforeRestart.providerId());
+        assertFalse(beforeRestart.storageSettled());
+
+        EconomyAccountData restored = EconomyAccountData.load(data.save(new CompoundTag()));
+        AccountManager restoredAccounts = new AccountManager();
+        restoredAccounts.loadFrom(restored);
+        TeamEconomyProvider fallback = deletingFallbackProvider();
+        EconomyApi.teamEconomy().registerProvider(fallback);
+        assertTrue(EconomyApi.teamEconomy().unregisterProvider(provider));
+        TeamWalletLifecycle.clear();
+        TeamWalletLifecycle.bind(restored);
+        try {
+            TeamWalletLifecycle.reconcile(restoredAccounts, orders, null);
+            TeamWalletState state = restored.getTeamWallets().get(team);
+            assertEquals(provider.providerId(), state.providerId());
+            assertTrue(state.closing());
+            assertFalse(state.storageSettled(),
+                    "foreign fallback provider must not finish cash/storage settlement");
+            assertTrue(state.settledMembers().isEmpty());
+            assertEquals(0, restoredAccounts.getOrCreateTeamAccount(team).getBalance().compareTo(new BigDecimal("100")));
+            assertEquals(0, restoredAccounts.getOrCreatePlayerAccount(owner).getBalance().compareTo(BigDecimal.ZERO));
+            assertEquals(0, restoredAccounts.getOrCreatePlayerAccount(officer).getBalance().compareTo(BigDecimal.ZERO));
+        } finally {
+            TeamWalletLifecycle.clear();
+            EconomyApi.teamEconomy().unregisterProvider(fallback);
+            EconomyApi.teamEconomy().registerProvider(provider);
+            TeamWalletLifecycle.bind(data);
+        }
+    }
+
+    @Test void preProvenanceWalletNeedsPositiveResolutionBeforeProviderCanClaimIt() {
+        CompoundTag legacyTag = data.save(new CompoundTag());
+        legacyTag.getList("TeamWallets", 10).getCompound(0).remove("Provider");
+        EconomyAccountData legacy = EconomyAccountData.load(legacyTag);
+        assertEquals(TeamWalletState.UNKNOWN_PROVIDER_ID, legacy.getTeamWallets().get(team).providerId());
+
+        TeamEconomyProvider fallback = deletingFallbackProvider();
+        EconomyApi.teamEconomy().registerProvider(fallback);
+        assertTrue(EconomyApi.teamEconomy().unregisterProvider(provider));
+        TeamWalletLifecycle.clear();
+        AccountManager legacyAccounts = new AccountManager();
+        legacyAccounts.loadFrom(legacy);
+        TeamWalletLifecycle.bind(legacy);
+        try {
+            TeamWalletLifecycle.reconcile(legacyAccounts, orders, null);
+            assertEquals(TeamWalletState.UNKNOWN_PROVIDER_ID, legacy.getTeamWallets().get(team).providerId());
+            assertFalse(legacy.getTeamWallets().get(team).closing(),
+                    "negative fallback lookup must not claim/delete pre-provenance state");
+            assertEquals(0, legacyAccounts.getOrCreateTeamAccount(team).getBalance().compareTo(new BigDecimal("100")));
+
+            EconomyApi.teamEconomy().unregisterProvider(fallback);
+            EconomyApi.teamEconomy().registerProvider(provider);
+            TeamWalletLifecycle.reconcile(legacyAccounts, orders, null);
+            assertEquals(provider.providerId(), legacy.getTeamWallets().get(team).providerId(),
+                    "positive resolution by the original provider should migrate legacy provenance");
+            assertFalse(legacy.getTeamWallets().get(team).closing());
+        } finally {
+            TeamWalletLifecycle.clear();
+            EconomyApi.teamEconomy().unregisterProvider(fallback);
+            EconomyApi.teamEconomy().unregisterProvider(provider);
+            EconomyApi.teamEconomy().registerProvider(provider);
+            TeamWalletLifecycle.bind(data);
+        }
+    }
+
     @Test void unavailableProviderDoesNotMeanDeletedAndStaleSelectionNeverChargesPersonal() {
         assertTrue(MarketWalletSelection.selectTeam(officer));
         unavailable = true;

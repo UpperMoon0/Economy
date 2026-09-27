@@ -2,6 +2,7 @@ package com.nstut.forge.gametest;
 
 import com.nstut.Economy;
 import com.nstut.economy.api.EconomyApi;
+import com.nstut.economy.api.EconomyId;
 import com.nstut.economy.api.ICommodity;
 import com.nstut.economy.api.IOrder;
 import com.nstut.economy.api.AccountRef;
@@ -237,6 +238,7 @@ public final class EconomyGameTests {
         boolean[] activeMember = {true};
         TeamRole[] memberRole = {TeamRole.OFFICER};
         TeamEconomyProvider fake = new TeamEconomyProvider() {
+            @Override public EconomyId providerId() { return EconomyId.of("test", "economy_gametest"); }
             @Override public java.util.Optional<TeamRef> resolveTeam(UUID playerId) {
                 return activeMember[0] && actor.equals(playerId) ? java.util.Optional.of(team) : java.util.Optional.empty();
             }

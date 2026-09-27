@@ -113,6 +113,7 @@ New code should provide a non-null transaction context with a namespaced cause.
 
 Neutral external-team bridge:
 
+- `EconomyId providerId()` - stable namespaced identity for the external Team domain. This id is persisted with Team wallet lifecycle state and **must not change** for the same provider across restarts or addon versions. Different providers must use different ids.
 - `Optional<TeamRef> resolveTeam(UUID playerId)`
 - `Optional<TeamRef> getTeam(UUID teamId)`
 - `TeamRole getRole(UUID playerId, UUID teamId)`
@@ -123,7 +124,7 @@ Neutral external-team bridge:
 
 Economy's built-in FTB Teams bridge is optional and maps only party teams. FTB personal teams and server teams are excluded. It is registered as an internal fallback: an addon-owned provider registered through `registerProvider(...)` takes precedence, and unregistering that custom provider exposes the FTB fallback again. FTB lifecycle events are ignored while a non-FTB provider is active.
 
-`getMembers(...)` is part of the lifecycle safety contract, not a cosmetic convenience. Equal-share disband settlement uses the last authoritative complete member snapshot. An empty/failed member enumeration never degrades to owner-only payout; settlement remains blocked until a valid snapshot exists.
+`providerId()` and `getMembers(...)` are lifecycle-safety contracts, not cosmetic metadata. Economy persists provider provenance with each Team wallet. Only the currently active provider whose `providerId()` matches that persisted owner may authorize, refresh, delete, or settle the wallet. If the owning provider is missing and another provider (including the FTB fallback) becomes active, the wallet, Team storage, and durable Team orders remain preserved fail-closed. Pre-provenance development data is only claimed after a provider positively resolves the Team; a negative lookup never becomes a deletion. Equal-share disband settlement uses the last authoritative complete member snapshot. An empty/failed member enumeration never degrades to owner-only payout; settlement remains blocked until a valid snapshot exists.
 
 ### `TeamEconomyRegistry`
 

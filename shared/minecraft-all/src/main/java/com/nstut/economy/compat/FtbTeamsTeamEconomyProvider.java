@@ -1,6 +1,7 @@
 package com.nstut.economy.compat;
 
 import com.nstut.economy.api.internal.FallbackTeamEconomyProvider;
+import com.nstut.economy.api.EconomyId;
 import com.nstut.economy.api.TeamRef;
 import com.nstut.economy.api.TeamRole;
 
@@ -16,6 +17,7 @@ import java.util.UUID;
  * FTB Teams.
  */
 public final class FtbTeamsTeamEconomyProvider implements FallbackTeamEconomyProvider {
+    public static final EconomyId PROVIDER_ID = EconomyId.of("economy", "ftb_teams");
     private static final String API_CLASS = "dev.ftb.mods.ftbteams.api.FTBTeamsAPI";
     private static final String MANAGER_CLASS = "dev.ftb.mods.ftbteams.api.TeamManager";
     private static final String TEAM_CLASS = "dev.ftb.mods.ftbteams.api.Team";
@@ -54,6 +56,11 @@ public final class FtbTeamsTeamEconomyProvider implements FallbackTeamEconomyPro
         this.getShortNameMethod = getShortNameMethod;
         this.getMembersMethod = getMembersMethod;
         this.getRankForPlayerMethod = getRankForPlayerMethod;
+    }
+
+    @Override
+    public EconomyId providerId() {
+        return PROVIDER_ID;
     }
 
     public static Optional<FtbTeamsTeamEconomyProvider> createIfPresent() {

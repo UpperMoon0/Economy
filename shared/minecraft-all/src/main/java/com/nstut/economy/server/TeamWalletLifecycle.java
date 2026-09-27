@@ -22,7 +22,9 @@ public final class TeamWalletLifecycle {
 
     public static void bind(EconomyAccountData accountData) {
         data = accountData;
-        com.nstut.economy.api.internal.TeamEconomyLifecycleBridge.bind(TeamWalletLifecycle::observe, TeamWalletLifecycle::isClosing);
+        com.nstut.economy.api.internal.TeamEconomyLifecycleBridge.bind(
+                TeamWalletLifecycle::observeFromProvider, TeamWalletLifecycle::isClosing,
+                TeamWalletLifecycle::allowsProvider, TeamWalletLifecycle::ownsProvider);
     }
 
     public static void clear() {
@@ -35,6 +37,18 @@ public final class TeamWalletLifecycle {
         return state != null && state.closing();
     }
 
+    private static boolean allowsProvider(EconomyId providerId, UUID teamId) {
+        if (data == null || providerId == null || teamId == null) return true;
+        TeamWalletState state = data.getTeamWallets().get(teamId);
+        return state == null || !state.hasKnownProvider() || state.providerId().equals(providerId);
+    }
+
+    private static boolean ownsProvider(EconomyId providerId, UUID teamId) {
+        if (data == null || providerId == null || teamId == null) return false;
+        TeamWalletState state = data.getTeamWallets().get(teamId);
+        return state != null && state.hasKnownProvider() && state.providerId().equals(providerId);
+    }
+
     /** Deleted team-owned physical storage is entrusted to the last owner after cash settlement finishes. */
     public static java.util.Optional<AccountRef> replacementOwner(AccountRef owner) {
         if (owner == null || owner.kind() != AccountKind.TEAM || data == null) return java.util.Optional.empty();
@@ -44,60 +58,111 @@ public final class TeamWalletLifecycle {
                 : java.util.Optional.empty();
     }
 
+    private static void observeFromProvider(EconomyId providerId, TeamRef team) {
+        observe(providerId, team, liveMembers(providerId, team));
+    }
+
     public static void observe(TeamRef team) {
-        observe(team, liveMembers(team));
+        var provider = activeProvider();
+        if (provider == null) return;
+        EconomyId providerId = provider.providerId();
+        observe(providerId, team, liveMembers(providerId, team));
     }
 
     public static void observe(TeamRef team, Collection<UUID> members) {
-        if (data == null || team == null || isClosing(team.id())) return;
+        var provider = activeProvider();
+        if (provider == null) return;
+        observe(provider.providerId(), team, members);
+    }
+
+    private static void observe(EconomyId providerId, TeamRef team, Collection<UUID> members) {
+        if (data == null || providerId == null || team == null || isClosing(team.id())) return;
         TeamWalletState previous = data.getTeamWallets().get(team.id());
+        if (previous != null && previous.hasKnownProvider() && !previous.providerId().equals(providerId)) {
+            Economy.LOGGER.warn("Refusing to let Team provider {} claim wallet {} owned by {}",
+                    providerId, team.id(), previous.providerId());
+            return;
+        }
+
         Collection<UUID> snapshot = members;
-        if (snapshot == null || snapshot.isEmpty()) {
-            if (previous == null || previous.settlementMembers().isEmpty()) return;
+        if ((snapshot == null || snapshot.isEmpty()) && previous != null && !previous.settlementMembers().isEmpty()) {
             snapshot = previous.settlementMembers();
         }
-        data.putTeamWallet(new TeamWalletState(team.id(), team.ownerId(), false, false,
+        if (snapshot == null) snapshot = List.of();
+        // Provider provenance is durable even when membership enumeration is temporarily unavailable.
+        // An empty settlementMembers list means deletion settlement is blocked until a complete snapshot exists.
+        data.putTeamWallet(new TeamWalletState(team.id(), team.ownerId(), providerId, false, false,
                 java.util.List.copyOf(snapshot), java.util.Set.of()));
     }
 
     public static void deleted(TeamRef team) {
-        if (data == null || team == null) return;
+        var provider = activeProvider();
+        if (provider == null || data == null || team == null) return;
+        EconomyId providerId = provider.providerId();
         TeamWalletState previous = data.getTeamWallets().get(team.id());
-        Collection<UUID> members = previous != null ? previous.settlementMembers() : liveMembers(team);
-        if (members == null || members.isEmpty()) {
+        if (!canMutateLifecycle(previous, providerId, team.id())) return;
+        Collection<UUID> members = previous.settlementMembers();
+        if (members.isEmpty()) {
             Economy.LOGGER.error("Refusing to settle deleted team {} without an authoritative final member snapshot", team.id());
             return;
         }
-        deleted(team, members);
+        deleted(providerId, team, members);
     }
 
     public static void deleted(TeamRef team, Collection<UUID> members) {
-        if (data == null || team == null) return;
-        // The first deletion snapshot is authoritative. Replayed events cannot change recipients or custody.
+        var provider = activeProvider();
+        if (provider == null || data == null || team == null) return;
+        deleted(provider.providerId(), team, members);
+    }
+
+    private static void deleted(EconomyId providerId, TeamRef team, Collection<UUID> members) {
+        if (data == null || providerId == null || team == null) return;
         TeamWalletState previous = data.getTeamWallets().get(team.id());
-        if (previous != null && previous.closing()) return;
+        if (!canMutateLifecycle(previous, providerId, team.id())) return;
+        if (previous.closing()) return;
+
         Collection<UUID> recipients = members;
-        if (recipients == null || recipients.isEmpty()) {
-            recipients = previous != null ? previous.settlementMembers() : List.of();
-        }
+        if (recipients == null || recipients.isEmpty()) recipients = previous.settlementMembers();
         if (recipients.isEmpty()) {
             Economy.LOGGER.error("Refusing to settle deleted team {} without an authoritative final member snapshot", team.id());
             return;
         }
-        data.putTeamWallet(new TeamWalletState(team.id(), team.ownerId(), true, false, java.util.List.copyOf(recipients), java.util.Set.of()));
+        data.putTeamWallet(new TeamWalletState(team.id(), team.ownerId(), providerId, true, false,
+                java.util.List.copyOf(recipients), java.util.Set.of()));
     }
 
-    private static Collection<UUID> liveMembers(TeamRef team) {
-        if (team == null) return List.of();
+    private static boolean canMutateLifecycle(TeamWalletState state, EconomyId providerId, UUID teamId) {
+        if (state == null) {
+            Economy.LOGGER.warn("Refusing Team lifecycle mutation for {} without persisted provider provenance", teamId);
+            return false;
+        }
+        if (!state.hasKnownProvider()) {
+            Economy.LOGGER.warn("Refusing Team lifecycle mutation for {} until a provider positively reclaims legacy state", teamId);
+            return false;
+        }
+        if (!state.providerId().equals(providerId)) {
+            Economy.LOGGER.warn("Refusing Team lifecycle mutation for {} from provider {}; wallet belongs to {}",
+                    teamId, providerId, state.providerId());
+            return false;
+        }
+        return true;
+    }
+
+    private static TeamEconomyProvider activeProvider() {
         var registry = EconomyApi.teamEconomy();
         var provider = registry.provider().orElse(null);
-        if (provider != null && registry.isProviderAvailable()) {
-            try {
-                Collection<UUID> members = provider.getMembers(team.id());
-                if (members != null && !members.isEmpty()) return members;
-            } catch (RuntimeException failure) {
-                Economy.LOGGER.warn("Could not snapshot members for team {}", team.id(), failure);
-            }
+        return provider != null && registry.isProviderAvailable() ? provider : null;
+    }
+
+    private static Collection<UUID> liveMembers(EconomyId providerId, TeamRef team) {
+        if (team == null || providerId == null) return List.of();
+        var provider = activeProvider();
+        if (provider == null || !providerId.equals(provider.providerId())) return List.of();
+        try {
+            Collection<UUID> members = provider.getMembers(team.id());
+            if (members != null && !members.isEmpty()) return members;
+        } catch (RuntimeException failure) {
+            Economy.LOGGER.warn("Could not snapshot members for team {} from provider {}", team.id(), providerId, failure);
         }
         return List.of();
     }
@@ -112,31 +177,50 @@ public final class TeamWalletLifecycle {
         var registry = EconomyApi.teamEconomy();
         var provider = registry.provider().orElse(null);
         if (provider == null || !registry.isProviderAvailable()) return;
+        EconomyId providerId = provider.providerId();
 
-        // Include wallets created through the account API, even if no player has opened the UI.
+        // Include wallets created through the account API, but never let a different provider claim a persisted UUID.
         for (AccountRef ref : data.getAccountBalances().keySet()) {
             if (ref.kind() != AccountKind.TEAM || isClosing(ref.id())) continue;
-            try { provider.getTeam(ref.id()).ifPresent(TeamWalletLifecycle::observe); }
-            catch (RuntimeException failure) { Economy.LOGGER.warn("Could not observe team {}", ref.id(), failure); }
-        }
-
-        // Refresh owner/member snapshots while teams are live; polling is also the fallback if lifecycle events are unavailable.
-        for (TeamWalletState state : data.getTeamWallets().values()) {
-            if (state.closing()) continue;
+            TeamWalletState existing = data.getTeamWallets().get(ref.id());
+            if (existing != null && existing.hasKnownProvider() && !existing.providerId().equals(providerId)) continue;
             try {
-                var current = provider.getTeam(state.teamId());
-                if (current.isPresent()) observe(current.get());
-                else if (provider.isTeamDeleted(state.teamId()))
-                    deleted(new TeamRef(state.teamId(), "Deleted team", state.ownerId()), state.settlementMembers());
+                provider.getTeam(ref.id()).ifPresent(team -> observe(providerId, team, liveMembers(providerId, team)));
             } catch (RuntimeException failure) {
-                Economy.LOGGER.warn("Team lookup failed; preserving wallet {}", state.teamId(), failure);
+                Economy.LOGGER.warn("Could not observe team {} from provider {}", ref.id(), providerId, failure);
             }
         }
 
-        // Closing principals are already rejected by the registry. First unwind every outstanding order/recovery reference.
+        // Only the provider that owns a persisted wallet may refresh or delete it. Legacy unowned state may be
+        // claimed only by a positive getTeam() result; a negative lookup can never turn it into a deletion.
+        for (TeamWalletState persisted : List.copyOf(data.getTeamWallets().values())) {
+            TeamWalletState state = persisted;
+            if (state.hasKnownProvider() && !state.providerId().equals(providerId)) continue;
+            try {
+                var current = provider.getTeam(state.teamId());
+                if (!state.hasKnownProvider()) {
+                    if (current.isEmpty()) continue; // Unknown legacy provenance is never deleted from a negative lookup.
+                    state = state.withProvider(providerId);
+                    data.putTeamWallet(state);
+                }
+                if (state.closing()) continue;
+                if (current.isPresent()) {
+                    TeamRef team = current.get();
+                    observe(providerId, team, liveMembers(providerId, team));
+                } else if (provider.isTeamDeleted(state.teamId())) {
+                    deleted(providerId, new TeamRef(state.teamId(), "Deleted team", state.ownerId()), state.settlementMembers());
+                }
+            } catch (RuntimeException failure) {
+                Economy.LOGGER.warn("Team lookup failed for provider {}; preserving wallet {}",
+                        providerId, state.teamId(), failure);
+            }
+        }
+
+        // Closing settlement is also provider-owned. If that provider is absent, preserve cash/storage fail-closed.
         orders.revalidateTeamOrders(level);
         for (TeamWalletState snapshot : data.getTeamWallets().values()) {
             if (!snapshot.closing() || snapshot.storageSettled() || orders.hasTeamRecoveryReferences(snapshot.teamId())) continue;
+            if (!snapshot.hasKnownProvider() || !snapshot.providerId().equals(providerId)) continue;
             settle(snapshot, accounts, level);
         }
     }

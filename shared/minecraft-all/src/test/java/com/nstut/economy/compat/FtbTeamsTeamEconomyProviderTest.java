@@ -28,6 +28,7 @@ class FtbTeamsTeamEconomyProviderTest {
         FTBTeamsAPI.configure(false, null);
         var ftb = FtbTeamsTeamEconomyProvider.createIfPresent().orElseThrow();
         com.nstut.economy.api.TeamEconomyProvider custom = new com.nstut.economy.api.TeamEconomyProvider() {
+            @Override public com.nstut.economy.api.EconomyId providerId() { return com.nstut.economy.api.EconomyId.of("test", "custom_ftb_guard"); }
             @Override public Optional<com.nstut.economy.api.TeamRef> resolveTeam(UUID playerId) { return Optional.empty(); }
             @Override public Optional<com.nstut.economy.api.TeamRef> getTeam(UUID teamId) { return Optional.empty(); }
             @Override public TeamRole getRole(UUID playerId, UUID teamId) { return TeamRole.NONE; }
@@ -47,6 +48,7 @@ class FtbTeamsTeamEconomyProviderTest {
         FTBTeamsAPI.configure(true, manager);
 
         var provider = FtbTeamsTeamEconomyProvider.createIfPresent().orElseThrow();
+        assertEquals(com.nstut.economy.api.EconomyId.of("economy", "ftb_teams"), provider.providerId());
         assertTrue(provider.isAvailable());
         assertTrue(provider.resolveTeam(player).isEmpty(),
                 "FTB personal teams must not become duplicate Economy team wallets");

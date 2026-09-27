@@ -10,6 +10,13 @@ import java.util.UUID;
  * own identity/membership/rank lookup; Economy remains the source of truth for money.
  */
 public interface TeamEconomyProvider {
+    /**
+     * Stable, namespaced identity for this provider's Team domain. This value is persisted with Team
+     * wallet lifecycle state and must never change for the same external Team system across restarts
+     * or addon versions. Different providers must use different ids.
+     */
+    EconomyId providerId();
+
     Optional<TeamRef> resolveTeam(UUID playerId);
     Optional<TeamRef> getTeam(UUID teamId);
     TeamRole getRole(UUID playerId, UUID teamId);
