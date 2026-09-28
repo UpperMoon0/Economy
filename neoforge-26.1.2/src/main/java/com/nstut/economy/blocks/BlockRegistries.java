@@ -46,12 +46,18 @@ public class BlockRegistries {
     public static final DeferredHolder<MenuType<?>, MenuType<MarketMenu>> MARKET_MENU =
             MENUS.register("market", () -> IMenuTypeExtension.create((id, inv, data) -> new MarketMenu(id, inv)));
     public static final DeferredHolder<MenuType<?>, MenuType<VaultMenu>> VAULT_MENU =
-            MENUS.register("vault", () -> IMenuTypeExtension.create((id, inv, data) -> new VaultMenu(id, inv)));
+            MENUS.register("vault", () -> IMenuTypeExtension.create((id, inv, data) -> {
+                BlockPos pos = com.nstut.economy.client.ClientMenuContext.consumeVaultPos();
+                VaultBlockEntity vault = pos != null && inv.player.level().getBlockEntity(pos) instanceof VaultBlockEntity v ? v : null;
+                return new VaultMenu(id, inv,
+                        vault != null ? vault : new net.minecraft.world.SimpleContainer(VaultMenu.CONTAINER_SIZE),
+                        new net.minecraft.world.inventory.SimpleContainerData(VaultMenu.DATA_COUNT), vault);
+            }));
     public static final DeferredHolder<MenuType<?>, MenuType<TankMenu>> TANK_MENU =
             MENUS.register("tank", () -> IMenuTypeExtension.create((id, inv, data) -> {
                 BlockPos pos = com.nstut.economy.client.ClientMenuContext.consumeTankPos();
                 TankBlockEntity tank = pos != null && inv.player.level().getBlockEntity(pos) instanceof TankBlockEntity t ? t : null;
-                return new TankMenu(id, inv, tank, new net.minecraft.world.inventory.SimpleContainerData(1), tank);
+                return new TankMenu(id, inv, tank, new net.minecraft.world.inventory.SimpleContainerData(TankMenu.DATA_COUNT), tank);
             }));
 
     public static void init(IEventBus bus) {

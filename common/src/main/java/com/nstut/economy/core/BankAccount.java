@@ -1,5 +1,6 @@
 package com.nstut.economy.core;
 
+import com.nstut.economy.api.AccountRef;
 import com.nstut.economy.api.EconomyEvents;
 import com.nstut.economy.api.EconomyId;
 import com.nstut.economy.api.IBankAccount;
@@ -21,6 +22,7 @@ public class BankAccount implements IBankAccount {
     private static final Object TRANSFER_TIE_LOCK = new Object();
     private static final System.Logger LOGGER = System.getLogger(BankAccount.class.getName());
 
+    private final AccountRef accountRef;
     private final UUID owner;
     private BigDecimal balance;
     private final List<ITransactionRecord> transactionHistory;
@@ -29,11 +31,20 @@ public class BankAccount implements IBankAccount {
     private boolean mutationInProgress;
 
     public BankAccount(UUID owner, BigDecimal initialBalance) {
-        this(owner, initialBalance, null);
+        this(AccountRef.player(owner), initialBalance, null);
     }
 
     public BankAccount(UUID owner, BigDecimal initialBalance, Consumer<BigDecimal> onBalanceChanged) {
-        this.owner = Objects.requireNonNull(owner, "owner");
+        this(AccountRef.player(owner), initialBalance, onBalanceChanged);
+    }
+
+    public BankAccount(AccountRef owner, BigDecimal initialBalance) {
+        this(owner, initialBalance, null);
+    }
+
+    public BankAccount(AccountRef owner, BigDecimal initialBalance, Consumer<BigDecimal> onBalanceChanged) {
+        this.accountRef = Objects.requireNonNull(owner, "owner");
+        this.owner = owner.id();
         this.balance = Objects.requireNonNull(initialBalance, "initialBalance");
         this.maxHistory = EconomyConfig.getInstance().getMaxTransactionHistory();
         this.transactionHistory = new LinkedList<>();
@@ -43,6 +54,11 @@ public class BankAccount implements IBankAccount {
     @Override
     public UUID getOwner() {
         return owner;
+    }
+
+    @Override
+    public AccountRef getAccountRef() {
+        return accountRef;
     }
 
     @Override
@@ -60,7 +76,7 @@ public class BankAccount implements IBankAccount {
             ctx = contextOrDefault(ctx, TransactionCauses.CREDIT, "Legacy credit");
             BigDecimal previous = balance;
             EconomyEvents.BalanceChangePre pre = EconomyEvents.post(
-                    new EconomyEvents.BalanceChangePre(owner, previous, amount, ctx));
+                    new EconomyEvents.BalanceChangePre(accountRef, previous, amount, ctx));
             if (pre.isCancelled()) {
                 return false;
             }
@@ -68,7 +84,7 @@ public class BankAccount implements IBankAccount {
             balance = balance.add(amount);
             recordTransaction(ctx, amount, null);
             notifyBalanceChanged();
-            EconomyEvents.post(new EconomyEvents.BalanceChanged(owner, previous, balance, amount, ctx));
+            EconomyEvents.post(new EconomyEvents.BalanceChanged(accountRef, previous, balance, amount, ctx));
             return true;
         } finally {
             mutationInProgress = false;
@@ -86,7 +102,7 @@ public class BankAccount implements IBankAccount {
             BigDecimal previous = balance;
             BigDecimal delta = amount.negate();
             EconomyEvents.BalanceChangePre pre = EconomyEvents.post(
-                    new EconomyEvents.BalanceChangePre(owner, previous, delta, ctx));
+                    new EconomyEvents.BalanceChangePre(accountRef, previous, delta, ctx));
             if (pre.isCancelled() || balance.compareTo(amount) < 0) {
                 return false;
             }
@@ -94,7 +110,7 @@ public class BankAccount implements IBankAccount {
             balance = balance.subtract(amount);
             recordTransaction(ctx, delta, null);
             notifyBalanceChanged();
-            EconomyEvents.post(new EconomyEvents.BalanceChanged(owner, previous, balance, delta, ctx));
+            EconomyEvents.post(new EconomyEvents.BalanceChanged(accountRef, previous, balance, delta, ctx));
             return true;
         } finally {
             mutationInProgress = false;
@@ -114,7 +130,7 @@ public class BankAccount implements IBankAccount {
     }
 
     private boolean transferToBuiltIn(BankAccount target, BigDecimal amount, ITransactionContext ctx) {
-        int ownerOrder = owner.compareTo(target.owner);
+        int ownerOrder = accountRef.compareTo(target.accountRef);
         if (ownerOrder == 0) {
             synchronized (TRANSFER_TIE_LOCK) {
                 synchronized (this) {
@@ -144,7 +160,7 @@ public class BankAccount implements IBankAccount {
         target.mutationInProgress = true;
         try {
             EconomyEvents.TransferPre transferPre = EconomyEvents.post(
-                    new EconomyEvents.TransferPre(owner, target.owner, amount, ctx));
+                    new EconomyEvents.TransferPre(accountRef, target.accountRef, amount, ctx));
             if (transferPre.isCancelled()) {
                 return false;
             }
@@ -152,10 +168,10 @@ public class BankAccount implements IBankAccount {
             BigDecimal sourceBefore = balance;
             BigDecimal targetBefore = target.balance;
             EconomyEvents.BalanceChangePre sourcePre = EconomyEvents.post(
-                    new EconomyEvents.BalanceChangePre(owner, sourceBefore, amount.negate(), ctx));
+                    new EconomyEvents.BalanceChangePre(accountRef, sourceBefore, amount.negate(), ctx));
             ITransactionContext targetCtx = counterpartContext(ctx, owner);
             EconomyEvents.BalanceChangePre targetPre = EconomyEvents.post(
-                    new EconomyEvents.BalanceChangePre(target.owner, targetBefore, amount, targetCtx));
+                    new EconomyEvents.BalanceChangePre(target.accountRef, targetBefore, amount, targetCtx));
             if (sourcePre.isCancelled() || targetPre.isCancelled() || balance.compareTo(amount) < 0) {
                 return false;
             }
@@ -165,16 +181,16 @@ public class BankAccount implements IBankAccount {
             targetBefore = target.balance;
             balance = balance.subtract(amount);
             target.balance = target.balance.add(amount);
-            recordTransaction(ctx, amount.negate(), target.owner);
-            target.recordTransaction(targetCtx, amount, owner);
+            recordTransaction(ctx, amount.negate(), target.accountRef);
+            target.recordTransaction(targetCtx, amount, accountRef);
             notifyBalanceChanged();
             target.notifyBalanceChanged();
 
             EconomyEvents.post(new EconomyEvents.BalanceChanged(
-                    owner, sourceBefore, balance, amount.negate(), ctx));
+                    accountRef, sourceBefore, balance, amount.negate(), ctx));
             EconomyEvents.post(new EconomyEvents.BalanceChanged(
-                    target.owner, targetBefore, target.balance, amount, targetCtx));
-            EconomyEvents.post(new EconomyEvents.TransferCompleted(owner, target.owner, amount, ctx));
+                    target.accountRef, targetBefore, target.balance, amount, targetCtx));
+            EconomyEvents.post(new EconomyEvents.TransferCompleted(accountRef, target.accountRef, amount, ctx));
             return true;
         } finally {
             target.mutationInProgress = false;
@@ -195,22 +211,22 @@ public class BankAccount implements IBankAccount {
         }
         mutationInProgress = true;
         try {
-            UUID targetOwner;
+            AccountRef targetOwner;
             try {
-                targetOwner = target.getOwner();
+                targetOwner = Objects.requireNonNull(target.getAccountRef());
             } catch (RuntimeException rejected) {
                 return false;
             }
 
             EconomyEvents.TransferPre transferPre = EconomyEvents.post(
-                    new EconomyEvents.TransferPre(owner, targetOwner, amount, ctx));
+                    new EconomyEvents.TransferPre(accountRef, targetOwner, amount, ctx));
             if (transferPre.isCancelled()) {
                 return false;
             }
 
             BigDecimal sourceBefore = balance;
             EconomyEvents.BalanceChangePre sourcePre = EconomyEvents.post(
-                    new EconomyEvents.BalanceChangePre(owner, sourceBefore, amount.negate(), ctx));
+                    new EconomyEvents.BalanceChangePre(accountRef, sourceBefore, amount.negate(), ctx));
             if (sourcePre.isCancelled() || balance.compareTo(amount) < 0) {
                 return false;
             }
@@ -236,8 +252,8 @@ public class BankAccount implements IBankAccount {
             recordTransaction(ctx, amount.negate(), targetOwner);
             notifyBalanceChanged();
             EconomyEvents.post(new EconomyEvents.BalanceChanged(
-                    owner, sourceBefore, balance, amount.negate(), ctx));
-            EconomyEvents.post(new EconomyEvents.TransferCompleted(owner, targetOwner, amount, ctx));
+                    accountRef, sourceBefore, balance, amount.negate(), ctx));
+            EconomyEvents.post(new EconomyEvents.TransferCompleted(accountRef, targetOwner, amount, ctx));
             return true;
         } finally {
             mutationInProgress = false;
@@ -270,8 +286,8 @@ public class BankAccount implements IBankAccount {
         }
     }
 
-    private void recordTransaction(ITransactionContext ctx, BigDecimal amount, UUID counterparty) {
-        TransactionRecord record = new TransactionRecord(
+    private void recordTransaction(ITransactionContext ctx, BigDecimal amount, AccountRef counterparty) {
+        TransactionRecord record = TransactionRecord.withCounterpartyRef(
                 ctx.getTransactionId(),
                 ctx.getTimestamp(),
                 ctx.getCauseId(),

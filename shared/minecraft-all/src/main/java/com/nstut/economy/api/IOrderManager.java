@@ -13,6 +13,15 @@ public interface IOrderManager {
     OrderCreateResult createBuyOrder(UUID owner, ICommodity commodity, int quantity, BigDecimal pricePerUnit);
     OrderCreateResult createSellOrder(UUID owner, ICommodity commodity, int quantity, BigDecimal pricePerUnit);
 
+    default OrderCreateResult createBuyOrder(MarketIdentity identity, ICommodity commodity, int quantity, BigDecimal price) {
+        if (!identity.equals(MarketIdentity.personal(identity.actor()))) throw new UnsupportedOperationException("Typed orders not supported");
+        return createBuyOrder(identity.actor(), commodity, quantity, price);
+    }
+    default OrderCreateResult createSellOrder(MarketIdentity identity, ICommodity commodity, int quantity, BigDecimal price) {
+        if (!identity.equals(MarketIdentity.personal(identity.actor()))) throw new UnsupportedOperationException("Typed orders not supported");
+        return createSellOrder(identity.actor(), commodity, quantity, price);
+    }
+
     /** Server orders use the same concrete order object and return null when domain validation rejects creation or OrderCreatePre cancels it. */
     IOrder createServerBuyOrder(ICommodity commodity, int quantity, BigDecimal pricePerUnit);
     IOrder createServerSellOrder(ICommodity commodity, int quantity, BigDecimal pricePerUnit);
@@ -34,4 +43,11 @@ public interface IOrderManager {
      */
     void preserveProviderReservation(UUID escrowOwner, ICommodity commodity, StorageReservation reservation,
                                      BigDecimal referencePrice, String reason);
+
+    default void preserveProviderReservation(MarketIdentity identity, ICommodity commodity, StorageReservation reservation,
+                                            BigDecimal referencePrice, String reason) {
+        if (!identity.equals(MarketIdentity.personal(identity.actor())))
+            throw new UnsupportedOperationException("Typed provider recovery not supported");
+        preserveProviderReservation(identity.actor(), commodity, reservation, referencePrice, reason);
+    }
 }

@@ -11,9 +11,20 @@ import net.minecraft.core.BlockPos;
 public final class ClientMenuContext {
 
     private static BlockPos lastTankPos;
+    private static BlockPos lastVaultPos;
 
     public static void setTankPos(BlockPos pos) {
         lastTankPos = pos;
+    }
+
+    public static void setVaultPos(BlockPos pos) {
+        lastVaultPos = pos;
+    }
+
+    public static BlockPos consumeVaultPos() {
+        BlockPos pos = lastVaultPos;
+        lastVaultPos = null;
+        return pos != null ? pos.immutable() : null;
     }
 
     public static BlockPos consumeTankPos() {

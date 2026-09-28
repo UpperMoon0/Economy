@@ -86,17 +86,32 @@ public class VaultBlock extends DirectionalBlock implements EntityBlock  {
     @Override
     protected @NotNull InteractionResult useWithoutItem(@NotNull BlockState state, Level level, @NotNull BlockPos pos,
             @NotNull Player player, @NotNull BlockHitResult hit) {
-        if (!level.isClientSide() && player instanceof ServerPlayer sp) {
+        if (level.isClientSide()) {
+            com.nstut.economy.client.ClientMenuContext.setVaultPos(pos);
+            return InteractionResult.SUCCESS;
+        }
+        if (player instanceof ServerPlayer sp) {
             if (level.getBlockEntity(pos) instanceof VaultBlockEntity vault) {
-                if (vault.getOwner() != null && !vault.getOwner().equals(player.getUUID())) {
+                if (!com.nstut.economy.server.TeamStorageAccess.canUse(player.getUUID(), vault.getOwnerRef())) {
                     sp.sendOverlayMessage(Component.translatable("message.economy.vault.not_owner"));
                     return InteractionResult.CONSUME;
                 }
                 sp.openMenu(new SimpleMenuProvider(
                         (id, inv, p) -> new VaultMenu(id, inv, vault, new net.minecraft.world.inventory.ContainerData() {
-                            @Override public int get(int idx) { return vault.getMode().id; }
-                            @Override public void set(int idx, int val) { vault.setMode(VaultBlockEntity.VaultMode.byId(val)); }
-                            @Override public int getCount() { return 1; }
+                            @Override public int get(int idx) {
+                                return switch (idx) {
+                                    case VaultMenu.DATA_MODE -> vault.getMode().id;
+                                    case VaultMenu.DATA_TEAM_OWNED -> vault.getOwnerRef() != null
+                                            && vault.getOwnerRef().kind() == com.nstut.economy.api.AccountKind.TEAM ? 1 : 0;
+                                    case VaultMenu.DATA_TEAM_AVAILABLE -> com.nstut.economy.api.EconomyApi.teamEconomy()
+                                            .resolveTeam(p.getUUID()).isPresent() ? 1 : 0;
+                                    default -> 0;
+                                };
+                            }
+                            @Override public void set(int idx, int val) {
+                                if (idx == VaultMenu.DATA_MODE) vault.setMode(VaultBlockEntity.VaultMode.byId(val));
+                            }
+                            @Override public int getCount() { return VaultMenu.DATA_COUNT; }
                         }, vault),
                         Component.translatable("block.economy.vault")
                 ));

@@ -2,8 +2,15 @@ package com.nstut.forge.gametest;
 
 import com.nstut.Economy;
 import com.nstut.economy.api.EconomyApi;
+import com.nstut.economy.api.EconomyId;
 import com.nstut.economy.api.ICommodity;
 import com.nstut.economy.api.IOrder;
+import com.nstut.economy.api.AccountRef;
+import com.nstut.economy.api.MarketIdentity;
+import com.nstut.economy.api.TeamEconomyMode;
+import com.nstut.economy.api.TeamEconomyProvider;
+import com.nstut.economy.api.TeamRef;
+import com.nstut.economy.api.TeamRole;
 import com.nstut.economy.blocks.BlockRegistries;
 import com.nstut.economy.blocks.TankBlockEntity;
 import com.nstut.economy.blocks.VaultBlockEntity;
@@ -18,6 +25,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.NonNullList;
 import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.EnchantedBookItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -72,6 +80,29 @@ public final class EconomyGameTests {
         helper.assertTrue(tank.getFluidAmount() == 750,
                 "Tank state must retain the undrained amount");
 
+        helper.succeed();
+    }
+
+    @GameTest(template = "economy_gametest_empty", timeoutTicks = 40)
+    public static void tankContainerInputAndOutputSlotsProcessStack(GameTestHelper helper) {
+        BlockPos tankPos = new BlockPos(2, 1, 0);
+        helper.setBlock(tankPos, BlockRegistries.TANK.get());
+        var blockEntity = helper.getLevel().getBlockEntity(helper.absolutePos(tankPos));
+        helper.assertTrue(blockEntity instanceof TankBlockEntity, "Tank must create its block entity");
+        TankBlockEntity tank = (TankBlockEntity) blockEntity;
+        helper.assertTrue(tank.getContainerSize() == 2, "Tank must expose distinct input and output inventory slots");
+        helper.assertTrue(tank.getCapacity() == com.nstut.economy.config.EconomyConfig.getInstance().getTankCapacity(),
+                "new Tank capacity must come from server storage config");
+
+        tank.setItem(TankBlockEntity.INPUT_SLOT, new ItemStack(Items.WATER_BUCKET, 2));
+
+        helper.assertTrue(tank.getItem(TankBlockEntity.INPUT_SLOT).isEmpty(),
+                "stacked filled containers must be consumed from the input slot");
+        ItemStack output = tank.getItem(TankBlockEntity.OUTPUT_SLOT);
+        helper.assertTrue(output.is(Items.BUCKET) && output.getCount() == 2,
+                "empty result containers must accumulate in the dedicated output slot");
+        helper.assertTrue(tank.getFluidAmount() == 2000,
+                "two water containers must transfer exactly 2,000 mB into the internal tank");
         helper.succeed();
     }
 
@@ -195,4 +226,125 @@ public final class EconomyGameTests {
 
         helper.succeed();
     }
+    @GameTest(template = "economy_gametest_empty", timeoutTicks = 100)
+    public static void teamMarketPrincipalUsesTeamOwnedVaults(GameTestHelper helper) {
+        helper.assertTrue(EconomyApi.isReady(), "Economy API must be ready for team market coverage");
+
+        var actingPlayer = helper.makeMockPlayer();
+        UUID actor = actingPlayer.getUUID();
+        UUID counterparty = UUID.randomUUID();
+        UUID teamId = UUID.randomUUID();
+        TeamRef team = new TeamRef(teamId, "GameTest Team", actor);
+        boolean[] activeMember = {true};
+        TeamRole[] memberRole = {TeamRole.OFFICER};
+        TeamEconomyProvider fake = new TeamEconomyProvider() {
+            @Override public EconomyId providerId() { return EconomyId.of("test", "economy_gametest"); }
+            @Override public java.util.Optional<TeamRef> resolveTeam(UUID playerId) {
+                return activeMember[0] && actor.equals(playerId) ? java.util.Optional.of(team) : java.util.Optional.empty();
+            }
+            @Override public java.util.Optional<TeamRef> getTeam(UUID id) {
+                return teamId.equals(id) ? java.util.Optional.of(team) : java.util.Optional.empty();
+            }
+            @Override public TeamRole getRole(UUID playerId, UUID id) {
+                return activeMember[0] && actor.equals(playerId) && teamId.equals(id) ? memberRole[0] : TeamRole.NONE;
+            }
+            @Override public java.util.Collection<UUID> getMembers(UUID id) {
+                return teamId.equals(id) && activeMember[0] ? java.util.List.of(actor) : java.util.List.of();
+            }
+        };
+
+        var teams = EconomyApi.teamEconomy();
+        TeamEconomyProvider previousProvider = teams.provider().orElse(null);
+        TeamEconomyMode previousMode = teams.mode();
+        if (previousProvider != null) teams.unregisterProvider(previousProvider);
+        teams.registerProvider(fake);
+        teams.setMode(TeamEconomyMode.HYBRID);
+
+        try {
+            BlockPos teamVaultPos = new BlockPos(0, 1, 0);
+            BlockPos counterpartyVaultPos = new BlockPos(1, 1, 0);
+            helper.setBlock(teamVaultPos, BlockRegistries.VAULT.get());
+            helper.setBlock(counterpartyVaultPos, BlockRegistries.VAULT.get());
+
+            VaultBlockEntity teamVault = (VaultBlockEntity) helper.getLevel().getBlockEntity(helper.absolutePos(teamVaultPos));
+            VaultBlockEntity counterpartyVault = (VaultBlockEntity) helper.getLevel().getBlockEntity(helper.absolutePos(counterpartyVaultPos));
+            helper.assertTrue(teamVault != null && counterpartyVault != null, "team market Vaults must exist");
+            teamVault.setOwner(AccountRef.team(teamId));
+            teamVault.setMode(VaultBlockEntity.VaultMode.BOTH);
+            BlockPos absoluteVault = helper.absolutePos(teamVaultPos);
+            actingPlayer.setPos(absoluteVault.getX() + 0.5, absoluteVault.getY() + 0.5, absoluteVault.getZ() + 0.5);
+            helper.assertTrue(teamVault.stillValid(actingPlayer), "current officer can keep team storage open");
+            var officerBreak = new net.minecraftforge.event.level.BlockEvent.BreakEvent(helper.getLevel(), absoluteVault,
+                    teamVault.getBlockState(), actingPlayer);
+            com.nstut.forge.EconomyEvents.onBlockBreak(officerBreak);
+            helper.assertTrue(officerBreak.isCanceled(), "officer cannot break OWNER-controlled team storage");
+            memberRole[0] = TeamRole.OWNER;
+            var ownerBreak = new net.minecraftforge.event.level.BlockEvent.BreakEvent(helper.getLevel(), absoluteVault,
+                    teamVault.getBlockState(), actingPlayer);
+            com.nstut.forge.EconomyEvents.onBlockBreak(ownerBreak);
+            helper.assertTrue(!ownerBreak.isCanceled(), "current team OWNER can break typed team storage");
+            memberRole[0] = TeamRole.OFFICER;
+            helper.assertTrue(AccountRef.team(teamId).equals(teamVault.getOwnerRef()),
+                    "team market Vault must retain typed TEAM ownership");
+            counterpartyVault.setOwner(counterparty);
+            counterpartyVault.setMode(VaultBlockEntity.VaultMode.BOTH);
+            counterpartyVault.setItem(0, new ItemStack(Items.IRON_INGOT, 4));
+
+            ItemCommodity iron = new ItemCommodity(new ResourceLocation("minecraft", "iron_ingot"), Items.IRON_INGOT, BigDecimal.ONE);
+            var accounts = EconomyApi.accounts();
+            var teamAccount = accounts.getOrCreateTeamAccount(teamId);
+            var actorAccount = accounts.getOrCreatePlayerAccount(actor);
+            var counterpartyAccount = accounts.getOrCreatePlayerAccount(counterparty);
+            BigDecimal actorBefore = actorAccount.getBalance();
+            BigDecimal counterpartyBefore = counterpartyAccount.getBalance();
+            teamAccount.credit(new BigDecimal("100"), null);
+
+            MarketIdentity teamIdentity = new MarketIdentity(AccountRef.team(teamId), actor, AccountRef.team(teamId));
+            OrderManager buyBook = new OrderManager();
+            var buyCreated = buyBook.createBuyOrder(teamIdentity, iron, 2, new BigDecimal("3"), false, helper.getLevel());
+            helper.assertTrue(buyCreated.accepted() && buyCreated.order().isPresent(), "team BUY order must be accepted");
+            IOrder.TransactionResult bought = buyCreated.order().orElseThrow().execute(MarketIdentity.personal(counterparty), helper.getLevel());
+            helper.assertTrue(bought.success && bought.quantityTransferred == 2, "team BUY must execute through typed IOrder API");
+            helper.assertTrue(teamAccount.getBalance().compareTo(new BigDecimal("94")) == 0, "team BUY must debit only the team principal");
+            helper.assertTrue(actorAccount.getBalance().compareTo(actorBefore) == 0, "team BUY must not debit the actor personal wallet");
+            helper.assertTrue(counterpartyAccount.getBalance().compareTo(counterpartyBefore.add(new BigDecimal("6"))) == 0, "team BUY must credit the seller personal wallet");
+            helper.assertTrue(VaultManager.countItemInVaults(helper.getLevel(), AccountRef.team(teamId), iron) == 2, "team BUY delivery must target TEAM-owned storage");
+            helper.assertTrue(VaultManager.countItemInVaults(helper.getLevel(), counterparty, iron) == 2, "team BUY must extract from the seller storage owner");
+
+            NonNullList<ItemStack> reserved = NonNullList.create();
+            helper.assertTrue(VaultManager.extractItemFromVaults(helper.getLevel(), AccountRef.team(teamId), iron, 1, reserved), "team SELL must reserve from TEAM-owned Vault storage");
+            OrderManager sellBook = new OrderManager();
+            var sellCreated = sellBook.createSellOrder(teamIdentity, iron, 1, new BigDecimal("4"), reserved, java.util.List.of(), helper.getLevel());
+            helper.assertTrue(sellCreated.accepted() && sellCreated.order().isPresent(), "team SELL order must be accepted");
+            IOrder.TransactionResult sold = sellCreated.order().orElseThrow().execute(MarketIdentity.personal(counterparty), helper.getLevel());
+            helper.assertTrue(sold.success && sold.quantityTransferred == 1, "team SELL must execute through typed IOrder API");
+            helper.assertTrue(teamAccount.getBalance().compareTo(new BigDecimal("98")) == 0, "team SELL proceeds must credit the team principal");
+            helper.assertTrue(actorAccount.getBalance().compareTo(actorBefore) == 0, "team SELL must not credit the actor personal wallet");
+            helper.assertTrue(counterpartyAccount.getBalance().compareTo(counterpartyBefore.add(new BigDecimal("2"))) == 0, "team SELL must debit the buyer personal wallet");
+            helper.assertTrue(VaultManager.countItemInVaults(helper.getLevel(), AccountRef.team(teamId), iron) == 1, "team SELL reservation must come from TEAM storage");
+            helper.assertTrue(VaultManager.countItemInVaults(helper.getLevel(), counterparty, iron) == 3, "team SELL delivery must target buyer storage");
+
+            NonNullList<ItemStack> invalidatedEscrow = NonNullList.create();
+            helper.assertTrue(VaultManager.extractItemFromVaults(helper.getLevel(), AccountRef.team(teamId), iron, 1, invalidatedEscrow),
+                    "invalidated team SELL must reserve from TEAM storage before membership changes");
+            OrderManager invalidatedBook = new OrderManager();
+            var invalidated = invalidatedBook.createSellOrder(teamIdentity, iron, 1, new BigDecimal("5"),
+                    invalidatedEscrow, java.util.List.of(), helper.getLevel());
+            helper.assertTrue(invalidated.accepted() && invalidated.order().isPresent(), "team SELL must exist before leave/kick");
+            UUID invalidatedId = invalidated.order().orElseThrow().getOrderId();
+            activeMember[0] = false;
+            helper.assertTrue(!teamVault.stillValid(actingPlayer), "leave/kick must invalidate an already-open storage menu");
+            invalidatedBook.revalidateTeamOrders(helper.getLevel());
+            helper.assertTrue(invalidatedBook.getOrder(invalidatedId).isEmpty(), "leave/kick must remove an invalidated team order");
+            helper.assertTrue(VaultManager.countItemInVaults(helper.getLevel(), AccountRef.team(teamId), iron) == 1,
+                    "invalidated team SELL escrow must return losslessly to the recorded TEAM storage owner");
+
+            helper.succeed();
+        } finally {
+            teams.unregisterProvider(fake);
+            if (previousProvider != null) teams.registerProvider(previousProvider);
+            teams.setMode(previousMode);
+        }
+    }
+
 }

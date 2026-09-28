@@ -27,14 +27,14 @@ class TradeCancellationPersistenceRegressionTest extends MinecraftTestBase {
 
     @BeforeEach
     void setUp() {
-        EconomyEvents.clearListeners();
+        com.nstut.economy.api.internal.EconomyEventBridge.clearListeners();
         TradeLedger.setTradeData(new EconomyTradeData());
         accounts = new AccountManager();
     }
 
     @AfterEach
     void tearDown() {
-        EconomyEvents.clearListeners();
+        com.nstut.economy.api.internal.EconomyEventBridge.clearListeners();
         TradeLedger.clearTradeData();
         AccountManagerHolder.setInstance(null);
     }

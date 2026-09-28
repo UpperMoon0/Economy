@@ -28,13 +28,19 @@ public final class BuiltinContainerStorageProvider implements IStorageProvider {
     @Override public boolean supports(ICommodity commodity) { return commodity instanceof ItemCommodity || commodity instanceof FluidCommodity; }
 
     @Override public int available(ServerLevel level, UUID owner, ICommodity commodity) {
+        return available(level, AccountRef.player(owner), commodity);
+    }
+    @Override public int available(ServerLevel level, AccountRef owner, ICommodity commodity) {
         if (commodity instanceof ItemCommodity item) return VaultManager.countItemInVaults(level, owner, item);
         if (commodity instanceof FluidCommodity fluid) return TankManager.countFluidInTanks(level, owner, fluid.getFluid());
         return 0;
     }
 
     @Override public int receivable(ServerLevel level, UUID owner, ICommodity commodity, int requestedAmount) {
-        if (owner.equals(SERVER_ID)) return requestedAmount;
+        return receivable(level, AccountRef.player(owner), commodity, requestedAmount);
+    }
+    @Override public int receivable(ServerLevel level, AccountRef owner, ICommodity commodity, int requestedAmount) {
+        if (owner.kind() == AccountKind.SERVER && owner.id().equals(SERVER_ID)) return requestedAmount;
         if (commodity instanceof ItemCommodity item) {
             return VaultManager.countMaxAcceptableItems(level, owner, item.createStacks(level.registryAccess(), requestedAmount));
         }
@@ -46,6 +52,11 @@ public final class BuiltinContainerStorageProvider implements IStorageProvider {
 
     @Override
     public Optional<StorageReservation> reserve(ServerLevel level, UUID owner, ICommodity commodity, int amount) {
+        return reserve(level, AccountRef.player(owner), commodity, amount);
+    }
+
+    @Override
+    public Optional<StorageReservation> reserve(ServerLevel level, AccountRef owner, ICommodity commodity, int amount) {
         if (amount <= 0 || available(level, owner, commodity) < amount) return Optional.empty();
         Map<String, String> metadata = reservationMetadata(owner, commodity);
         CompoundTag state = new CompoundTag();
@@ -82,6 +93,12 @@ public final class BuiltinContainerStorageProvider implements IStorageProvider {
     @Override
     public StorageDeliveryResult deliverReserved(ServerLevel level, StorageReservation reservation,
                                                  UUID receiver, int amount) {
+        return deliverReserved(level, reservation, AccountRef.player(receiver), amount);
+    }
+
+    @Override
+    public StorageDeliveryResult deliverReserved(ServerLevel level, StorageReservation reservation,
+                                                 AccountRef receiver, int amount) {
         int wanted = Math.min(Math.max(0, amount), reservation.amount());
         if (wanted <= 0) return StorageDeliveryResult.unchanged(reservation);
         ICommodity commodity = decode(reservation);
@@ -97,7 +114,7 @@ public final class BuiltinContainerStorageProvider implements IStorageProvider {
                 throw new IllegalStateException("Exact item escrow is shorter than reservation amount for " + reservation.token());
             }
 
-            NonNullList<ItemStack> rejected = receiver.equals(SERVER_ID)
+            NonNullList<ItemStack> rejected = receiver.kind() == AccountKind.SERVER && receiver.id().equals(SERVER_ID)
                     ? NonNullList.create()
                     : VaultManager.insertItemStacksToVaults(level, receiver, attempted);
             int delivered = wanted - VaultInventoryOps.total(rejected);
@@ -110,7 +127,7 @@ public final class BuiltinContainerStorageProvider implements IStorageProvider {
         }
 
         if (commodity instanceof FluidCommodity fluid) {
-            int delivered = receiver.equals(SERVER_ID)
+            int delivered = receiver.kind() == AccountKind.SERVER && receiver.id().equals(SERVER_ID)
                     ? wanted
                     : TankManager.insertFluidToTanks(level, receiver, new EconomyFluidStack(fluid.getFluid(), wanted));
             delivered = Math.max(0, Math.min(wanted, delivered));
@@ -129,7 +146,12 @@ public final class BuiltinContainerStorageProvider implements IStorageProvider {
     public boolean release(ServerLevel level, StorageReservation reservation) {
         String ownerValue = reservation.metadata().get(OWNER);
         if (ownerValue == null) return false;
-        UUID owner = UUID.fromString(ownerValue);
+        AccountRef owner;
+        try {
+            owner = ownerValue.indexOf(':') > 0 ? AccountRef.parse(ownerValue) : AccountRef.player(UUID.fromString(ownerValue));
+        } catch (RuntimeException malformed) {
+            return false;
+        }
         ICommodity commodity = decode(reservation);
 
         if (commodity instanceof ItemCommodity) {
@@ -228,6 +250,7 @@ public final class BuiltinContainerStorageProvider implements IStorageProvider {
     }
 
     @Override public String describe(ServerLevel level, UUID owner) { return "Economy Vaults and Tanks"; }
+    @Override public String describe(ServerLevel level, AccountRef owner) { return "Economy Vaults and Tanks"; }
 
     private static StorageDeliveryResult deliveryResult(StorageReservation before, int delivered,
                                                         Collection<ItemStack> exactRemaining, ServerLevel level) {
@@ -239,7 +262,7 @@ public final class BuiltinContainerStorageProvider implements IStorageProvider {
         return StorageDeliveryResult.partial(delivered, rest);
     }
 
-    private static Map<String, String> reservationMetadata(UUID owner, ICommodity commodity) {
+    private static Map<String, String> reservationMetadata(AccountRef owner, ICommodity commodity) {
         Map<String, String> metadata = new HashMap<>();
         metadata.put(OWNER, owner.toString());
         metadata.put(TYPE, commodity.getTypeId().toString());

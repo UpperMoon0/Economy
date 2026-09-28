@@ -54,16 +54,16 @@ public class EconomyFabric implements ModInitializer {
     private boolean canBreak(Level world, Player player, net.minecraft.core.BlockPos pos) {
         if (world.isClientSide || !(player instanceof ServerPlayer serverPlayer)) return true;
         BlockEntity be = world.getBlockEntity(pos);
-        java.util.UUID owner = null;
+        com.nstut.economy.api.AccountRef owner = null;
         String messageKey = null;
         if (be instanceof com.nstut.economy.blocks.VaultBlockEntity vault) {
-            owner = vault.getOwner();
+            owner = vault.getOwnerRef();
             messageKey = "message.economy.vault.not_owner";
         } else if (be instanceof com.nstut.economy.blocks.TankBlockEntity tank) {
-            owner = tank.getOwner();
+            owner = tank.getOwnerRef();
             messageKey = "message.economy.tank.not_owner";
         }
-        if (owner == null || owner.equals(player.getUUID())) return true;
+        if (owner == null || com.nstut.economy.server.TeamStorageAccess.canAdmin(player.getUUID(), owner)) return true;
         if (player.hasPermissions(2)) return true;
         serverPlayer.displayClientMessage(Component.translatable(messageKey), true);
         return false;

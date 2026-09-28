@@ -75,7 +75,7 @@ public final class DefaultMarketDataService implements IMarketDataService {
     public static TradeView toView(EconomyTradeData.TradeSnapshot trade) {
         EconomyId type = typeId(trade.commodityType);
         return new TradeView(EconomyId.parse(trade.itemId), type, new BigDecimal(trade.price),
-                trade.quantity, trade.buyer, trade.seller, Instant.ofEpochMilli(trade.timestamp));
+                trade.quantity, trade.buyer, trade.seller, Instant.ofEpochMilli(trade.timestamp), trade.buyerIdentity, trade.sellerIdentity);
     }
 
     private static boolean matches(EconomyTradeData.TradeSnapshot trade, CommodityKey commodity) {

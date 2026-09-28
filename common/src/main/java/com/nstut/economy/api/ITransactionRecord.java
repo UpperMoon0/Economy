@@ -24,6 +24,13 @@ public interface ITransactionRecord {
 
     BigDecimal getAmount();
     BigDecimal getResultingBalance();
+    /** Legacy UUID projection; use getCounterpartyRef() for typed identity. */
     UUID getCounterparty();
+
+    /** Typed counterparty, or null for a standalone credit/debit. Legacy records describe players. */
+    default AccountRef getCounterpartyRef() {
+        UUID counterparty = getCounterparty();
+        return counterparty == null ? null : AccountRef.player(counterparty);
+    }
     String getDescription();
 }

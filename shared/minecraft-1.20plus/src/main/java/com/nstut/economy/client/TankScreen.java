@@ -39,6 +39,7 @@ public class TankScreen extends EconomyUiContainerScreen<TankMenu> {
     private static final int TRANSFER_SECTION_WIDTH = 90;
 
     private ButtonWidget modeBtn;
+    private ButtonWidget ownerBtn;
     private FluidTankComponent tankComponent;
     private TankBlockEntity.TankMode currentMode;
 
@@ -63,7 +64,15 @@ public class TankScreen extends EconomyUiContainerScreen<TankMenu> {
         if (modeBtn != null && mode != currentMode) {
             currentMode = mode;
             modeBtn.setLabel(modeLabel(mode));
-            modeBtn.tooltip(modeTooltip(mode));
+            modeBtn.tooltip(modeTooltipWithPermission(mode));
+        }
+        if (ownerBtn != null) {
+            ownerBtn.setVisible(menu.hasTeam());
+            ownerBtn.setLabel(storageOwnerLabel());
+            ownerBtn.enabled(menu.hasTeam() && menu.getTankBlockEntity() != null);
+        }
+        if (modeBtn != null) {
+            modeBtn.tooltip(modeTooltipWithPermission(currentMode));
         }
     }
 
@@ -81,14 +90,15 @@ public class TankScreen extends EconomyUiContainerScreen<TankMenu> {
         for (Slot slot : menu.slots) {
             UiRender.slot(g, x + slot.x - 1, y + slot.y - 1, 18, 18, c);
         }
-        int slotX = x + TankMenu.TRANSFER_SLOT_X;
-        UiRender.text(g, font, Component.translatable("ui.economy.tank.transfer"),
-                slotX, y + TRANSFER_TITLE_Y, c.onSurface());
+        UiRender.text(g, font, Component.translatable("ui.economy.tank.input"),
+                x + TankMenu.INPUT_SLOT_X - 4, y + TRANSFER_TITLE_Y, c.onSurface());
+        UiRender.text(g, font, Component.translatable("ui.economy.tank.output"),
+                x + TankMenu.OUTPUT_SLOT_X - 6, y + TRANSFER_TITLE_Y, c.onSurface());
         String hint = Component.translatable("ui.economy.tank.transfer_hint").getString();
-        int hintX = x + TRANSFER_HINT_X;
+        int hintX = x + TankMenu.INPUT_SLOT_X - 8;
         int hintWidth = Math.max(1, x + imageWidth - 10 - hintX);
         hint = MarketScreen.fitText(font, hint, hintWidth);
-        UiRender.text(g, font, hint, hintX, y + TRANSFER_HINT_Y, c.onSurface());
+        UiRender.text(g, font, hint, hintX, y + TRANSFER_HINT_Y + 21, c.onSurfaceMuted());
     }
 
     @Override
@@ -102,8 +112,12 @@ public class TankScreen extends EconomyUiContainerScreen<TankMenu> {
         HStack header = new HStack().gap(4).align(Alignment.CENTER);
         header.addChild(Ui.text(Component.translatable("ui.economy.tank.title")).style(TextStyle.TITLE));
         header.addChild(Ui.spacer().flex());
-        modeBtn = Ui.button(modeLabel(currentMode), this::cycleMode).ghost().small();
-        modeBtn.tooltip(modeTooltip(currentMode));
+        ownerBtn = EconomyUiComponents.configStateButton(storageOwnerLabel(), this::toggleStorageOwner);
+        ownerBtn.tooltip(Component.translatable("ui.economy.container.owner_transfer_tooltip"));
+        ownerBtn.setVisible(menu.hasTeam());
+        header.addChild(ownerBtn);
+        modeBtn = EconomyUiComponents.configStateButton(modeLabel(currentMode), this::cycleMode);
+        modeBtn.tooltip(modeTooltipWithPermission(currentMode));
         header.addChild(modeBtn);
         header.addChild(buildCompactThemeToggle());
 
@@ -165,6 +179,32 @@ public class TankScreen extends EconomyUiContainerScreen<TankMenu> {
             case INPUT -> "ui.economy.container.tooltip.mode_input";
             case OUTPUT -> "ui.economy.container.tooltip.mode_output";
         });
+    }
+
+
+    private Component modeTooltipWithPermission(TankBlockEntity.TankMode mode) {
+        return modeTooltip(mode).copy()
+                .append("\n")
+                .append(Component.translatable("ui.economy.container.mode_admin_hint"));
+    }
+
+    private boolean isTeamStorage() {
+        return menu.isTeamOwned();
+    }
+
+    private Component storageOwnerLabel() {
+        Component principal = Component.translatable(isTeamStorage()
+                ? "ui.economy.principal.team"
+                : "ui.economy.principal.personal");
+        return principal;
+    }
+
+    private void toggleStorageOwner() {
+        TankBlockEntity storage = menu.getTankBlockEntity();
+        if (storage == null || minecraft == null || minecraft.level == null) return;
+        MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.SetStorageOwnerPacket(
+                minecraft.level.dimension().location().toString(),
+                storage.getBlockPos(), true, !menu.isTeamOwned()));
     }
 
     private void cycleMode() {

@@ -14,6 +14,10 @@ import org.jetbrains.annotations.NotNull;
 public class VaultMenu extends AbstractContainerMenu {
 
     public static final int CONTAINER_SIZE = 54;
+    public static final int DATA_MODE = 0;
+    public static final int DATA_TEAM_OWNED = 1;
+    public static final int DATA_TEAM_AVAILABLE = 2;
+    public static final int DATA_COUNT = 3;
     public static final int IMAGE_WIDTH = 356;
     public static final int IMAGE_HEIGHT = 208;
     public static final int VAULT_SLOT_START_X = 16;
@@ -27,13 +31,13 @@ public class VaultMenu extends AbstractContainerMenu {
     private final VaultBlockEntity vaultBlockEntity;
 
     public VaultMenu(int containerId, Inventory playerInventory) {
-        this(containerId, playerInventory, new SimpleContainer(CONTAINER_SIZE), new SimpleContainerData(1), null);
+        this(containerId, playerInventory, new SimpleContainer(CONTAINER_SIZE), new SimpleContainerData(DATA_COUNT), null);
     }
 
     public VaultMenu(int containerId, Inventory playerInventory, Container container, ContainerData data, VaultBlockEntity vault) {
         super(BlockRegistries.VAULT_MENU.get(), containerId);
         checkContainerSize(container, CONTAINER_SIZE);
-        checkContainerDataCount(data, 1);
+        checkContainerDataCount(data, DATA_COUNT);
 
         this.container = container;
         this.data = data;
@@ -63,11 +67,21 @@ public class VaultMenu extends AbstractContainerMenu {
     }
 
     public VaultBlockEntity.VaultMode getMode() {
-        return VaultBlockEntity.VaultMode.byId(data.get(0));
+        return VaultBlockEntity.VaultMode.byId(data.get(DATA_MODE));
     }
 
     public VaultBlockEntity getVaultBlockEntity() {
         return vaultBlockEntity;
+    }
+
+    /** Server-synchronized ownership state for reactive screen labels. */
+    public boolean isTeamOwned() {
+        return data.get(DATA_TEAM_OWNED) != 0;
+    }
+
+    /** Whether the viewing player currently belongs to a team/party. */
+    public boolean hasTeam() {
+        return data.get(DATA_TEAM_AVAILABLE) != 0;
     }
 
     @Override

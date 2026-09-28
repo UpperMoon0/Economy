@@ -1,7 +1,7 @@
 package com.nstut.economy.server;
 
 import com.nstut.Economy;
-import com.nstut.economy.api.EconomyApi;
+import com.nstut.economy.api.internal.EconomyRuntimeBridge;
 import com.nstut.economy.api.internal.DefaultMarketDataService;
 import com.nstut.economy.blocks.TankManager;
 import com.nstut.economy.blocks.VaultManager;
@@ -25,6 +25,7 @@ public final class EconomyServerLifecycle {
         EconomyTradeData tradeData = EconomyTradeData.get(overworld);
 
         Economy.getAccountManager().loadFrom(accountData);
+        TeamWalletLifecycle.bind(accountData);
 
         OrderManager orderManager = Economy.getOrderManager();
         orderManager.setOrderData(orderData);
@@ -33,7 +34,7 @@ public final class EconomyServerLifecycle {
         TradeLedger.setTradeData(tradeData);
         VaultManager.setAccountData(accountData);
         TankManager.setAccountData(accountData);
-        EconomyApi.bindRuntime(Economy.getAccountManager(), orderManager,
+        EconomyRuntimeBridge.bind(Economy.getAccountManager(), orderManager,
                 new DefaultMarketDataService(orderManager), overworld);
         Economy.LOGGER.info("Economy data loaded for dimension {}", overworld.dimension().location());
     }
@@ -47,13 +48,16 @@ public final class EconomyServerLifecycle {
         try {
             save();
         } finally {
-            EconomyApi.unbindRuntime();
+            TeamWalletLifecycle.clear();
+            MarketWalletSelection.clear();
+            EconomyRuntimeBridge.unbind();
         }
     }
 
     public static void tick(MinecraftServer server) {
         ServerLevel overworld = server.overworld();
         if (overworld != null && server.getTickCount() % 20 == 0) {
+            TeamWalletLifecycle.tick(overworld);
             Economy.getOrderManager().matchAllPendingOrders(overworld);
         }
     }

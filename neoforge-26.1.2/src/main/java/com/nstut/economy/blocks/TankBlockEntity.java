@@ -1,5 +1,8 @@
 package com.nstut.economy.blocks;
 
+import com.nstut.economy.api.AccountRef;
+import com.nstut.economy.api.AccountKind;
+
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.NonNullList;
@@ -21,6 +24,7 @@ import net.minecraft.world.level.storage.ValueOutput;
 
 import com.nstut.economy.trading.EconomyFluidStack;
 import com.nstut.economy.config.EconomyConfig;
+import com.nstut.economy.compat.Compat;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -57,12 +61,15 @@ public class TankBlockEntity extends BlockEntity implements WorldlyContainer {
         }
     }
 
-    private static final int CONTAINER_SIZE = 1;
+    public static final int INPUT_SLOT = 0;
+    public static final int OUTPUT_SLOT = 1;
+    private static final int CONTAINER_SIZE = 2;
     public static final int DEFAULT_CAPACITY = 128000;
 
-    private int capacity = DEFAULT_CAPACITY;
+    private int capacity = EconomyConfig.getInstance().getTankCapacity();
     private EconomyFluidStack fluid = EconomyFluidStack.EMPTY;
     private UUID owner;
+    private AccountKind ownerKind = AccountKind.PLAYER;
     private TankMode mode = TankMode.BOTH;
     private NonNullList<ItemStack> items;
     private Object platformFluidStorage;
@@ -157,28 +164,62 @@ public class TankBlockEntity extends BlockEntity implements WorldlyContainer {
     }
 
     public void handleBucketTransfer() {
-        ItemStack bucketStack = items.get(0);
-        if (level == null || level.isClientSide() || bucketStack.isEmpty()) return;
+        if (level == null || level.isClientSide()) return;
+        boolean moved = false;
+        int guard = 0;
+        while (guard++ < 64 && processSingleContainerTransfer()) moved = true;
+        if (moved) syncStateToClients();
+    }
 
+    private boolean processSingleContainerTransfer() {
+        ItemStack input = items.get(INPUT_SLOT);
+        if (input.isEmpty()) return false;
+
+        ItemStack single = input.copy();
+        single.setCount(1);
         var emptyResult = com.nstut.economy.platform.Services.FLUID.tryEmptyContainerIntoTank(
-                bucketStack.copy(), capacity, fluid.copy());
-        if (emptyResult.isPresent()) {
-            commitContainerTransfer(emptyResult.get().resultContainer(), emptyResult.get().resultTankFluid());
-            return;
+                single, capacity, fluid.copy());
+        if (emptyResult.isPresent() && canAcceptOutput(emptyResult.get().resultContainer())) {
+            return commitContainerTransfer(emptyResult.get().resultContainer(), emptyResult.get().resultTankFluid());
         }
 
         if (!fluid.isEmpty()) {
             var fillResult = com.nstut.economy.platform.Services.FLUID.tryFillContainerFromTank(
-                    bucketStack.copy(), capacity, fluid.copy());
-            if (fillResult.isPresent()) {
-                commitContainerTransfer(fillResult.get().resultContainer(), fillResult.get().resultTankFluid());
+                    single, capacity, fluid.copy());
+            if (fillResult.isPresent() && canAcceptOutput(fillResult.get().resultContainer())) {
+                return commitContainerTransfer(fillResult.get().resultContainer(), fillResult.get().resultTankFluid());
             }
         }
+        return false;
     }
-    private void commitContainerTransfer(ItemStack resultContainer, EconomyFluidStack resultingFluid) {
+
+    private boolean canAcceptOutput(ItemStack resultContainer) {
+        if (resultContainer == null || resultContainer.isEmpty()) return true;
+        ItemStack output = items.get(OUTPUT_SLOT);
+        if (output.isEmpty()) return true;
+        if (!Compat.stacksEqual(output, resultContainer)) return false;
+        return output.getCount() + resultContainer.getCount() <= output.getMaxStackSize();
+    }
+
+    private boolean commitContainerTransfer(ItemStack resultContainer, EconomyFluidStack resultingFluid) {
+        if (!canAcceptOutput(resultContainer)) return false;
+        ItemStack input = items.get(INPUT_SLOT);
+        if (input.isEmpty()) return false;
+
         fluid = resultingFluid.copy();
-        items.set(0, resultContainer.copy());
-        syncStateToClients();
+        input.shrink(1);
+        if (input.isEmpty()) items.set(INPUT_SLOT, ItemStack.EMPTY);
+
+        if (resultContainer != null && !resultContainer.isEmpty()) {
+            ItemStack output = items.get(OUTPUT_SLOT);
+            if (output.isEmpty()) {
+                items.set(OUTPUT_SLOT, resultContainer.copy());
+            } else {
+                output.grow(resultContainer.getCount());
+            }
+        }
+        setChanged();
+        return true;
     }
 
     private void syncStateToClients() {
@@ -203,15 +244,22 @@ public class TankBlockEntity extends BlockEntity implements WorldlyContainer {
         setMode(TankMode.byId((getMode().id + 1) % TankMode.values().length));
     }
 
-    public UUID getOwner() {
-        return owner;
-    }
+    public UUID getOwner() { return owner; }
+    public AccountRef getOwnerRef() { return owner == null ? null : new AccountRef(ownerKind, owner); }
 
-    public void setOwner(UUID owner) {
-        this.owner = owner;
+    public void setOwner(UUID owner) { setOwner(owner == null ? null : AccountRef.player(owner)); }
+    public void setOwner(AccountRef newOwner) {
+        AccountRef oldOwner = getOwnerRef();
+        if (java.util.Objects.equals(oldOwner, newOwner)) return;
+        if (level != null && oldOwner != null) {
+            TankManager.unregister(oldOwner, worldPosition, level.dimension().identifier().toString());
+        }
+        owner = newOwner == null ? null : newOwner.id();
+        ownerKind = newOwner == null ? AccountKind.PLAYER : newOwner.kind();
         setChanged();
-        if (level != null && !level.isClientSide()) {
-            TankManager.register(owner, worldPosition, level.dimension().identifier().toString());
+        if (level != null && newOwner != null) {
+            TankManager.register(newOwner, worldPosition, level.dimension().identifier().toString());
+            level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 3);
         }
     }
 
@@ -229,6 +277,7 @@ public class TankBlockEntity extends BlockEntity implements WorldlyContainer {
         ItemStack result = ContainerHelper.removeItem(items, slot, amount);
         if (!result.isEmpty()) {
             setChanged();
+            if (slot == OUTPUT_SLOT) handleBucketTransfer();
         }
         return result;
     }
@@ -238,6 +287,7 @@ public class TankBlockEntity extends BlockEntity implements WorldlyContainer {
         ItemStack result = ContainerHelper.takeItem(items, slot);
         if (!result.isEmpty()) {
             setChanged();
+            if (slot == OUTPUT_SLOT) handleBucketTransfer();
         }
         return result;
     }
@@ -249,12 +299,13 @@ public class TankBlockEntity extends BlockEntity implements WorldlyContainer {
             stack.setCount(getMaxStackSize());
         }
         setChanged();
-        handleBucketTransfer();
+        if (slot == INPUT_SLOT) handleBucketTransfer();
     }
 
     @Override
     public boolean stillValid(@NotNull Player player) {
         if (level == null || level.getBlockEntity(worldPosition) != this) return false;
+        if (!level.isClientSide() && !com.nstut.economy.server.TeamStorageAccess.canUse(player.getUUID(), getOwnerRef())) return false;
         return player.distanceToSqr(worldPosition.getX() + 0.5, worldPosition.getY() + 0.5, worldPosition.getZ() + 0.5) <= 64.0;
     }
 
@@ -266,31 +317,38 @@ public class TankBlockEntity extends BlockEntity implements WorldlyContainer {
 
     @Override
     public int[] getSlotsForFace(Direction side) {
-        return new int[0];
+        return new int[]{INPUT_SLOT, OUTPUT_SLOT};
     }
 
     @Override
     public boolean canPlaceItemThroughFace(int index, ItemStack stack, @Nullable Direction direction) {
-        return false;
+        return index == INPUT_SLOT && com.nstut.economy.platform.Services.FLUID.isFluidContainer(stack);
     }
 
     @Override
     public boolean canTakeItemThroughFace(int index, ItemStack stack, @Nullable Direction direction) {
-        return false;
+        return index == OUTPUT_SLOT;
     }
 
     @Override
     public void setLevel(Level level) {
         super.setLevel(level);
         if (!level.isClientSide() && owner != null) {
-            TankManager.register(owner, worldPosition, level.dimension().identifier().toString());
+            AccountRef current = getOwnerRef();
+            AccountRef normalized = com.nstut.economy.server.TeamWalletLifecycle.replacementOwner(current).orElse(current);
+            if (!normalized.equals(current)) {
+                owner = normalized.id();
+                ownerKind = normalized.kind();
+                setChanged();
+            }
+            TankManager.register(normalized, worldPosition, level.dimension().identifier().toString());
         }
     }
 
     @Override
     public void setRemoved() {
         if (level != null && !level.isClientSide() && owner != null) {
-            TankManager.unregister(owner, worldPosition, level.dimension().identifier().toString());
+            TankManager.unregister(getOwnerRef(), worldPosition, level.dimension().identifier().toString());
         }
         super.setRemoved();
     }
@@ -313,6 +371,9 @@ public class TankBlockEntity extends BlockEntity implements WorldlyContainer {
                 .orElse(EconomyFluidStack.EMPTY);
         input.getInt("Capacity").ifPresent(value -> capacity = value);
         owner = input.read("Owner", UUIDUtil.CODEC).orElse(null);
+        ownerKind = input.read("OwnerKind", com.mojang.serialization.Codec.STRING)
+                .map(v -> { try { return AccountKind.valueOf(v); } catch (RuntimeException ignored) { return AccountKind.PLAYER; } })
+                .orElse(AccountKind.PLAYER);
         input.getInt("Mode").ifPresent(modeId -> mode = TankMode.byId(modeId));
     }
 
@@ -328,6 +389,7 @@ public class TankBlockEntity extends BlockEntity implements WorldlyContainer {
         output.putInt("Capacity", capacity);
         if (owner != null) {
             output.store("Owner", UUIDUtil.CODEC, owner);
+            output.store("OwnerKind", com.mojang.serialization.Codec.STRING, ownerKind.name());
         }
         output.putInt("Mode", getMode().id);
     }
@@ -351,7 +413,3 @@ public class TankBlockEntity extends BlockEntity implements WorldlyContainer {
         return EconomyFluidStack.EMPTY;
     }
 }
-
-
-
-

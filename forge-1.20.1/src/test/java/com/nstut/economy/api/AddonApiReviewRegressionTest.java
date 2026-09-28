@@ -44,7 +44,7 @@ class AddonApiReviewRegressionTest extends MinecraftTestBase {
 
     @BeforeEach
     void setUp() {
-        EconomyEvents.clearListeners();
+        com.nstut.economy.api.internal.EconomyEventBridge.clearListeners();
         TradeLedger.clearTradeData();
         EconomyApi.commodityTypes().unregister(ADDON_TYPE);
         EconomyApi.storage().unregister(ADDON_PROVIDER);
@@ -53,10 +53,25 @@ class AddonApiReviewRegressionTest extends MinecraftTestBase {
 
     @AfterEach
     void tearDown() {
-        EconomyEvents.clearListeners();
+        com.nstut.economy.api.internal.EconomyEventBridge.clearListeners();
         TradeLedger.clearTradeData();
         EconomyApi.commodityTypes().unregister(ADDON_TYPE);
         EconomyApi.storage().unregister(ADDON_PROVIDER);
+    }
+
+    @Test
+    @DisplayName("Runtime mutators are internal while the 0.0.13 listener-reset symbol remains binary compatible")
+    void stableApiKeepsOnlyTheLegacyGlobalListenerResetShim() throws Exception {
+        var economyApiMethods = java.util.Arrays.stream(EconomyApi.class.getMethods())
+                .map(java.lang.reflect.Method::getName).toList();
+
+        assertFalse(economyApiMethods.contains("bindRuntime"));
+        assertFalse(economyApiMethods.contains("unbindRuntime"));
+        var clearListeners = EconomyEvents.class.getMethod("clearListeners");
+        assertTrue(clearListeners.isAnnotationPresent(Deprecated.class),
+                "0.0.13 binary compatibility shim must remain deprecated");
+        assertDoesNotThrow(() -> Class.forName("com.nstut.economy.api.internal.EconomyRuntimeBridge"));
+        assertDoesNotThrow(() -> Class.forName("com.nstut.economy.api.internal.EconomyEventBridge"));
     }
 
     @Test

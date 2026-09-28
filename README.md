@@ -63,10 +63,10 @@ Install the file matching both your Minecraft version and loader. A jar built fo
 
 #### Fluid Tank
 
-- Stores up to `128,000 mB` of one compatible fluid.
-- Accepts loader-compatible fluid containers such as buckets and cells through its processing slot.
+- Stores one compatible fluid with server-configurable internal capacity (`tankCapacity`, default `128,000 mB`) in `config/economy-storage.properties`.
+- Uses distinct **Input** and **Output** container slots. Filled/empty compatible containers are consumed from Input and their result containers accumulate in Output; stackable modded containers are processed as a batch while Output has room.
 - Exposes the loader's standard fluid API for compatible pipes and automation.
-- Uses a centered custom screen with a tiled/cropped fluid texture and a single `current / maximum` amount display.
+- Uses a centered custom screen with a tiled/cropped fluid texture, explicit Input/Output slots, and a single `current / maximum` amount display.
 - Renders its fluid on the Tank's front face using the fluid's true texture proportions.
 - Supports the same `BOTH`, `INPUT ONLY`, and `OUTPUT ONLY` market behavior as Vaults.
 - Storage modes govern market supply and delivery; direct inventory and fluid automation remains available independently.
@@ -75,7 +75,22 @@ Install the file matching both your Minecraft version and loader. A jar built fo
 #### Containers Tab
 
 - The former `Vaults` tab is now `Containers`.
-- Shows registered Vaults and Tanks together, including location, mode, capacity, stored item/fluid totals, and current contents.
+- Shows registered Vaults and Tanks together, including location, mode, capacity, stored item/fluid totals, and current contents. Ownership and I/O mode are clickable state chips (`? Personal/Team`, `? Both/Input Only/Output Only`) rather than action-verb buttons.
+
+### Optional Team Wallets
+
+- Economy has typed `PLAYER`, `TEAM`, `SERVER`, and `TAX` principals, so shared wallets cannot collide with player UUIDs.
+- FTB Teams is an optional provider rather than a hard dependency; only party teams map to shared Economy accounts.
+- Team economy is enabled by default when FTB Teams is installed; set `enabled=false` in `config/economy-team.properties` to disable it. Without FTB Teams, personal economy works normally.
+- The Market balance badge is an account switcher. Players can select Personal or an authorized Team account without commands; the selection controls the money, proceeds, and storage used by new orders.
+- The **Team Treasury** Market tab shows balances/role and accepts Personal -> Team deposits. Ordinary Team -> Personal withdrawal does not exist; authorized direct Team payouts to other players use **Pay Player**.
+- Default permissions deliberately separate ordinary market activity from administration: MEMBER can view/deposit, OFFICER can place team market orders, and OWNER is required for direct Team payouts to other players, Team storage reassignment, or Vault/Tank market I/O changes.
+- Vaults and Tanks can be owned by either a `PLAYER` or `TEAM` account. Team orders use Team-owned Vaults/Tanks, while Personal orders use Personal storage.
+- The Containers tab shows storage ownership and lets an authorized team owner assign a Personal Vault/Tank to the current team or return Team storage to themselves.
+- New-order and confirmation views show the exact account and storage identity that will be used. Existing orders retain the identity they were created with when the account switcher changes.
+- Same-principal self-trades are blocked and team membership/rank is revalidated before protected actions. Team deletion freezes the final member snapshot, closes/recovers outstanding orders first, then splits remaining cash equally across that snapshot. Team-owned Vault/Tank blocks pass to the last recorded owner for physical custody after cash settlement.
+
+See [Team Economy](docs/TEAM_ECONOMY.md) for account semantics, modes, permissions, and integration guidance.
 
 ### Currency Feedback
 
@@ -89,16 +104,25 @@ Install the file matching both your Minecraft version and loader. A jar built fo
 
 | Command | Permission | Description |
 | :--- | :--- | :--- |
-| `/economy balance` | Player | View your balance and open the Market Terminal |
-| `/economy balance <player>` | OP Level 2 | View another player's balance |
-| `/economy pay <player> <amount>` | Player | Transfer coins to another player |
+| `/economy balance` | Player | Legacy shorthand for your Personal balance |
+| `/economy balance <personal|team> [player]` | Player / OP for other player | View an explicit Personal or current-Team principal balance |
+| `/economy pay <player> <amount>` | Player | Legacy Personal-payment shorthand |
+| `/economy pay personal <player> <amount>` | Player | Pay from your Personal account |
+| `/economy pay team <player> <amount>` | Player | Pay from your current Team account; requires payout permission and rejects self-payment |
+| `/economy team [balance]` | Player | View Personal/Team balances, current role, and Market wallet selection |
+| `/economy team deposit <amount>` | Player | Move personal funds into the current party wallet (default MEMBER+) |
+| `/economy team pay <player> <amount>` | Player | Pay another player from the party wallet (default OWNER+); self-payment is rejected |
+| `/economy team use <personal|team|default>` | Player | Choose the wallet used by new market actions, or return to mode-driven default |
 | `/economy serverorder buy <commodity> <qty> <price>` | OP Level 2 | Create a server buy order for an item or fluid |
 | `/economy serverorder sell <commodity> <qty> <price>` | OP Level 2 | Create a server sell order for an item or fluid |
 | `/economy serverorder list` | OP Level 2 | List active server orders and their IDs |
 | `/economy serverorder remove <order-id>` | OP Level 2 | Remove a server order by ID; active IDs are tab-completed |
-| `/economy give <player> <amount>` | OP Level 2 | Add funds to a player's account |
-| `/economy take <player> <amount>` | OP Level 2 | Remove funds from a player's account |
-| `/economy set <player> <amount>` | OP Level 2 | Set a player's balance |
+| `/economy give <player> <amount>` | OP Level 2 | Legacy Personal-account admin shorthand |
+| `/economy give <personal|team> <player> <amount>` | OP Level 2 | Add funds to the explicit Personal or current-Team principal |
+| `/economy take <player> <amount>` | OP Level 2 | Legacy Personal-account admin shorthand |
+| `/economy take <personal|team> <player> <amount>` | OP Level 2 | Remove funds from the explicit Personal or current-Team principal |
+| `/economy set <player> <amount>` | OP Level 2 | Legacy Personal-account admin shorthand |
+| `/economy set <personal|team> <player> <amount>` | OP Level 2 | Set the explicit Personal or current-Team principal balance |
 
 New server-order creation responses include the order ID. If an order was created by mistake, run `/economy serverorder list`, then `/economy serverorder remove <order-id>`.
 
@@ -118,19 +142,21 @@ Economy exposes a supported addon API in the top-level `com.nstut.economy.api` p
 
 The public API supports:
 
-- player, server, and tax accounts with atomic transfers;
-- namespaced transaction causes, metadata, and loader-neutral account events;
+- typed player, team, server, and tax accounts with atomic transfers;
+- namespaced transaction causes, public `TransactionContexts` factories, metadata, and loader-neutral account events;
 - order creation/query/edit/cancel operations;
 - immutable market/trade analytics;
 - custom namespaced commodity types with versioned persistence codecs;
 - pluggable durable storage providers and reservations;
-- loader-neutral market events for order and trade integrations.
+- loader-neutral market events for order and trade integrations;
+- optional team-economy providers, shared-wallet resolution, modes, and fresh role checks; addon providers take precedence over the built-in FTB Teams fallback.
 
 Developer documentation:
 
 - [Getting Started](docs/GETTING_STARTED.md) — dependency setup, runtime lifecycle, orders, market reads, events, and addon verification.
 - [Extending Economy](docs/EXTENDING_ECONOMY.md) — custom transaction causes, commodities/codecs, storage providers, persistence rules, and compatibility guidance.
 - [API Reference](docs/API_REFERENCE.md) — practical catalog of the supported public classes and methods.
+- [Team Economy](docs/TEAM_ECONOMY.md) — typed accounts, shared wallets, modes, and FTB Teams behavior.
 
 Economy currently defines loader-specific Maven publications but does not configure a public Maven repository. The Getting Started guide documents composite-build and Maven Local development until a public repository is officially available.
 

@@ -13,8 +13,15 @@ public record TradeView(
         int quantity,
         UUID buyer,
         UUID seller,
-        Instant timestamp
+        Instant timestamp,
+        MarketIdentity buyerIdentity,
+        MarketIdentity sellerIdentity
 ) {
+    public TradeView(EconomyId commodityId, EconomyId commodityTypeId, BigDecimal pricePerUnit,
+                     int quantity, UUID buyer, UUID seller, Instant timestamp) {
+        this(commodityId, commodityTypeId, pricePerUnit, quantity, buyer, seller, timestamp,
+                MarketIdentity.personal(buyer), MarketIdentity.personal(seller));
+    }
     public TradeView {
         Objects.requireNonNull(commodityId, "commodityId");
         Objects.requireNonNull(commodityTypeId, "commodityTypeId");

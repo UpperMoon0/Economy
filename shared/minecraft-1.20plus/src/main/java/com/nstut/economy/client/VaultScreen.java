@@ -30,6 +30,7 @@ public class VaultScreen extends EconomyUiContainerScreen<VaultMenu> {
     static final int PLAYER_PANEL_Y = 122;
     static final int PLAYER_PANEL_HEIGHT = 82;
     private ButtonWidget modeBtn;
+    private ButtonWidget ownerBtn;
     private VaultBlockEntity.VaultMode currentMode;
 
     public VaultScreen(VaultMenu menu, Inventory playerInventory, Component title) {
@@ -48,7 +49,15 @@ public class VaultScreen extends EconomyUiContainerScreen<VaultMenu> {
         if (modeBtn != null && mode != currentMode) {
             currentMode = mode;
             modeBtn.setLabel(modeLabel(mode));
-            modeBtn.tooltip(modeTooltip(mode));
+            modeBtn.tooltip(modeTooltipWithPermission(mode));
+        }
+        if (ownerBtn != null) {
+            ownerBtn.setVisible(menu.hasTeam());
+            ownerBtn.setLabel(storageOwnerLabel());
+            ownerBtn.enabled(menu.hasTeam() && menu.getVaultBlockEntity() != null);
+        }
+        if (modeBtn != null) {
+            modeBtn.tooltip(modeTooltipWithPermission(currentMode));
         }
     }
 
@@ -74,8 +83,12 @@ public class VaultScreen extends EconomyUiContainerScreen<VaultMenu> {
         HStack header = new HStack().gap(4).align(Alignment.CENTER);
         header.addChild(Ui.text(Component.translatable("ui.economy.vault.title")).style(TextStyle.TITLE));
         header.addChild(Ui.spacer().flex());
-        modeBtn = Ui.button(modeLabel(currentMode), this::cycleMode).ghost().small();
-        modeBtn.tooltip(modeTooltip(currentMode));
+        ownerBtn = EconomyUiComponents.configStateButton(storageOwnerLabel(), this::toggleStorageOwner);
+        ownerBtn.tooltip(Component.translatable("ui.economy.container.owner_transfer_tooltip"));
+        ownerBtn.setVisible(menu.hasTeam());
+        header.addChild(ownerBtn);
+        modeBtn = EconomyUiComponents.configStateButton(modeLabel(currentMode), this::cycleMode);
+        modeBtn.tooltip(modeTooltipWithPermission(currentMode));
         header.addChild(modeBtn);
         header.addChild(buildCompactThemeToggle());
 
@@ -99,6 +112,32 @@ public class VaultScreen extends EconomyUiContainerScreen<VaultMenu> {
             case INPUT -> "ui.economy.container.tooltip.mode_input";
             case OUTPUT -> "ui.economy.container.tooltip.mode_output";
         });
+    }
+
+
+    private Component modeTooltipWithPermission(VaultBlockEntity.VaultMode mode) {
+        return modeTooltip(mode).copy()
+                .append("\n")
+                .append(Component.translatable("ui.economy.container.mode_admin_hint"));
+    }
+
+    private boolean isTeamStorage() {
+        return menu.isTeamOwned();
+    }
+
+    private Component storageOwnerLabel() {
+        Component principal = Component.translatable(isTeamStorage()
+                ? "ui.economy.principal.team"
+                : "ui.economy.principal.personal");
+        return principal;
+    }
+
+    private void toggleStorageOwner() {
+        VaultBlockEntity storage = menu.getVaultBlockEntity();
+        if (storage == null || minecraft == null || minecraft.level == null) return;
+        MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.SetStorageOwnerPacket(
+                minecraft.level.dimension().location().toString(),
+                storage.getBlockPos(), false, !menu.isTeamOwned()));
     }
 
     private void cycleMode() {

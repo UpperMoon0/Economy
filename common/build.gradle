@@ -18,6 +18,19 @@ base {
     archivesName = "$rootProject.archives_name-$project.name"
 }
 
+// Binary compatibility fixture: compile consumer bytecode against the v0.0.13 public
+// EconomyEvents descriptor, then run that bytecode with the current API implementation.
+// If a shipped symbol is removed, execution fails with NoSuchMethodError.
+sourceSets {
+    legacy013ApiStub {
+        java.srcDir 'src/legacy013ApiStub/java'
+    }
+    legacy013BinaryFixture {
+        java.srcDir 'src/legacy013BinaryFixture/java'
+        compileClasspath = sourceSets.legacy013ApiStub.output
+    }
+}
+
 dependencies {
     // SLF4J API for logging (implementation provided by Minecraft)
     compileOnly "org.slf4j:slf4j-api:2.0.9"
@@ -33,4 +46,21 @@ test {
 
 tasks.withType(JavaCompile).configureEach {
     it.options.release = 17
+}
+
+tasks.named('compileLegacy013BinaryFixtureJava', JavaCompile).configure {
+    dependsOn tasks.named('compileLegacy013ApiStubJava')
+    options.release = 17
+}
+
+tasks.register('verifyLegacy013BinaryCompatibility', JavaExec) {
+    group = 'verification'
+    description = 'Runs consumer bytecode compiled against the Economy 0.0.13 API on the current implementation.'
+    dependsOn tasks.named('compileLegacy013BinaryFixtureJava'), tasks.named('classes')
+    classpath = sourceSets.legacy013BinaryFixture.output + sourceSets.main.runtimeClasspath
+    mainClass = 'example.economyaddon.v013.Legacy013EventAddon'
+}
+
+tasks.named('test').configure {
+    dependsOn tasks.named('verifyLegacy013BinaryCompatibility')
 }

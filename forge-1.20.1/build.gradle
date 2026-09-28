@@ -173,3 +173,80 @@ remapJar {
 test {
     useJUnitPlatform()
 }
+
+// Isolated visual fixture mod: never bundled into production jars.
+sourceSets {
+    uiPreview {
+        compileClasspath += sourceSets.main.output + sourceSets.main.compileClasspath
+        runtimeClasspath += sourceSets.main.output + sourceSets.main.runtimeClasspath
+    }
+}
+loom.runs {
+    uiPreview {
+        client()
+        mods {
+            main {
+                sourceSet sourceSets.main
+            }
+            economy_ui_preview {
+                sourceSet sourceSets.uiPreview
+            }
+        }
+        source sourceSets.uiPreview
+        runDir 'build/ui-preview-run'
+        property 'economy.uiPreview.output', layout.buildDirectory.dir('ui-previews').get().asFile.absolutePath
+        programArgs '--width', '1024', '--height', '832'
+    }
+}
+tasks.named('runUiPreview').configure {
+    dependsOn 'runGameTestServer'
+    doFirst {
+        // Only generated directories inside this project's build directory are replaced.
+        delete layout.buildDirectory.dir('ui-previews'), layout.buildDirectory.dir('ui-preview-run')
+        def sourceWorld = file('run/gametest/world')
+        if (!new File(sourceWorld, 'level.dat').isFile()) {
+            throw new GradleException("GameTest fixture world is missing: ${sourceWorld}")
+        }
+        def run = layout.buildDirectory.dir('ui-preview-run').get().asFile
+        run.mkdirs()
+        copy { from sourceWorld; into new File(run, 'saves/world'); exclude 'session.lock' }
+        new File(run, 'options.txt').text = 'guiScale:2\nmaxFps:60\nenableVsync:false\nlang:en_us\npauseOnLostFocus:false\n'
+    }
+}
+tasks.register('renderUiPreviews') {
+    group = 'verification'
+    description = 'Renders production Market screens with deterministic Team wallet fixtures.'
+    dependsOn 'runUiPreview'
+    doLast {
+        def output = layout.buildDirectory.dir('ui-previews').get().asFile
+        def manifest = new File(output, 'manifest.json')
+        if (!manifest.isFile()) throw new GradleException('UI preview did not complete')
+        def images = new groovy.json.JsonSlurper().parse(manifest)
+        def cases = ['browse-personal', 'browse-team', 'treasury-owner', 'treasury-owner-expanded', 'treasury-officer', 'treasury-member',
+                     'treasury-unavailable', 'containers-personal', 'containers-owner', 'containers-officer', 'orders-personal-selected',
+                     'orders-team-selected', 'new-personal-buy', 'new-personal-sell', 'new-team-buy', 'new-team-sell']
+        def expectedFiles = [] as Set
+        ['dark', 'light'].each { theme ->
+            ['wide', 'narrow'].each { layoutName ->
+                cases.each { caseName -> expectedFiles << "${caseName}-${layoutName}-${theme}.png" }
+            }
+        }
+        def actualFiles = images.collect { it.file } as Set
+        def expectedCount = cases.size() * 4
+        if (images.size() != expectedCount || actualFiles != expectedFiles)
+            throw new GradleException("Expected the complete ${expectedCount}-case UI matrix; missing=${expectedFiles - actualFiles}, extra=${actualFiles - expectedFiles}")
+        images.each { entry ->
+            def file = new File(output, entry.file)
+            def png = javax.imageio.ImageIO.read(file)
+            def expectedWidth = entry.guiScale == 2 ? 744 : 1024
+            def expectedHeight = entry.guiScale == 2 ? 528 : 792
+            if (png == null || png.width != entry.width || png.height != entry.height ||
+                    entry.width != expectedWidth || entry.height != expectedHeight || file.length() < 1024)
+                throw new GradleException("Invalid preview: ${entry.file}")
+        }
+        def gallery = new File(output, 'index.html')
+        if (!gallery.isFile() || !expectedFiles.every { gallery.text.contains(it) })
+            throw new GradleException('UI preview gallery is incomplete')
+        logger.lifecycle("Verified ${expectedCount} Market UI previews in ${output}")
+    }
+}

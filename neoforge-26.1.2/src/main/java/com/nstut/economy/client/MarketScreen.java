@@ -35,6 +35,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.resources.DefaultPlayerSkin;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
@@ -86,7 +87,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
     private static final int TOOLTIP_MAX_WIDTH = 140;
     private static final SimpleDateFormat CHART_TIME_FMT = new SimpleDateFormat("MM/dd HH:mm:ss");
 
-    enum MarketView { BROWSE, DETAIL, NEW_ORDER, ORDERS, PORTFOLIO, CONTAINERS }
+    enum MarketView { BROWSE, DETAIL, NEW_ORDER, ORDERS, PAY_PLAYER, PORTFOLIO, TEAM_TREASURY, CONTAINERS }
     enum OrdersTab { ACTIVE, HISTORY }
     enum CommodityTypeFilter { ALL, ITEMS, FLUIDS }
     enum BrowseActivityFilter { ALL, ACTIVE }
@@ -114,7 +115,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
     record VariantTraits(boolean enchanted, boolean damaged, boolean named,
                          boolean otherMetadata, boolean damageable, int durabilityRemaining) {}
 
-    // ── View & filter state ───────────────────────────────────────────────
+    // Ã¢â€â‚¬Ã¢â€â‚¬ View & filter state Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
     private final Signal<MarketView> view = Signals.of(MarketView.BROWSE);
     private final Signal<OrdersTab> ordersTab = Signals.of(OrdersTab.ACTIVE);
     private final Signal<String> browseQuery = Signals.of("");
@@ -140,7 +141,12 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
     private final Signal<String> createPrice = Signals.of("");
     private final Signal<Boolean> createSellMode = Signals.of(true);
     private final Signal<Boolean> createInfinite = Signals.of(false);
-    private final Signal<String> createError = Signals.of(null);
+    private final Signal<String> treasuryAmount = Signals.of("");
+    private final Signal<Boolean> treasuryInfoExpanded = Signals.of(false);
+    private final Signal<String> payPlayerQuery = Signals.of("");
+    private final Signal<String> payAmount = Signals.of("");
+    private final Signal<UUID> payPlayerId = Signals.of(null);
+    private final Signal<List<MarketNetwork.PlayerTargetData>> playerSearchResults = Signals.of(List.of());
     private final Signal<MarketNetwork.ActiveOrderEntry> editingOrder = Signals.of(null);
     private final Signal<PendingConfirmation> pendingConfirmation = Signals.of(null);
 
@@ -151,6 +157,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
     private final List<Subscription> subscriptions = new ArrayList<>();
     private final Signal<List<ItemSearchResult>> searchResults = Signals.of(List.of());
     private Subscription itemSearchSubscription;
+    private Subscription playerSearchSubscription;
     private boolean initialDataRequested;
     private Component deferredTooltip;
 
@@ -212,10 +219,12 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
     private final Computed<Boolean> asksEmpty = computed(() -> visibleAsks.get().isEmpty());
     private final Computed<Boolean> bidsEmpty = computed(() -> visibleBids.get().isEmpty());
 
-    private ButtonWidget browseBtn, newOrderBtn, ordersBtn, portfolioBtn, containersBtn;
+    private ButtonWidget browseBtn, newOrderBtn, ordersBtn, payPlayerBtn, portfolioBtn, treasuryBtn, containersBtn;
     private ButtonWidget newOrderSellBtn, newOrderBuyBtn;
     private Popover itemSearchPopover;
     private OverlayHandle itemSearchHandle;
+    private Popover playerSearchPopover;
+    private OverlayHandle playerSearchHandle;
 
     private static String t(String key) { return Component.translatable(key).getString(); }
 
@@ -258,9 +267,32 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         super(menu, inv, title);
     }
 
-    // ── Network handler delegates (kept as thin bridges to the store) ──────
+    // Ã¢â€â‚¬Ã¢â€â‚¬ Network handler delegates (kept as thin bridges to the store) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
     public static void handleSyncItemList(MarketNetwork.SyncItemListPacket pkt) {
+        boolean hadTreasury = treasuryAvailable();
+        boolean hadPayPlayerAccess = payPlayerAvailable();
+        String previousPrincipal = MarketClientStore.marketPrincipal.get();
         MarketClientStore.applySyncItemList(pkt);
+        boolean principalChanged = !java.util.Objects.equals(previousPrincipal, MarketClientStore.marketPrincipal.get());
+        boolean payPlayerAccessChanged = hadPayPlayerAccess != payPlayerAvailable();
+        Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft.screen instanceof MarketScreen screen) {
+            if (!treasuryAvailable() && screen.view.get() == MarketView.TEAM_TREASURY) {
+                screen.view.set(MarketView.BROWSE);
+            }
+            if (!payPlayerAvailable() && screen.view.get() == MarketView.PAY_PLAYER) {
+                screen.view.set(MarketView.BROWSE);
+            }
+            if (hadTreasury != treasuryAvailable() || principalChanged || payPlayerAccessChanged) screen.rebuildUI();
+            if (principalChanged) screen.onViewEntered(screen.view.get());
+            String id = screen.view.get() == MarketView.NEW_ORDER
+                    ? screen.selectedCreateCommodityId() : screen.selectedItemId.get();
+            String type = screen.view.get() == MarketView.NEW_ORDER
+                    ? (id != null && isFluidCommodity(id) ? "FLUID" : "ITEM") : screen.selectedCommodityType.get();
+            if (id != null && !id.isBlank()) {
+                MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestItemDetailPacket(id, type));
+            }
+        }
     }
 
     public static void handleSyncItemDetail(MarketNetwork.SyncItemDetailPacket pkt) {
@@ -283,22 +315,50 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         MarketClientStore.applySyncActiveOrders(pkt);
     }
 
+    public static void handleSyncPlayerList(MarketNetwork.SyncPlayerListPacket pkt) {
+        MarketClientStore.applySyncPlayerList(pkt);
+    }
+
     public static void handleActionResult(MarketNetwork.MarketActionResultPacket pkt) {
-        Component title = Component.translatable(switch (pkt.result) {
-            case SUCCESS -> "ui.economy.toast.success";
-            case WARNING -> switch (pkt.action) {
-                case CANCEL_ORDER -> "ui.economy.toast.cancel_rejected";
-                case EDIT_ORDER -> "ui.economy.toast.edit_rejected";
-                default -> "ui.economy.toast.order_rejected";
-            };
-            case ERROR -> "ui.economy.toast.error";
-        });
+        Component title = Component.translatable(actionToastTitleKey(pkt.action, pkt.result));
         Component message = Component.translatable(pkt.messageKey, pkt.args.toArray());
         Minecraft minecraft = Minecraft.getInstance();
+        if (pkt.action == MarketNetwork.Action.PAYMENT && pkt.result == MarketNetwork.Result.SUCCESS
+                && minecraft.screen instanceof MarketScreen market) {
+            market.payAmount.set("");
+            market.payPlayerQuery.set("");
+            market.payPlayerId.set(null);
+            market.hidePlayerSearch();
+        }
         if (minecraft.screen instanceof EconomyUiContainerScreen<?> screen && screen.uiRuntime() != null) {
             Toast toast = new Toast(switch (pkt.result) { case SUCCESS -> Toast.Type.SUCCESS; case WARNING -> Toast.Type.WARNING; case ERROR -> Toast.Type.ERROR; }, title, message, 3500, null);
             Toast.show(screen.uiRuntime().overlays(), toast);
         } else if (minecraft.gui != null) minecraft.gui.setOverlayMessage(message, false);
+    }
+
+    private static String actionToastTitleKey(MarketNetwork.Action action, MarketNetwork.Result result) {
+        String suffix = result == MarketNetwork.Result.SUCCESS ? "success" : "failed";
+        return "ui.economy.toast.title." + switch (action) {
+            case CREATE_ORDER -> "create_" + suffix;
+            case ACCEPT_ORDER -> "accept_" + suffix;
+            case CANCEL_ORDER -> "cancel_" + suffix;
+            case EDIT_ORDER -> "edit_" + suffix;
+            case WALLET -> "wallet_" + suffix;
+            case TREASURY -> "treasury_" + suffix;
+            case STORAGE -> "storage_" + suffix;
+            case PAYMENT -> "payment_" + suffix;
+        };
+    }
+
+    private void showLocalValidationToast(MarketNetwork.Action action, String messageKey, Object... args) {
+        Component title = Component.translatable(actionToastTitleKey(action, MarketNetwork.Result.WARNING));
+        Component message = Component.translatable(messageKey, args);
+        if (uiRuntime() != null) {
+            Toast.show(uiRuntime().overlays(), new Toast(Toast.Type.WARNING, title, message, 3500, null));
+        } else {
+            Minecraft minecraft = Minecraft.getInstance();
+            if (minecraft.gui != null) minecraft.gui.setOverlayMessage(message, false);
+        }
     }
 
     @Override
@@ -346,12 +406,19 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         hideItemSearch();
         itemSearchHandle = null;
         itemSearchPopover = null;
+        if (playerSearchSubscription != null) {
+            playerSearchSubscription.close();
+            playerSearchSubscription = null;
+        }
+        hidePlayerSearch();
+        playerSearchHandle = null;
+        playerSearchPopover = null;
         computedList.clear();
         subscriptions.clear();
         super.removed();
     }
 
-    // ── Build root UI ─────────────────────────────────────────────────────
+    // Ã¢â€â‚¬Ã¢â€â‚¬ Build root UI Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
     @Override
     protected UIComponent buildUI() {
         for (Subscription s : subscriptions) s.close();
@@ -360,6 +427,13 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
             itemSearchSubscription.close();
             itemSearchSubscription = null;
         }
+        if (playerSearchSubscription != null) {
+            playerSearchSubscription.close();
+            playerSearchSubscription = null;
+        }
+        hidePlayerSearch();
+        if (!treasuryAvailable() && view.get() == MarketView.TEAM_TREASURY) view.set(MarketView.BROWSE);
+        if (!payPlayerAvailable() && view.get() == MarketView.PAY_PLAYER) view.set(MarketView.BROWSE);
         subscriptions.add(view.subscribe(v -> {
             updateNav(v);
             onViewEntered(v);
@@ -369,7 +443,34 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
             if (newOrderBuyBtn != null) newOrderBuyBtn.setActive(!b);
             if (b) createInfinite.set(false);
         }));
+        subscriptions.add(MarketClientStore.teamWallet.subscribe(ignored -> updateNav(view.get())));
+        subscriptions.add(MarketClientStore.marketPrincipal.subscribe(ignored -> updateNav(view.get())));
         return Ui.padding(8, Ui.responsive(ctx -> buildShell(ctx.width())));
+    }
+
+    private static boolean treasuryAvailable() {
+        var team = MarketClientStore.teamWallet.get();
+        return team != null && team.visible();
+    }
+
+    private static boolean payPlayerAvailable() {
+        if (MarketClientStore.isPersonalPrincipal()) return true;
+        var team = MarketClientStore.teamWallet.get();
+        return team != null && team.visible() && team.canPayout();
+    }
+
+    private static Component payPlayerNavTooltip() {
+        if (MarketClientStore.isPersonalPrincipal()) {
+            return Component.translatable("ui.economy.payment.nav_personal_hint");
+        }
+        var team = MarketClientStore.teamWallet.get();
+        if (team == null || !team.visible()) {
+            return Component.translatable("ui.economy.payment.nav_team_unavailable");
+        }
+        if (!team.canPayout()) {
+            return Component.translatable("ui.economy.payment.nav_team_permission", humanizeEnum(team.payoutRole()));
+        }
+        return Component.translatable("ui.economy.payment.nav_team_hint");
     }
 
     private UIComponent buildShell(int availableWidth) {
@@ -387,12 +488,20 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         VStack sidebar = new VStack().gap(5);
         sidebar.width(SIDEBAR_W);
         sidebar.fillHeight();
-        sidebar.addChild(Ui.text(Component.translatable("ui.economy.brand")).style(TextStyle.TITLE));
-        sidebar.addChild(Ui.text(Component.translatable("ui.economy.market.subtitle")));
-        sidebar.addChild(EconomyUiComponents.balancePill(MarketClientStore.balance));
+        sidebar.addChild(Ui.text(Component.translatable("ui.economy.market.subtitle")).style(TextStyle.TITLE));
+        sidebar.addChild(EconomyUiComponents.walletBadge(
+                MarketClientStore.balance,
+                MarketClientStore.teamWallet,
+                MarketClientStore.marketPrincipal,
+                () -> MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.SelectMarketWalletPacket(
+                        MarketClientStore.isPersonalPrincipal()))));
         sidebar.addChild(Ui.divider());
-        buildNav(sidebar);
-        sidebar.addChild(Ui.spacer());
+        VStack navList = new VStack().gap(5);
+        navList.fillWidth();
+        buildNav(navList);
+        UIComponent navScroll = Ui.scroll(navList);
+        navScroll.flex();
+        sidebar.addChild(navScroll);
         sidebar.addChild(buildThemeToggle());
         main.addChild(sidebar);
 
@@ -406,17 +515,32 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         root.fillHeight();
 
         HStack top = new HStack().gap(6);
-        top.addChild(Ui.text(Component.translatable("ui.economy.brand")).style(TextStyle.TITLE));
-        top.addChild(Ui.text(Component.translatable("ui.economy.market.subtitle")).style(TextStyle.CAPTION));
+        top.addChild(Ui.text(Component.translatable("ui.economy.market.subtitle")).style(TextStyle.TITLE));
         top.addChild(Ui.spacer().flex());
         top.addChild(buildThemeToggle());
         root.addChild(top);
 
+        HStack walletRow = new HStack().gap(4);
+        walletRow.fillWidth();
+        walletRow.addChild(EconomyUiComponents.walletBadge(
+                MarketClientStore.balance,
+                MarketClientStore.teamWallet,
+                MarketClientStore.marketPrincipal,
+                () -> MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.SelectMarketWalletPacket(
+                        MarketClientStore.isPersonalPrincipal()))));
+        root.addChild(walletRow);
+
         Select<MarketView> nav = Ui.select(view);
         nav.option(Component.translatable("ui.economy.nav.browse"), MarketView.BROWSE);
         nav.option(Component.translatable("ui.economy.nav.new_order"), MarketView.NEW_ORDER);
-        nav.option(Component.translatable("ui.economy.nav.orders"), MarketView.ORDERS);
+        nav.option(Component.literal(ordersNavLabel()), MarketView.ORDERS);
+        if (payPlayerAvailable()) {
+            nav.option(Component.translatable("ui.economy.nav.pay_player"), MarketView.PAY_PLAYER);
+        }
         nav.option(Component.translatable("ui.economy.nav.portfolio"), MarketView.PORTFOLIO);
+        if (treasuryAvailable()) {
+            nav.option(Component.translatable("ui.economy.nav.team_treasury"), MarketView.TEAM_TREASURY);
+        }
         nav.option(Component.translatable("ui.economy.nav.containers"), MarketView.CONTAINERS);
         nav.fillWidth();
         root.addChild(nav);
@@ -432,7 +556,9 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                 .when(MarketView.DETAIL, this::buildDetailView)
                 .when(MarketView.NEW_ORDER, this::buildNewOrderView)
                 .when(MarketView.ORDERS, this::buildOrdersView)
+                .when(MarketView.PAY_PLAYER, this::buildPayPlayerView)
                 .when(MarketView.PORTFOLIO, this::buildPortfolioView)
+                .when(MarketView.TEAM_TREASURY, this::buildTeamTreasuryView)
                 .when(MarketView.CONTAINERS, this::buildContainersView);
         switcher.flex();
         content.addChild(switcher);
@@ -442,38 +568,60 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
     private void buildNav(VStack sidebar) {
         browseBtn = navButton(t("ui.economy.nav.browse"), () -> switchView(MarketView.BROWSE));
         newOrderBtn = navButton(t("ui.economy.nav.new_order"), () -> switchView(MarketView.NEW_ORDER));
-        ordersBtn = navButton(t("ui.economy.nav.orders"), () -> switchView(MarketView.ORDERS));
+        ordersBtn = navButton(ordersNavLabel(), () -> switchView(MarketView.ORDERS));
+        payPlayerBtn = navButton(t("ui.economy.nav.pay_player"), () -> switchView(MarketView.PAY_PLAYER));
         portfolioBtn = navButton(t("ui.economy.nav.portfolio"), () -> switchView(MarketView.PORTFOLIO));
+        treasuryBtn = navButton(t("ui.economy.nav.team_treasury"), () -> switchView(MarketView.TEAM_TREASURY));
         containersBtn = navButton(t("ui.economy.nav.containers"), () -> switchView(MarketView.CONTAINERS));
         sidebar.addChild(browseBtn);
         sidebar.addChild(newOrderBtn);
         sidebar.addChild(ordersBtn);
+        sidebar.addChild(payPlayerBtn);
         sidebar.addChild(portfolioBtn);
+        if (treasuryAvailable()) sidebar.addChild(treasuryBtn);
         sidebar.addChild(containersBtn);
     }
 
     private ButtonWidget navButton(String label, Runnable action) {
-        ButtonWidget b = Ui.button(Component.literal(label), action).alignLeft().activeIndicator();
-        b.height(18);
-        return b;
+        return new MarqueeNavButton(Component.literal(label), action);
+    }
+
+    private String ordersNavLabel() {
+        return t(MarketClientStore.isTeamPrincipal()
+                ? "ui.economy.nav.team_orders"
+                : "ui.economy.nav.my_orders");
     }
 
     private void updateNav(MarketView v) {
         if (browseBtn != null) browseBtn.setActive(v == MarketView.BROWSE);
         if (newOrderBtn != null) newOrderBtn.setActive(v == MarketView.NEW_ORDER);
         if (ordersBtn != null) ordersBtn.setActive(v == MarketView.ORDERS);
+        if (payPlayerBtn != null) {
+            boolean available = payPlayerAvailable();
+            payPlayerBtn.enabled(available);
+            payPlayerBtn.setActive(available && v == MarketView.PAY_PLAYER);
+            payPlayerBtn.tooltip(payPlayerNavTooltip());
+        }
         if (portfolioBtn != null) portfolioBtn.setActive(v == MarketView.PORTFOLIO);
+        if (treasuryBtn != null) treasuryBtn.setActive(v == MarketView.TEAM_TREASURY);
         if (containersBtn != null) containersBtn.setActive(v == MarketView.CONTAINERS);
     }
 
     private void onViewEntered(MarketView v) {
+        if (v == MarketView.PAY_PLAYER && !payPlayerAvailable()) return;
+        if (v == MarketView.TEAM_TREASURY && !treasuryAvailable()) return;
         switch (v) {
             case BROWSE -> MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestRefreshPacket());
             case ORDERS -> {
                 MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestActiveOrdersPacket());
                 MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestOrderHistoryPacket());
             }
+            case PAY_PLAYER -> {
+                MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestPlayerListPacket());
+                MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestRefreshPacket());
+            }
             case PORTFOLIO -> MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestPortfolioPacket());
+            case TEAM_TREASURY -> MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestRefreshPacket());
             case CONTAINERS -> MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestVaultInfoPacket());
             case DETAIL -> {
                 String id = selectedItemId.get();
@@ -488,10 +636,14 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
     }
 
     private void switchView(MarketView v) {
+        if (v == MarketView.PAY_PLAYER && !payPlayerAvailable()) return;
+        if (v == MarketView.TEAM_TREASURY && !treasuryAvailable()) return;
+        hideItemSearch();
+        hidePlayerSearch();
         view.set(v);
     }
 
-    // ── BROWSE ────────────────────────────────────────────────────────────
+    // Ã¢â€â‚¬Ã¢â€â‚¬ BROWSE Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
     private UIComponent buildBrowseView() {
         VStack v = new VStack().gap(4);
         v.addChild(new UIComponent() {
@@ -643,10 +795,10 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         int limit = Math.min(6, group.variants().size());
         for (int i = 0; i < limit; i++) {
             MarketNetwork.ItemCardData card = group.variants().get(i);
-            text.append("\n• ").append(getItemDisplayName(card.itemId, card.displayName));
+            text.append("\nÃ¢â‚¬Â¢ ").append(getItemDisplayName(card.itemId, card.displayName));
         }
         if (group.variants().size() > limit) {
-            text.append("\n… +").append(group.variants().size() - limit);
+            text.append("\nÃ¢â‚¬Â¦ +").append(group.variants().size() - limit);
         }
         return Component.literal(text.toString());
     }
@@ -937,7 +1089,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestItemDetailPacket(id, commodityType));
     }
 
-    // ── DETAIL ─────────────────────────────────────────────────────────────
+    // Ã¢â€â‚¬Ã¢â€â‚¬ DETAIL Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
     private UIComponent buildDetailView() {
         VStack v = new VStack().gap(4);
         v.flex();
@@ -1048,7 +1200,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                     UiRender.roundedRect(g, x, y + 1, width, 16, 2, c.surfaceRaised());
                 }
                 int clr = e.isServerOrder ? c.primary() : (isAsks ? c.danger() : c.success());
-                String line = e.price + " x " + (e.isInfinite ? "∞" : (isFluidCommodity(MarketClientStore.detail.get() == null ? "" : MarketClientStore.detail.get().itemId)
+                String line = e.price + " x " + (e.isInfinite ? "Ã¢Ë†Å¾" : (isFluidCommodity(MarketClientStore.detail.get() == null ? "" : MarketClientStore.detail.get().itemId)
                         ? formatFluidAmount(e.quantity) : formatItemAmount(e.quantity)));
                 String sellerName = e.isServerOrder
                         ? t("ui.economy.orders.server_badge")
@@ -1081,7 +1233,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                     UiRender.roundedRect(g, x, y + 1, width, 16, 2, c.surfaceRaised());
                 }
                 String detailItemId = MarketClientStore.detail.get() == null ? "" : MarketClientStore.detail.get().itemId;
-                String line = e.price + " x " + (e.isInfinite ? "∞" : (isFluidCommodity(detailItemId)
+                String line = e.price + " x " + (e.isInfinite ? "Ã¢Ë†Å¾" : (isFluidCommodity(detailItemId)
                         ? formatFluidAmount(e.quantity) : formatItemAmount(e.quantity)));
                 String sideLabel = o.isSell() ? t("ui.economy.opt.sell") : t("ui.economy.opt.buy");
                 int lineWidth = Math.max(0, width - 6 - f.width(sideLabel) - 6 - 10);
@@ -1100,16 +1252,17 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         edit.height(14);
         ButtonWidget cancel = Ui.button(t("ui.economy.action.cancel"),
                 () -> confirmOrderCancellation(e.orderId, detailItemId(), detailItemName(), o.isSell(),
-                        e.price, e.quantity, e.isInfinite)).danger().small();
+                        e.price, e.quantity, e.isInfinite, e.identity)).danger().small();
         cancel.height(14);
         row.addChild(edit);
         row.addChild(cancel);
         return row;
     }
 
-    // ── NEW ORDER ──────────────────────────────────────────────────────────
+    // Ã¢â€â‚¬Ã¢â€â‚¬ NEW ORDER Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
     private UIComponent buildNewOrderView() {
         VStack v = new VStack().gap(4);
+        v.fillWidth();
         v.addChild(Ui.button(Component.translatable("ui.economy.action.back"), () -> switchView(MarketView.BROWSE)).ghost());
         v.addChild(Ui.divider());
 
@@ -1164,20 +1317,19 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         subscriptions.add(createCommodityId.subscribe(id -> updatePricePlaceholder.run()));
         v.addChild(priceField);
 
+        UIComponent identityRow = Ui.text(() -> Component.translatable(
+                        MarketClientStore.isTeamPrincipal()
+                                ? "ui.economy.new_order.identity.team"
+                                : "ui.economy.new_order.identity.personal"))
+                .style(TextStyle.CAPTION).nowrap().ellipsis();
+        identityRow.height(14);
+        v.addChild(identityRow);
+
         ButtonWidget submit = Ui.button(Component.translatable("ui.economy.action.submit"), this::submitOffer).primary();
         v.addChild(submit);
 
-        v.addChild(new UIComponent() {
-            @Override public int preferredWidth(Font f) { return 0; }
-            @Override public int preferredHeight(Font f) { return createError.get() != null ? 24 : 0; }
-            @Override public void render(GuiGraphicsExtractor g, Font f, int mx, int my, float pt) {
-                String err = createError.get();
-                if (err != null) drawWrappedText(g, f, err, x, y, Math.max(1, width), height, theme().colors().danger(), 2);
-            }
-        });
-
         updateCreateModeButtons(newOrderSellBtn, newOrderBuyBtn);
-        return v;
+        return Ui.scroll(v).flex();
     }
 
     private void updateCreateModeButtons(ButtonWidget sell, ButtonWidget buy) {
@@ -1418,16 +1570,15 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
     }
 
     private void submitOffer() {
-        createError.set(null);
         String id = selectedCreateCommodityId();
-        if (id == null || id.isEmpty()) { createError.set(t("ui.economy.error.item_required")); return; }
+        if (id == null || id.isEmpty()) { showLocalValidationToast(MarketNetwork.Action.CREATE_ORDER, "ui.economy.error.item_required"); return; }
         String priceStr = createPrice.get().trim();
-        if (priceStr.isEmpty()) { createError.set(t("ui.economy.error.price_required")); return; }
+        if (priceStr.isEmpty()) { showLocalValidationToast(MarketNetwork.Action.CREATE_ORDER, "ui.economy.error.price_required"); return; }
         BigDecimal price;
         try {
             price = new BigDecimal(priceStr);
-            if (price.compareTo(BigDecimal.ZERO) <= 0) { createError.set(t("ui.economy.error.price_positive")); return; }
-        } catch (NumberFormatException e) { createError.set(t("ui.economy.error.price_number")); return; }
+            if (price.compareTo(BigDecimal.ZERO) <= 0) { showLocalValidationToast(MarketNetwork.Action.CREATE_ORDER, "ui.economy.error.price_positive"); return; }
+        } catch (NumberFormatException e) { showLocalValidationToast(MarketNetwork.Action.CREATE_ORDER, "ui.economy.error.price_number"); return; }
 
         boolean inf = !createSellMode.get() && createInfinite.get();
         String qtyStr = createQty.get().trim();
@@ -1435,26 +1586,26 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         if (!inf) {
             try {
                 qty = Integer.parseInt(qtyStr);
-                if (qty <= 0) { createError.set(t("ui.economy.error.qty_positive")); return; }
-            } catch (NumberFormatException ignored) { createError.set(t("ui.economy.error.qty_number")); return; }
+                if (qty <= 0) { showLocalValidationToast(MarketNetwork.Action.CREATE_ORDER, "ui.economy.error.qty_positive"); return; }
+            } catch (NumberFormatException ignored) { showLocalValidationToast(MarketNetwork.Action.CREATE_ORDER, "ui.economy.error.qty_number"); return; }
         }
         if (createSellMode.get()) {
             int stock = getVaultStockForItem(id);
             if (stock <= 0 || qty > stock) {
-                createError.set(isFluidCommodity(id) ? t("ui.economy.error.insufficient_fluid") : t("ui.economy.error.insufficient_vault"));
+                showLocalValidationToast(MarketNetwork.Action.CREATE_ORDER, isFluidCommodity(id) ? "ui.economy.error.insufficient_fluid" : "ui.economy.error.insufficient_vault");
                 return;
             }
         } else if (!inf) {
             try {
                 BigDecimal total = totalPrice(price, qty, id);
-                BigDecimal bal = new BigDecimal(MarketClientStore.balance.get());
-                if (total.compareTo(bal) > 0) { createError.set(Component.translatable("ui.economy.error.insufficient_funds", bal).getString()); return; }
-            } catch (NumberFormatException ignored) { createError.set(t("ui.economy.error.balance_verify")); return; }
+                BigDecimal bal = new BigDecimal(selectedWalletBalance());
+                if (total.compareTo(bal) > 0) { showLocalValidationToast(MarketNetwork.Action.CREATE_ORDER, "ui.economy.error.insufficient_funds", bal); return; }
+            } catch (NumberFormatException ignored) { showLocalValidationToast(MarketNetwork.Action.CREATE_ORDER, "ui.economy.error.balance_verify"); return; }
         }
         String commodityType = isFluidCommodity(id) ? "FLUID" : "ITEM";
         String dispName = getItemDisplayName(id, id);
         boolean fluid = isFluidCommodity(id);
-        String totalStr = inf ? "∞ (" + (fluid ? "Per bucket: " : "Per unit: ") + price.toPlainString() + ")"
+        String totalStr = inf ? "Ã¢Ë†Å¾ (" + (fluid ? "Per bucket: " : "Per unit: ") + price.toPlainString() + ")"
                 : formatMoney(totalPrice(price, qty, id));
         pendingConfirmation.set(new PendingConfirmation(id, qty, price.toPlainString(), createSellMode.get(), inf,
                  createSellMode.get() ? t("ui.economy.opt.sell") : t("ui.economy.opt.buy"), dispName, totalStr, commodityType));
@@ -1465,7 +1616,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         PendingConfirmation p = pendingConfirmation.get();
         if (p == null) return;
         boolean fluid = isFluidCommodity(p.itemId);
-        String qtyStr = p.isInfinite ? "∞" : EconomyFormatUtil.formatCommodityQuantity(p.quantity, fluid);
+        String qtyStr = p.isInfinite ? "Ã¢Ë†Å¾" : EconomyFormatUtil.formatCommodityQuantity(p.quantity, fluid);
         String msg = Component.translatable("ui.economy.confirm.message", p.action, qtyStr, getItemDisplayName(p.itemId, p.itemName)).getString();
         OverlayHandle[] holder = new OverlayHandle[1];
         boolean[] actionTaken = new boolean[1];
@@ -1510,10 +1661,13 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         body.addChild(Ui.heading(Component.translatable("ui.economy.confirm.title")));
         body.addChild(Ui.text(Component.literal(msg)));
         body.addChild(totalRow);
+        body.addChild(Ui.text(Component.translatable("ui.economy.confirm.account", selectedWalletLabel())));
+        body.addChild(Ui.text(Component.translatable("ui.economy.confirm.storage",
+                MarketClientStore.isTeamPrincipal() ? selectedWalletLabel() : t("ui.economy.principal.personal"))));
         body.addChild(actions);
 
         Card card = new Card(body).elevated(true).outlined(true).padding(14);
-        card.width(220).minHeight(88);
+        card.width(240).minHeight(108);
         holder[0] = Dialog.show(uiRuntime().overlays(), card, true, true, () -> {
             if (!actionTaken[0]) {
                 actionTaken[0] = true;
@@ -1522,7 +1676,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         });
     }
 
-    // ── ORDERS ─────────────────────────────────────────────────────────────
+    // Ã¢â€â‚¬Ã¢â€â‚¬ ORDERS Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
     private UIComponent buildOrdersView() {
         VStack v = new VStack().gap(4);
         v.flex();
@@ -1603,7 +1757,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                         : Component.translatable("ui.economy.orders.quantity_progress",
                                 isFluidCommodity(e.itemId) ? formatFluidAmount(e.quantity) : formatItemAmount(e.quantity),
                                 isFluidCommodity(e.itemId) ? formatFluidAmount(e.initialQuantity) : formatItemAmount(e.initialQuantity)).getString();
-                drawPriceChangeRowMarquee(g, f, e.price, " • " + qty,
+                drawPriceChangeRowMarquee(g, f, e.price, " Ã¢â‚¬Â¢ " + qty,
                         x + 24, y + 17, Math.max(0, width - 28),
                         c.primary(), c.onSurfaceMuted());
             }
@@ -1614,7 +1768,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         edit.width(40).height(18);
         ButtonWidget cancel = Ui.button(t("ui.economy.action.cancel"),
                 () -> confirmOrderCancellation(e.orderId, e.itemId, e.displayName, e.isSell,
-                        e.price, e.quantity, e.isInfinite)).danger().small();
+                        e.price, e.quantity, e.isInfinite, e.identity)).danger().small();
         cancel.width(48).height(18);
         row.addChild(edit);
         row.addChild(cancel);
@@ -1632,7 +1786,8 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
     }
 
     private void confirmOrderCancellation(UUID orderId, String itemId, String itemName, boolean isSell,
-                                          String price, int quantity, boolean infinite) {
+                                          String price, int quantity, boolean infinite,
+                                          com.nstut.economy.api.MarketIdentity identity) {
         OverlayHandle[] holder = new OverlayHandle[1];
         boolean[] actionTaken = new boolean[1];
         boolean fluid = isFluidCommodity(itemId);
@@ -1678,13 +1833,15 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         body.addChild(Ui.text(Component.translatable(
                 "ui.economy.cancel_order.message", side, commodityName)).wrap().maxLines(2));
         body.addChild(orderSummary);
+        body.addChild(Ui.text(Component.translatable("ui.economy.cancel_order.account", orderAccountLabel(identity)))
+                .style(TextStyle.CAPTION));
         body.addChild(Ui.text(Component.translatable(isSell
                 ? "ui.economy.cancel_order.restore_sell"
                 : "ui.economy.cancel_order.restore_buy")).style(TextStyle.CAPTION).wrap().maxLines(2));
         body.addChild(actions);
 
         Card card = new Card(body).elevated(true).outlined(true).padding(14);
-        card.width(230).minHeight(112);
+        card.width(230).minHeight(124);
         holder[0] = Dialog.show(uiRuntime().overlays(), card, true, true, () -> actionTaken[0] = true);
     }
 
@@ -1705,7 +1862,6 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         Signal<String> qtySig = Signals.of(String.valueOf(Math.max(1, e.quantity)));
         Signal<String> priceSig = Signals.of(e.price);
         Signal<Boolean> infSig = Signals.of(e.isInfinite);
-        Signal<String> errSig = Signals.of((String) null);
 
         OrderQuantityControl qtyControl = new OrderQuantityControl(qtySig, Signals.of(e.isSell), infSig, null,
                 t("ui.economy.new_order.qty_field"), t("ui.economy.new_order.unlimited"),
@@ -1719,32 +1875,25 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         VStack body = new VStack().gap(4);
         body.addChild(Ui.text(Component.translatable(e.isSell ? "ui.economy.new_order.title_sell" : "ui.economy.new_order.title_buy")).style(TextStyle.HEADING));
         body.addChild(Ui.text(getItemDisplayName(e.itemId, e.displayName)).style(TextStyle.LABEL));
+        body.addChild(Ui.text(Component.translatable("ui.economy.edit_order.account", orderAccountLabel(e.identity)))
+                .style(TextStyle.CAPTION));
         body.addChild(qtyControl);
         body.addChild(priceField);
-        body.addChild(new UIComponent() {
-            @Override public int preferredWidth(Font f) { return 0; }
-            @Override public int preferredHeight(Font f) { return errSig.get() != null ? 24 : 0; }
-            @Override public void render(GuiGraphicsExtractor g, Font f, int mx, int my, float pt) {
-                String err = errSig.get();
-                if (err != null) drawWrappedText(g, f, err, x, y, Math.max(1, width), height, theme().colors().danger(), 2);
-            }
-        });
         HStack actions = new HStack().gap(4).justify(com.nstut.openui.layout.Justification.END);
         actions.addChild(Ui.button(t("ui.economy.action.save"), () -> {
-            errSig.set(null);
             String pr = priceSig.get().trim();
             BigDecimal price;
             try {
                 price = new BigDecimal(pr);
-                if (price.compareTo(BigDecimal.ZERO) <= 0) { errSig.set(t("ui.economy.error.price_zero")); return; }
-            } catch (Exception ex) { errSig.set(t("ui.economy.error.price_invalid")); return; }
+                if (price.compareTo(BigDecimal.ZERO) <= 0) { showLocalValidationToast(MarketNetwork.Action.EDIT_ORDER, "ui.economy.error.price_zero"); return; }
+            } catch (Exception ex) { showLocalValidationToast(MarketNetwork.Action.EDIT_ORDER, "ui.economy.error.price_invalid"); return; }
             int newQty = e.quantity > 0 ? e.quantity : 1;
             boolean inf = infSig.get();
             if (!inf) {
                 try {
                     newQty = Integer.parseInt(qtySig.get().trim());
-                    if (newQty <= 0) { errSig.set(t("ui.economy.error.qty_zero")); return; }
-                } catch (Exception ex) { errSig.set(t("ui.economy.error.qty_invalid")); return; }
+                    if (newQty <= 0) { showLocalValidationToast(MarketNetwork.Action.EDIT_ORDER, "ui.economy.error.qty_zero"); return; }
+                } catch (Exception ex) { showLocalValidationToast(MarketNetwork.Action.EDIT_ORDER, "ui.economy.error.qty_invalid"); return; }
             }
             MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.EditOrderPacket(e.orderId, newQty, price.toPlainString(), inf));
             editingOrder.set(null);
@@ -1833,7 +1982,146 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         };
     }
 
-    // ── PORTFOLIO ──────────────────────────────────────────────────────────
+    // Player payment ------------------------------------------------------------
+
+    private UIComponent buildPayPlayerView() {
+        VStack v = new VStack().gap(6);
+        v.fillWidth();
+        v.addChild(Ui.heading(Component.translatable("ui.economy.payment.title")));
+        v.addChild(Ui.text(() -> Component.translatable(
+                        MarketClientStore.isTeamPrincipal()
+                                ? "ui.economy.payment.source_team"
+                                : "ui.economy.payment.source_personal"))
+                .style(TextStyle.CAPTION).wrap().ellipsis(false));
+
+        TextField playerField = new TextField(payPlayerQuery) {
+            @Override public void onFocusGained() {
+                super.onFocusGained();
+                refreshPlayerSearchResults(payPlayerQuery.get(), true);
+            }
+        };
+        playerField.placeholder(t("ui.economy.payment.search_placeholder"));
+        playerField.fillWidth();
+        v.addChild(playerField);
+        setupPlayerSearchPopover(playerField);
+
+        TextField amountField = Ui.textField(payAmount);
+        amountField.placeholder(t("ui.economy.payment.amount_placeholder"));
+        amountField.fillWidth();
+        v.addChild(amountField);
+
+        ButtonWidget pay = Ui.button(Component.translatable("ui.economy.payment.pay"), () -> {
+            UUID target = payPlayerId.get();
+            if (target == null) return;
+            MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.PlayerPaymentPacket(target, payAmount.get().trim()));
+        }).primary();
+        pay.fillWidth();
+        Runnable updatePayEnabled = () -> {
+            boolean amountValid = false;
+            try {
+                amountValid = new BigDecimal(payAmount.get().trim()).signum() > 0;
+            } catch (RuntimeException ignored) {}
+            pay.enabled(payPlayerId.get() != null && amountValid);
+        };
+        updatePayEnabled.run();
+        subscriptions.add(payAmount.subscribe(ignored -> updatePayEnabled.run()));
+        subscriptions.add(payPlayerId.subscribe(ignored -> updatePayEnabled.run()));
+        v.addChild(pay);
+        return v;
+    }
+
+    private void setupPlayerSearchPopover(TextField anchor) {
+        if (playerSearchSubscription != null) {
+            playerSearchSubscription.close();
+            playerSearchSubscription = null;
+        }
+        hidePlayerSearch();
+        VirtualList<MarketNetwork.PlayerTargetData> list = Ui.list(playerSearchResults, this::buildPlayerSearchResultRow)
+                .itemHeight(28)
+                .gap(2);
+        list.height(150);
+        playerSearchPopover = Ui.popover(anchor, list).matchAnchorWidth();
+        playerSearchSubscription = payPlayerQuery.subscribe(query -> {
+            MarketNetwork.PlayerTargetData selected = selectedPayTarget();
+            if (selected != null && java.util.Objects.equals(query, selected.name)) {
+                playerSearchResults.set(List.of());
+                hidePlayerSearch();
+                return;
+            }
+            payPlayerId.set(null);
+            refreshPlayerSearchResults(query, true);
+        });
+        subscriptions.add(MarketClientStore.playerTargets.subscribe(ignored ->
+                refreshPlayerSearchResults(payPlayerQuery.get(), playerFieldFocused(anchor))));
+    }
+
+    private boolean playerFieldFocused(TextField field) {
+        return field != null && field.isFocused();
+    }
+
+    private void refreshPlayerSearchResults(String query, boolean openWhenAvailable) {
+        String q = query == null ? "" : query.trim().toLowerCase(Locale.ROOT);
+        List<MarketNetwork.PlayerTargetData> matches = new ArrayList<>();
+        for (MarketNetwork.PlayerTargetData player : MarketClientStore.playerTargets.get()) {
+            if (player == null) continue;
+            String search = (player.name + " " + player.playerId).toLowerCase(Locale.ROOT);
+            if (q.isEmpty() || search.contains(q)) matches.add(player);
+        }
+        playerSearchResults.set(List.copyOf(matches));
+        if (matches.isEmpty()) {
+            hidePlayerSearch();
+        } else if (openWhenAvailable && !isPlayerSearchOpen() && uiRuntime() != null) {
+            playerSearchHandle = playerSearchPopover.show(uiRuntime().overlays());
+        }
+    }
+
+    private UIComponent buildPlayerSearchResultRow(MarketNetwork.PlayerTargetData player) {
+        return new UIComponent() {
+            { height(28); }
+            @Override public int preferredWidth(Font f) { return 0; }
+            @Override public int preferredHeight(Font f) { return 28; }
+            @Override public void render(GuiGraphicsExtractor g, Font f, int mx, int my, float pt) {
+                ColorScheme colors = uiRuntime().theme().colors();
+                if (mx >= x && mx < x + width && my >= y && my < y + height) {
+                    UiRender.roundedRect(g, x, y, width, height, 2, colors.surfaceRaised());
+                }
+                drawPlayerHead(g, player.playerId, x + 3, y + 4, 20);
+                String label = player.name + " - " + player.playerId;
+                drawMarqueeText(g, f, label, x + 28, y + 9, Math.max(1, width - 32), colors.onSurface(), false);
+            }
+            @Override public boolean mouseClicked(double mx, double my, int button) {
+                if (mx >= x && mx < x + width && my >= y && my < y + height) {
+                    payPlayerId.set(player.playerId);
+                    payPlayerQuery.set(player.name);
+                    hidePlayerSearch();
+                    return true;
+                }
+                return false;
+            }
+        };
+    }
+
+    private MarketNetwork.PlayerTargetData selectedPayTarget() {
+        UUID id = payPlayerId.get();
+        if (id == null) return null;
+        for (MarketNetwork.PlayerTargetData player : MarketClientStore.playerTargets.get()) {
+            if (player != null && id.equals(player.playerId)) return player;
+        }
+        return null;
+    }
+
+    private void hidePlayerSearch() {
+        if (playerSearchHandle != null) {
+            playerSearchHandle.close();
+            playerSearchHandle = null;
+        }
+    }
+
+    private boolean isPlayerSearchOpen() {
+        return playerSearchHandle != null && playerSearchHandle.isOpen();
+    }
+
+    // Ã¢â€â‚¬Ã¢â€â‚¬ PORTFOLIO Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
     private UIComponent buildPortfolioView() {
         VStack v = new VStack().gap(4);
         v.flex();
@@ -1880,6 +2168,15 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         drawMarqueeText(g, f, label, bx + 4, by + 3, Math.max(0, bw - 8), c.onSurfaceMuted(), true);
         EconomyUiComponents.drawCoin(g, bx + 4, by + 13);
         drawMarqueeText(g, f, value, bx + 14, by + 13, Math.max(0, bw - 18), valueColor, false);
+    }
+
+    private static void drawPlayerHead(GuiGraphicsExtractor g, UUID playerId, int x, int y, int size) {
+        var connection = Minecraft.getInstance().getConnection();
+        var info = connection != null ? connection.getPlayerInfo(playerId) : null;
+        var skin = info != null ? info.getSkin() : DefaultPlayerSkin.get(playerId);
+        Identifier texture = skin.body().texturePath();
+        g.blit(texture, x, y, size, size, 8.0F / 64.0F, 8.0F / 64.0F, 16.0F / 64.0F, 16.0F / 64.0F);
+        g.blit(texture, x, y, size, size, 40.0F / 64.0F, 8.0F / 64.0F, 48.0F / 64.0F, 16.0F / 64.0F);
     }
 
     /** Draws text inside a hard clip and ping-pongs it only when it exceeds the available width. */
@@ -1981,7 +2278,106 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         };
     }
 
-    // ── CONTAINERS ─────────────────────────────────────────────────────────
+    // Ã¢â€â‚¬Ã¢â€â‚¬ CONTAINERS Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+
+    private UIComponent buildTeamTreasuryView() {
+        VStack v = new VStack().gap(6);
+        v.fillWidth();
+
+        v.addChild(new UIComponent() {
+            { height(66); }
+            @Override public int preferredWidth(Font f) { return 0; }
+            @Override public int preferredHeight(Font f) { return 66; }
+            @Override public void render(GuiGraphicsExtractor g, Font f, int mx, int my, float pt) {
+                ColorScheme c = uiRuntime().theme().colors();
+                MarketClientStore.TeamWalletState team = MarketClientStore.teamWallet.get();
+                if (team == null || !team.visible()) {
+                    return;
+                }
+                UiRender.text(g, f, fitText(f, t("ui.economy.treasury.title") + " / " + team.teamName(), Math.max(0, width - 8)), x + 4, y + 3, c.primary());
+                String teamBal = t("ui.economy.treasury.team_balance") + ": " + formatMoneyCompact(new BigDecimal(team.teamBalance()));
+                String personalBal = t("ui.economy.treasury.personal_balance") + ": " + formatMoneyCompact(new BigDecimal(MarketClientStore.balance.get()));
+                EconomyUiComponents.drawCoin(g, x + 4, y + 20);
+                UiRender.text(g, f, teamBal, x + 14, y + 21, c.onSurface());
+                EconomyUiComponents.drawCoin(g, x + 4, y + 35);
+                UiRender.text(g, f, personalBal, x + 14, y + 36, c.onSurfaceMuted());
+                String role = t("ui.economy.treasury.role") + ": " + humanizeEnum(team.role());
+                UiRender.text(g, f, fitText(f, role, Math.max(0, width - 8)), x + 4, y + 51, c.onSurfaceMuted());
+            }
+        });
+
+        TextField amount = Ui.textField(treasuryAmount);
+        amount.placeholder(t("ui.economy.treasury.amount"));
+        amount.fillWidth();
+        v.addChild(amount);
+
+        ButtonWidget deposit = Ui.button(Component.translatable("ui.economy.treasury.deposit"), () ->
+                MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.TeamTreasuryPacket(
+                        treasuryAmount.get().trim()))).success();
+        deposit.fillWidth();
+        v.addChild(deposit);
+
+        Runnable permissions = () -> {
+            MarketClientStore.TeamWalletState team = MarketClientStore.teamWallet.get();
+            boolean visible = team != null && team.visible();
+            boolean canDeposit = visible && team.canDeposit();
+            deposit.enabled(canDeposit);
+            Component unavailable = Component.translatable("ui.economy.treasury.unavailable_hint");
+            deposit.tooltip(!visible ? unavailable : canDeposit
+                    ? Component.translatable("ui.economy.treasury.deposit_rule")
+                    : Component.translatable("ui.economy.toast.treasury_permission_denied"));
+        };
+        permissions.run();
+        subscriptions.add(MarketClientStore.teamWallet.subscribe(ignored -> permissions.run()));
+
+        ButtonWidget infoToggle = Ui.button(
+                Component.literal(treasuryInfoExpanded.get() ? "^ " : "v ")
+                        .append(Component.translatable("ui.economy.treasury.info")),
+                () -> treasuryInfoExpanded.set(!treasuryInfoExpanded.get())).outline().small();
+        infoToggle.fillWidth();
+        infoToggle.setActive(treasuryInfoExpanded.get());
+        subscriptions.add(treasuryInfoExpanded.subscribe(expanded -> {
+            infoToggle.setActive(expanded);
+            infoToggle.setLabel(Component.literal(expanded ? "^ " : "v ")
+                    .append(Component.translatable("ui.economy.treasury.info")));
+        }));
+        v.addChild(infoToggle);
+
+        UIComponent infoPanel = Ui.switcher(treasuryInfoExpanded)
+                .when(false, () -> Ui.spacer().height(0))
+                .when(true, () -> {
+                    VStack rules = new VStack().gap(3);
+                    rules.fillWidth();
+                    rules.addChild(Ui.text(() -> Component.translatable("ui.economy.treasury.deposit_rule"))
+                            .style(TextStyle.CAPTION).wrap().ellipsis(false));
+                    rules.addChild(Ui.text(() -> {
+                                MarketClientStore.TeamWalletState team = MarketClientStore.teamWallet.get();
+                                return Component.translatable("ui.economy.treasury.market_rule",
+                                        humanizeEnum(team != null ? team.spendRole() : "OFFICER"));
+                            }).style(TextStyle.CAPTION).wrap().ellipsis(false));
+                    rules.addChild(Ui.text(() -> {
+                                MarketClientStore.TeamWalletState team = MarketClientStore.teamWallet.get();
+                                return Component.translatable("ui.economy.treasury.payout_rule",
+                                        humanizeEnum(team != null ? team.payoutRole() : "OWNER"));
+                            }).style(TextStyle.CAPTION).wrap().ellipsis(false));
+                    rules.addChild(Ui.text(() -> Component.translatable("ui.economy.treasury.settlement_rule"))
+                            .style(TextStyle.CAPTION).wrap().ellipsis(false));
+
+                    UIComponent rulesScroll = Ui.scroll(rules);
+                    rulesScroll.fillWidth();
+                    rulesScroll.flex();
+                    Card card = new Card(rulesScroll).padding(6).outlined(true).elevated(false);
+                    card.fillWidth();
+                    card.flex();
+                    return card;
+                });
+        infoPanel.fillWidth();
+        infoPanel.flex();
+        v.addChild(infoPanel);
+        v.flex();
+        return v;
+    }
+
     private UIComponent buildContainersView() {
         VStack v = new VStack().gap(4);
         v.flex();
@@ -2002,80 +2398,154 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
             }
         });
         UIComponent containersList = Ui.switcher(containersEmpty)
-                .when(false, () -> Ui.list(visibleContainers, this::buildContainerRow)
-                        .key(e -> e.dimension + ":" + e.x + "," + e.y + "," + e.z)
-                        .itemHeight(40)
-                        .flex())
+                .when(false, () -> Ui.responsive(ctx -> {
+                    boolean stackedHeader = ctx.width() > 0 && ctx.width() < containerInlineHeaderMinWidth();
+                    return Ui.list(visibleContainers, e -> buildContainerRow(e, stackedHeader))
+                            .key(e -> e.dimension + ":" + e.x + "," + e.y + "," + e.z)
+                            .itemHeight(stackedHeader ? 48 : 40)
+                            .flex();
+                }))
                 .when(true, () -> Ui.emptyState(Component.translatable("ui.economy.empty.no_containers")));
         containersList.flex();
         v.addChild(containersList);
         return v;
     }
 
-    private UIComponent buildContainerRow(MarketNetwork.VaultDetailEntry e) {
-        return new UIComponent() {
-            {
-                height(40);
-            }
-            @Override public int preferredWidth(Font f) { return 0; }
-            @Override public int preferredHeight(Font f) { return 40; }
-            @Override public void render(GuiGraphicsExtractor g, Font f, int mx, int my, float pt) {
-                ColorScheme c = uiRuntime().theme().colors();
-                if (mx >= x && mx < x + width && my >= y && my < y + height) {
-                    UiRender.roundedRect(g, x, y + 1, width, 38, 3, c.surfaceRaised());
-                }
-                int idx = 1;
-                for (MarketNetwork.VaultDetailEntry o : MarketClientStore.containerEntries.get()) {
-                    if (o == e) break;
-                    if (o.tank == e.tank) idx++;
-                }
-                boolean full = e.usedSlots >= e.totalSlots;
-                String badge = full ? t("ui.economy.container.full") : t("ui.economy.container.active");
-                int statusWidth = EconomyUiComponents.badgeWidth(f, badge);
-                int statusX = x + width - 4 - statusWidth;
-                boolean statusHovered = mx >= statusX && mx < statusX + statusWidth
-                        && my >= y + 2 && my < y + 2 + EconomyUiComponents.BADGE_HEIGHT;
-                EconomyUiComponents.drawBadge(g, f, badge, x + width - 4, y + 2,
-                        full ? Badge.Variant.DANGER : Badge.Variant.SUCCESS, statusHovered, c);
-                String modeBadge = switch (e.mode) {
-                    case 1 -> t("ui.economy.container.mode_input"); case 2 -> t("ui.economy.container.mode_output"); default -> t("ui.economy.container.mode_both");
-                };
-                Badge.Variant modeVariant = e.mode == 1 ? Badge.Variant.WARNING : Badge.Variant.PRIMARY;
-                int modeWidth = EconomyUiComponents.badgeWidth(f, modeBadge);
-                int modeX = statusX - 4 - modeWidth;
-                boolean modeHovered = mx >= modeX && mx < modeX + modeWidth
-                        && my >= y + 2 && my < y + 2 + EconomyUiComponents.BADGE_HEIGHT;
-                EconomyUiComponents.drawBadge(g, f, modeBadge, statusX - 4, y + 2,
-                        modeVariant, modeHovered, c);
-                String title = fitText(f,
-                        (e.tank ? t("ui.economy.container.tank_prefix") : t("ui.economy.container.vault_prefix")) + idx,
-                        Math.max(0, modeX - (x + 4) - 6));
-                UiRender.text(g, f, title, x + 4, y + 3, c.primary());
-                String loc = e.dimension.replace("minecraft:", "") + " (" + e.x + ", " + e.y + ", " + e.z + ")";
-                String cap = e.tank ? formatFluidAmount(e.usedSlots) + "/" + formatFluidAmount(e.totalSlots)
-                        : formatCompact(e.usedSlots) + "/" + formatCompact(e.totalSlots) + " " + t("ui.economy.containers.slots");
-                cap = fitText(f, cap, Math.max(0, width / 3));
-                int capX = x + width - f.width(cap) - 4;
-                UiRender.text(g, f, cap, capX, y + 17, c.onSurface());
-                loc = fitText(f, loc, Math.max(0, capX - (x + 4) - 6));
-                UiRender.text(g, f, loc, x + 4, y + 17, c.onSurfaceMuted());
-                if (statusHovered) {
-                    deferredTooltip = Component.translatable(full
-                            ? "ui.economy.container.tooltip.full"
-                            : "ui.economy.container.tooltip.active");
-                } else if (modeHovered) {
-                    String tooltipKey = switch (e.mode) {
-                        case 1 -> "ui.economy.container.tooltip.mode_input";
-                        case 2 -> "ui.economy.container.tooltip.mode_output";
-                        default -> "ui.economy.container.tooltip.mode_both";
-                    };
-                    deferredTooltip = Component.translatable(tooltipKey);
-                }
-            }
-        };
+    private int containerInlineHeaderMinWidth() {
+        int maxTitleWidth = 0;
+        int vaultIndex = 0;
+        int tankIndex = 0;
+        for (MarketNetwork.VaultDetailEntry entry : MarketClientStore.containerEntries.get()) {
+            int index = entry.tank ? ++tankIndex : ++vaultIndex;
+            String prefix = entry.tank ? t("ui.economy.container.tank_prefix") : t("ui.economy.container.vault_prefix");
+            maxTitleWidth = Math.max(maxTitleWidth, font.width(prefix + index));
+        }
+        if (maxTitleWidth == 0) {
+            maxTitleWidth = Math.max(
+                    font.width(t("ui.economy.container.vault_prefix") + "1"),
+                    font.width(t("ui.economy.container.tank_prefix") + "1"));
+        }
+
+        int modeWidth = Math.max(
+                configStateChipPreferredWidth(t("ui.economy.container.mode_both")),
+                Math.max(
+                        configStateChipPreferredWidth(t("ui.economy.container.mode_input")),
+                        configStateChipPreferredWidth(t("ui.economy.container.mode_output"))));
+        int ownerWidth = Math.max(
+                configStateChipPreferredWidth(t("ui.economy.principal.personal")),
+                configStateChipPreferredWidth(t("ui.economy.principal.team")));
+        int statusWidth = Math.max(
+                new Badge(Component.translatable("ui.economy.container.active"), Badge.Variant.SUCCESS).preferredWidth(font),
+                new Badge(Component.translatable("ui.economy.container.full"), Badge.Variant.DANGER).preferredWidth(font));
+
+        // The title is flex/ellipsis, so do not require its full preferred width before keeping
+        // the header inline. Reserve only a small readable slice; the chips get priority.
+        int titleReserve = Math.min(maxTitleWidth, 24);
+        // Card padding (8), three 4px gaps, and a small scrollbar/layout safety margin.
+        return titleReserve + modeWidth + ownerWidth + statusWidth + 8 + 12 + 6;
     }
 
-    // ── Chart component ────────────────────────────────────────────────────
+    private int configStateChipPreferredWidth(String label) {
+        return EconomyUiComponents.configStateButton(Component.literal(label), () -> {}).preferredWidth(font);
+    }
+
+    private UIComponent buildContainerRow(MarketNetwork.VaultDetailEntry e, boolean stackedHeader) {
+        int idx = 1;
+        for (MarketNetwork.VaultDetailEntry other : MarketClientStore.containerEntries.get()) {
+            if (other == e) break;
+            if (other.tank == e.tank) idx++;
+        }
+
+        boolean full = e.usedSlots >= e.totalSlots;
+        String title = (e.tank ? t("ui.economy.container.tank_prefix") : t("ui.economy.container.vault_prefix")) + idx;
+        String location = e.dimension.replace("minecraft:", "") + " (" + e.x + ", " + e.y + ", " + e.z + ")";
+        String capacity = e.tank
+                ? formatFluidAmount(e.usedSlots) + "/" + formatFluidAmount(e.totalSlots)
+                : formatCompact(e.usedSlots) + "/" + formatCompact(e.totalSlots) + " " + t("ui.economy.containers.slots");
+        String modeLabel = switch (e.mode) {
+            case 1 -> t("ui.economy.container.mode_input");
+            case 2 -> t("ui.economy.container.mode_output");
+            default -> t("ui.economy.container.mode_both");
+        };
+        String modeTooltipKey = switch (e.mode) {
+            case 1 -> "ui.economy.container.tooltip.mode_input";
+            case 2 -> "ui.economy.container.tooltip.mode_output";
+            default -> "ui.economy.container.tooltip.mode_both";
+        };
+
+        ButtonWidget modeChip = EconomyUiComponents.configStateButton(Component.literal(modeLabel), () -> {
+            net.minecraft.core.BlockPos pos = new net.minecraft.core.BlockPos(e.x, e.y, e.z);
+            if (e.tank) MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.ToggleTankModePacket(e.dimension, pos));
+            else MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.ToggleVaultModePacket(e.dimension, pos));
+        });
+        modeChip.height(14);
+        boolean canChangeMode = !e.teamOwned || e.canReassign;
+        modeChip.enabled(canChangeMode);
+        modeChip.tooltip(Component.translatable(canChangeMode ? modeTooltipKey : "ui.economy.container.mode_admin_hint"));
+
+        String transferLabel = t(e.teamOwned
+                ? "ui.economy.principal.team"
+                : "ui.economy.principal.personal");
+        ButtonWidget ownerChip = EconomyUiComponents.configStateButton(Component.literal(transferLabel), () ->
+                MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.SetStorageOwnerPacket(
+                        e.dimension, new net.minecraft.core.BlockPos(e.x, e.y, e.z), e.tank, !e.teamOwned)));
+        ownerChip.height(14);
+        ownerChip.enabled(e.canReassign);
+        ownerChip.tooltip(Component.translatable(e.canReassign
+                ? "ui.economy.container.owner_transfer_tooltip"
+                : "ui.economy.container.owner_admin_required"));
+
+        Badge statusBadge = new Badge(
+                Component.translatable(full ? "ui.economy.container.full" : "ui.economy.container.active"),
+                full ? Badge.Variant.DANGER : Badge.Variant.SUCCESS);
+        statusBadge.tooltip(Component.translatable(full
+                ? "ui.economy.container.tooltip.full"
+                : "ui.economy.container.tooltip.active"));
+
+        VStack content = new VStack().gap(1);
+        content.fillWidth();
+
+        UIComponent titleText = Ui.text(Component.literal(title)).style(TextStyle.LABEL).nowrap().ellipsis();
+        if (stackedHeader) {
+            HStack titleRow = new HStack();
+            titleRow.fillWidth();
+            titleText.flex();
+            titleRow.addChild(titleText);
+            content.addChild(titleRow);
+
+            HStack chipRow = new HStack().gap(4);
+            chipRow.fillWidth();
+            chipRow.addChild(Ui.spacer().flex());
+            chipRow.addChild(modeChip);
+            chipRow.addChild(ownerChip);
+            chipRow.addChild(statusBadge);
+            content.addChild(chipRow);
+        } else {
+            HStack header = new HStack().gap(4);
+            header.fillWidth();
+            titleText.flex();
+            header.addChild(titleText);
+            header.addChild(modeChip);
+            header.addChild(ownerChip);
+            header.addChild(statusBadge);
+            content.addChild(header);
+        }
+
+        HStack meta = new HStack().gap(4);
+        meta.fillWidth();
+        UIComponent locationText = Ui.text(Component.literal(location)).style(TextStyle.CAPTION).nowrap().ellipsis();
+        locationText.flex();
+        meta.addChild(locationText);
+        meta.addChild(Ui.text(Component.literal(capacity)).style(TextStyle.CAPTION).nowrap());
+        content.addChild(meta);
+
+        Card card = new Card(content).padding(4).outlined(true).elevated(false).hoverable(true);
+        card.fillWidth();
+        card.height(stackedHeader ? 48 : 40);
+        return card;
+    }
+
+    // Ã¢â€â‚¬Ã¢â€â‚¬ Chart component Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
     private class TrendChartComponent extends UIComponent {
         private final ReadableSignal<List<ChartSample>> data;
         private final Signal<Integer> offset;
@@ -2228,11 +2698,43 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         }
     }
 
-    // ── Shared helpers ─────────────────────────────────────────────────────
+    // Ã¢â€â‚¬Ã¢â€â‚¬ Shared helpers Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
     static String formatCompact(double val) { return EconomyFormatUtil.formatCompact(val); }
     static String formatCompact(BigDecimal val) { return EconomyFormatUtil.formatCompact(val); }
     static String formatCompact(long val) { return EconomyFormatUtil.formatCompact(val); }
     static String formatCompact(String str) { return EconomyFormatUtil.formatCompact(str); }
+    private String orderAccountLabel(com.nstut.economy.api.MarketIdentity identity) {
+        if (identity == null || identity.principal().kind() == com.nstut.economy.api.AccountKind.PLAYER) {
+            return t("ui.economy.principal.personal");
+        }
+        if (identity.principal().kind() == com.nstut.economy.api.AccountKind.TEAM) {
+            return Component.translatable("ui.economy.wallet.team", identity.principal().id().toString().substring(0, 8)).getString();
+        }
+        return identity.principal().kind().name();
+    }
+
+    private String selectedWalletBalance() {
+        MarketClientStore.TeamWalletState team = MarketClientStore.teamWallet.get();
+        return MarketClientStore.isTeamPrincipal()
+                ? (team != null && team.visible() ? team.teamBalance() : "0") : MarketClientStore.balance.get();
+    }
+
+    private String selectedWalletLabel() {
+        MarketClientStore.TeamWalletState team = MarketClientStore.teamWallet.get();
+        if (MarketClientStore.isTeamPrincipal()) {
+            return team != null && team.visible()
+                    ? Component.translatable("ui.economy.wallet.team", team.teamName()).getString()
+                    : t("ui.economy.wallet.team_unavailable");
+        }
+        return t("ui.economy.principal.personal");
+    }
+
+    private static String humanizeEnum(String value) {
+        if (value == null || value.isBlank()) return "";
+        String lower = value.toLowerCase(Locale.ROOT).replace('_', ' ');
+        return Character.toUpperCase(lower.charAt(0)) + lower.substring(1);
+    }
+
     static String formatMoney(BigDecimal val) { return EconomyFormatUtil.formatMoney(val); }
     static String formatMoneyCompact(BigDecimal val) { return EconomyFormatUtil.formatMoneyCompact(val); }
     static String formatChartMoney(double val) { return EconomyFormatUtil.formatMoneyCompact(BigDecimal.valueOf(val)); }
@@ -2698,6 +3200,47 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         return results;
     }
 
+    /**
+     * Sidebar navigation button that preserves the OpenUI button behavior while
+     * hard-clipping its label and ping-ponging only when the text is wider than
+     * the available interior. This keeps long/localized labels inside the border.
+     */
+    private static final class MarqueeNavButton extends ButtonWidget {
+        private final Component marqueeLabel;
+        private boolean suppressBaseLabel;
+
+        MarqueeNavButton(Component label, Runnable action) {
+            super(label);
+            this.marqueeLabel = label;
+            onPress(action);
+            alignLeft();
+            activeIndicator();
+            height(18);
+        }
+
+        @Override
+        public Component getLabel() {
+            return suppressBaseLabel ? Component.empty() : marqueeLabel;
+        }
+
+        @Override
+        public void render(GuiGraphicsExtractor g, Font font, int mx, int my, float pt) {
+            suppressBaseLabel = true;
+            try {
+                super.render(g, font, mx, my, pt);
+            } finally {
+                suppressBaseLabel = false;
+            }
+
+            int textX = x + 9;
+            int textY = y + (height - font.lineHeight) / 2;
+            int textWidth = Math.max(0, width - 15);
+            int textColor = isEnabled()
+                    ? theme().colors().onSurface()
+                    : theme().colors().onSurfaceDisabled();
+            drawMarqueeText(g, font, marqueeLabel.getString(), textX, textY, textWidth, textColor, false);
+        }
+    }
     private static class ItemSearchResult {
         final String itemId;
         final String displayName;

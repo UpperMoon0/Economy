@@ -1,5 +1,6 @@
 package com.nstut.economy.core;
 
+import com.nstut.economy.api.AccountRef;
 import com.nstut.economy.api.EconomyId;
 import com.nstut.economy.api.ITransactionContext;
 import com.nstut.economy.api.ITransactionRecord;
@@ -17,7 +18,7 @@ public class TransactionRecord implements ITransactionRecord {
     private final EconomyId causeId;
     private final BigDecimal amount;
     private final BigDecimal resultingBalance;
-    private final UUID counterparty;
+    private final AccountRef counterparty;
     private final String description;
     private final Map<String, String> metadata;
 
@@ -32,6 +33,21 @@ public class TransactionRecord implements ITransactionRecord {
     public TransactionRecord(UUID transactionId, Instant timestamp, EconomyId causeId,
                              BigDecimal amount, BigDecimal resultingBalance,
                              UUID counterparty, String description, Map<String, String> metadata) {
+        this(transactionId, timestamp, causeId, amount, resultingBalance,
+                counterparty == null ? null : AccountRef.player(counterparty), description, metadata);
+    }
+
+    /** Typed factory avoids making existing constructor calls with null ambiguous. */
+    public static TransactionRecord withCounterpartyRef(UUID transactionId, Instant timestamp, EconomyId causeId,
+                             BigDecimal amount, BigDecimal resultingBalance,
+                             AccountRef counterparty, String description, Map<String, String> metadata) {
+        return new TransactionRecord(transactionId, timestamp, causeId, amount, resultingBalance,
+                counterparty, description, metadata);
+    }
+
+    private TransactionRecord(UUID transactionId, Instant timestamp, EconomyId causeId,
+                             BigDecimal amount, BigDecimal resultingBalance,
+                             AccountRef counterparty, String description, Map<String, String> metadata) {
         this.transactionId = transactionId;
         this.timestamp = timestamp;
         this.causeId = causeId;
@@ -49,6 +65,7 @@ public class TransactionRecord implements ITransactionRecord {
     @Override public Map<String, String> getMetadata() { return metadata; }
     @Override public BigDecimal getAmount() { return amount; }
     @Override public BigDecimal getResultingBalance() { return resultingBalance; }
-    @Override public UUID getCounterparty() { return counterparty; }
+    @Override public UUID getCounterparty() { return counterparty == null ? null : counterparty.id(); }
+    @Override public AccountRef getCounterpartyRef() { return counterparty; }
     @Override public String getDescription() { return description; }
 }

@@ -1,0 +1,273 @@
+package com.nstut.economy.api;
+
+import com.nstut.economy.core.AccountManager;
+import com.nstut.economy.core.TransactionContext;
+
+import java.math.BigDecimal;
+import org.junit.jupiter.api.Test;
+
+import java.util.Optional;
+import java.util.UUID;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+class TeamEconomyRegistryTest {
+    @Test
+    void customProviderOverridesFallbackAndFallbackResumesAfterUnregister() {
+        TeamEconomyRegistry registry = new TeamEconomyRegistry();
+        FallbackProvider fallback = new FallbackProvider();
+        MutableProvider custom = new MutableProvider();
+        MutableProvider secondCustom = new MutableProvider();
+
+        registry.registerProvider(fallback);
+        assertSame(fallback, registry.provider().orElseThrow());
+
+        registry.registerProvider(custom);
+        assertSame(custom, registry.provider().orElseThrow(),
+                "addon provider must take precedence over Economy's built-in fallback");
+        assertThrows(IllegalStateException.class, () -> registry.registerProvider(secondCustom),
+                "two addon-owned providers must still conflict");
+
+        assertTrue(registry.unregisterProvider(custom));
+        assertSame(fallback, registry.provider().orElseThrow(),
+                "removing the addon provider should reactivate the retained fallback");
+    }
+
+    @Test
+    void providerIdsMustBeUniqueAndCannotUseTheLegacyUnknownMarker() {
+        TeamEconomyRegistry registry = new TeamEconomyRegistry();
+        FallbackProvider fallback = new FallbackProvider();
+        registry.registerProvider(fallback);
+
+        MutableProvider colliding = new MutableProvider() {
+            @Override public EconomyId providerId() { return fallback.providerId(); }
+        };
+        assertThrows(IllegalStateException.class, () -> registry.registerProvider(colliding));
+
+        MutableProvider reserved = new MutableProvider() {
+            @Override public EconomyId providerId() {
+                return com.nstut.economy.api.internal.TeamWalletState.UNKNOWN_PROVIDER_ID;
+            }
+        };
+        assertThrows(IllegalArgumentException.class, () -> new TeamEconomyRegistry().registerProvider(reserved));
+    }
+
+    @Test
+    void disabledModeDoesNotExposeTeamEconomy() {
+        MutableProvider provider = new MutableProvider();
+        TeamEconomyRegistry registry = new TeamEconomyRegistry();
+        registry.registerProvider(provider);
+
+        registry.setMode(TeamEconomyMode.PERSONAL_ONLY);
+        assertEquals(TeamEconomyMode.PERSONAL_ONLY, registry.mode());
+        assertTrue(registry.resolveTeam(provider.playerId).isEmpty());
+        assertEquals(AccountRef.player(provider.playerId), registry.defaultPrincipal(provider.playerId));
+    }
+
+    @Test
+    void enabledDefaultExposesWalletButKeepsPersonalAsDefault() {
+        MutableProvider provider = new MutableProvider();
+        TeamEconomyRegistry registry = new TeamEconomyRegistry();
+        registry.registerProvider(provider);
+        assertEquals(TeamEconomyMode.HYBRID, registry.mode());
+
+        assertEquals(provider.team.id(), registry.resolveTeam(provider.playerId).orElseThrow().id());
+        assertEquals(AccountRef.player(provider.playerId), registry.defaultPrincipal(provider.playerId));
+        assertTrue(registry.canView(provider.playerId, provider.team.id()));
+        assertTrue(registry.canDeposit(provider.playerId, provider.team.id()));
+        assertFalse(registry.canSpend(provider.playerId, provider.team.id()));
+
+        AccountManager accounts = new AccountManager();
+        assertEquals(AccountKind.TEAM,
+                registry.teamAccount(accounts, provider.playerId).orElseThrow().getAccountRef().kind());
+    }
+
+    @Test
+    void authorizedMoneyOperationsRecheckRoleAndNeverAllowTeamSelfPayout() {
+        MutableProvider provider = new MutableProvider();
+        TeamEconomyRegistry registry = new TeamEconomyRegistry();
+        registry.registerProvider(provider);
+        registry.setMode(TeamEconomyMode.HYBRID);
+        AccountManager accounts = new AccountManager();
+        UUID recipient = UUID.randomUUID();
+
+        var personal = accounts.getOrCreatePlayerAccount(provider.playerId);
+        assertTrue(personal.credit(new BigDecimal("100"), TransactionContext.adminGive("test")));
+
+        assertTrue(registry.depositFromPlayer(accounts, provider.playerId, new BigDecimal("40"),
+                TransactionContext.transfer("team deposit", provider.team.id())));
+        assertEquals(new BigDecimal("60"), personal.getBalance());
+        assertEquals(new BigDecimal("40"), accounts.getTeamAccount(provider.team.id()).orElseThrow().getBalance());
+
+        assertFalse(registry.spendFromTeam(accounts, provider.playerId, AccountRef.player(recipient), BigDecimal.TEN,
+                TransactionContext.transfer("member cannot payout", recipient)));
+
+        provider.role = TeamRole.OFFICER;
+        assertTrue(registry.canSpend(provider.playerId, provider.team.id()),
+                "officer must retain market-spend permission");
+        assertFalse(registry.canPayout(provider.playerId, provider.team.id()),
+                "market spending must not imply direct payout permission");
+        assertFalse(registry.spendFromTeam(accounts, provider.playerId, AccountRef.player(recipient), BigDecimal.TEN,
+                TransactionContext.transfer("officer cannot payout", recipient)));
+
+        provider.role = TeamRole.OWNER;
+        assertTrue(registry.canPayout(provider.playerId, provider.team.id()));
+        assertFalse(registry.spendFromTeam(accounts, provider.playerId, AccountRef.player(provider.playerId), BigDecimal.TEN,
+                TransactionContext.transfer("self payout forbidden", provider.playerId)),
+                "even an owner must never turn Team funds directly into Personal funds");
+        assertEquals(new BigDecimal("60"), personal.getBalance());
+        assertTrue(registry.spendFromTeam(accounts, provider.playerId, AccountRef.player(recipient), BigDecimal.TEN,
+                TransactionContext.transfer("owner external payout", recipient)));
+        assertEquals(new BigDecimal("30"), accounts.getTeamAccount(provider.team.id()).orElseThrow().getBalance());
+        assertEquals(new BigDecimal("10"), accounts.getOrCreatePlayerAccount(recipient).getBalance());
+
+        provider.role = TeamRole.MEMBER;
+        assertFalse(registry.spendFromTeam(accounts, provider.playerId, AccountRef.player(recipient), BigDecimal.ONE,
+                TransactionContext.transfer("demoted", recipient)));
+    }
+
+    @Test
+    void teamPrimaryUsesFreshRankChecksAndFailsClosedAfterDemotion() {
+        MutableProvider provider = new MutableProvider();
+        provider.role = TeamRole.OFFICER;
+        TeamEconomyRegistry registry = new TeamEconomyRegistry();
+        registry.registerProvider(provider);
+        registry.setMode(TeamEconomyMode.TEAM_PRIMARY);
+
+        assertEquals(provider.team.account(), registry.defaultPrincipal(provider.playerId));
+        assertTrue(registry.canSpend(provider.playerId, provider.team.id()));
+
+        provider.role = TeamRole.MEMBER;
+        assertFalse(registry.canSpend(provider.playerId, provider.team.id()),
+                "rank must be revalidated rather than cached");
+        assertTrue(registry.canView(provider.playerId, provider.team.id()));
+        assertEquals(AccountRef.player(provider.playerId), registry.defaultPrincipal(provider.playerId),
+                "TEAM_PRIMARY must not default to a wallet the actor cannot spend");
+
+        provider.member = false;
+        assertEquals(AccountRef.player(provider.playerId), registry.defaultPrincipal(provider.playerId));
+        assertFalse(registry.canView(provider.playerId, provider.team.id()));
+    }
+
+    @Test
+    void walletSnapshotDistinguishesPersonalAndTeamAndClearsAfterLeave() {
+        MutableProvider provider = new MutableProvider();
+        provider.role = TeamRole.MEMBER;
+        TeamEconomyRegistry registry = new TeamEconomyRegistry();
+        registry.registerProvider(provider);
+        registry.setMode(TeamEconomyMode.HYBRID);
+        AccountManager accounts = new AccountManager();
+
+        var personal = accounts.getOrCreatePlayerAccount(provider.playerId);
+        personal.credit(new BigDecimal("25"), TransactionContext.adminGive("test"));
+        var team = accounts.getOrCreateTeamAccount(provider.team.id());
+        team.credit(new BigDecimal("80"), TransactionContext.adminGive("test"));
+
+        TeamWalletSnapshot snapshot = registry.walletSnapshot(accounts, provider.playerId);
+        assertEquals(new BigDecimal("25"), snapshot.personalBalance());
+        assertTrue(snapshot.teamVisible());
+        assertEquals("Test Party", snapshot.team().orElseThrow().displayName());
+        assertEquals(new BigDecimal("80"), snapshot.teamBalance());
+        assertEquals(TeamRole.MEMBER, snapshot.role());
+        assertTrue(snapshot.canDeposit());
+        assertFalse(snapshot.canSpend());
+        assertFalse(snapshot.canPayout());
+        assertEquals(TeamRole.OFFICER, snapshot.spendRole());
+        assertEquals(TeamRole.OWNER, snapshot.payoutRole());
+
+        provider.member = false;
+        TeamWalletSnapshot afterLeave = registry.walletSnapshot(accounts, provider.playerId);
+        assertFalse(afterLeave.teamVisible(), "leave/kick must remove team UI state immediately");
+        assertEquals(BigDecimal.ZERO, afterLeave.teamBalance());
+        assertEquals(TeamRole.NONE, afterLeave.role());
+    }
+
+    @Test
+    void walletSnapshotHidesTeamWhenViewPermissionIsLost() {
+        MutableProvider provider = new MutableProvider();
+        TeamEconomyRegistry registry = new TeamEconomyRegistry();
+        registry.registerProvider(provider);
+        registry.setMode(TeamEconomyMode.HYBRID);
+        registry.setViewRole(TeamRole.OFFICER);
+        AccountManager accounts = new AccountManager();
+
+        assertFalse(registry.walletSnapshot(accounts, provider.playerId).teamVisible());
+
+        provider.role = TeamRole.OFFICER;
+        assertTrue(registry.walletSnapshot(accounts, provider.playerId).teamVisible());
+    }
+
+    @Test
+    void storageAdministrationIsIndependentFromMarketSpend() {
+        MutableProvider provider = new MutableProvider();
+        provider.role = TeamRole.OFFICER;
+        TeamEconomyRegistry registry = new TeamEconomyRegistry();
+        registry.registerProvider(provider);
+        registry.setMode(TeamEconomyMode.HYBRID);
+
+        assertTrue(registry.canSpend(provider.playerId, provider.team.id()),
+                "officer should keep team market-spend permission");
+        assertFalse(registry.canAdmin(provider.playerId, provider.team.id()),
+                "market-spend permission must not authorize storage administration");
+
+        provider.role = TeamRole.OWNER;
+        assertTrue(registry.canAdmin(provider.playerId, provider.team.id()));
+
+        registry.setAdminRole(TeamRole.OFFICER);
+        provider.role = TeamRole.OFFICER;
+        assertTrue(registry.canAdmin(provider.playerId, provider.team.id()),
+                "storage administration must honor the configurable adminRole threshold");
+    }
+
+    @Test
+    void permissionThresholdCannotAuthorizeNonmembers() {
+        TeamEconomyRegistry registry = new TeamEconomyRegistry();
+        assertThrows(IllegalArgumentException.class, () -> registry.setSpendRole(TeamRole.NONE));
+        assertThrows(IllegalArgumentException.class, () -> registry.setPayoutRole(TeamRole.NONE));
+        assertThrows(IllegalArgumentException.class, () -> registry.setAdminRole(TeamRole.NONE));
+        assertFalse(registry.canPayout(UUID.randomUUID(), UUID.randomUUID()));
+    }
+
+    @Test
+    void legacyWalletSnapshotDoesNotGrantSeparatePayoutPermission() {
+        TeamWalletSnapshot snapshot = new TeamWalletSnapshot(TeamEconomyMode.HYBRID, BigDecimal.TEN,
+                Optional.empty(), BigDecimal.ZERO, TeamRole.OFFICER, true, true, TeamRole.OFFICER);
+        assertFalse(snapshot.canPayout());
+        assertEquals(TeamRole.OWNER, snapshot.payoutRole());
+        assertFalse(TeamWalletSnapshot.personalOnly(TeamEconomyMode.PERSONAL_ONLY, BigDecimal.TEN,
+                TeamRole.OFFICER).canPayout());
+    }
+
+    private static class MutableProvider implements TeamEconomyProvider {
+        final UUID playerId = UUID.randomUUID();
+        @Override public EconomyId providerId() { return EconomyId.of("test", "mutable_team_provider"); }
+        final TeamRef team = new TeamRef(UUID.randomUUID(), "Test Party", playerId);
+        TeamRole role = TeamRole.MEMBER;
+        boolean member = true;
+
+        @Override
+        public Optional<TeamRef> resolveTeam(UUID playerId) {
+            return member && this.playerId.equals(playerId) ? Optional.of(team) : Optional.empty();
+        }
+
+        @Override
+        public Optional<TeamRef> getTeam(UUID teamId) {
+            return team.id().equals(teamId) ? Optional.of(team) : Optional.empty();
+        }
+
+        @Override
+        public TeamRole getRole(UUID playerId, UUID teamId) {
+            return member && this.playerId.equals(playerId) && team.id().equals(teamId) ? role : TeamRole.NONE;
+        }
+
+        @Override
+        public boolean isMember(UUID playerId, UUID teamId) {
+            return member && this.playerId.equals(playerId) && team.id().equals(teamId);
+        }
+    }
+
+    private static final class FallbackProvider extends MutableProvider
+            implements com.nstut.economy.api.internal.FallbackTeamEconomyProvider {
+        @Override public EconomyId providerId() { return EconomyId.of("test", "fallback_team_provider"); }
+    }
+}
