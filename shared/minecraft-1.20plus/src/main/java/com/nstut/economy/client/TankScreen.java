@@ -6,6 +6,7 @@ import com.nstut.economy.util.EconomyFormatUtil;
 import com.nstut.economy.network.MarketNetwork;
 import com.nstut.openui.api.ButtonWidget;
 import com.nstut.openui.api.HStack;
+import com.nstut.openui.api.TextWidget;
 import com.nstut.openui.api.UIComponent;
 import com.nstut.openui.api.Ui;
 import com.nstut.openui.api.UiRender;
@@ -34,9 +35,12 @@ public class TankScreen extends EconomyUiContainerScreen<TankMenu> {
     static final int PLAYER_PANEL_HEIGHT = 79;
     static final int TRANSFER_TITLE_X = TankMenu.TRANSFER_SLOT_X;
     static final int TRANSFER_TITLE_Y = TankMenu.TRANSFER_SLOT_Y - 12;
-    static final int TRANSFER_HINT_X = TankMenu.TRANSFER_SLOT_X + 23;
-    static final int TRANSFER_HINT_Y = TankMenu.TRANSFER_SLOT_Y + 5;
+    static final int TRANSFER_HINT_X = TankMenu.INPUT_SLOT_X - 8;
+    static final int TRANSFER_HINT_Y = TankMenu.TRANSFER_SLOT_Y + 26;
     private static final int TRANSFER_SECTION_WIDTH = 90;
+
+    private final TextWidget transferHint = Ui.text(Component.translatable("ui.economy.tank.transfer_hint"))
+            .nowrap().marquee();
 
     private ButtonWidget modeBtn;
     private ButtonWidget ownerBtn;
@@ -94,11 +98,8 @@ public class TankScreen extends EconomyUiContainerScreen<TankMenu> {
                 x + TankMenu.INPUT_SLOT_X - 4, y + TRANSFER_TITLE_Y, c.onSurface());
         UiRender.text(g, font, Component.translatable("ui.economy.tank.output"),
                 x + TankMenu.OUTPUT_SLOT_X - 6, y + TRANSFER_TITLE_Y, c.onSurface());
-        String hint = Component.translatable("ui.economy.tank.transfer_hint").getString();
-        int hintX = x + TankMenu.INPUT_SLOT_X - 8;
-        int hintWidth = Math.max(1, x + imageWidth - 10 - hintX);
-        hint = MarketScreen.fitText(font, hint, hintWidth);
-        UiRender.text(g, font, hint, hintX, y + TRANSFER_HINT_Y + 21, c.onSurfaceMuted());
+        renderMarquee(transferHint, g, font, x + TRANSFER_HINT_X, y + TRANSFER_HINT_Y,
+                imageWidth - 10 - TRANSFER_HINT_X, c.onSurfaceMuted(), mouseX, mouseY, partialTick);
     }
 
     @Override
@@ -138,12 +139,27 @@ public class TankScreen extends EconomyUiContainerScreen<TankMenu> {
 
         VStack root = new VStack().gap(2);
         root.addChild(header);
-        root.addChild(Ui.text(Component.translatable("ui.economy.tank.subtitle")).style(TextStyle.CAPTION));
+        root.addChild(Ui.text(Component.translatable("ui.economy.tank.subtitle")).style(TextStyle.CAPTION).nowrap().marquee());
         root.addChild(body);
         return Ui.padding(Insets.only(5, 10, 6, 10), root);
     }
 
+    /** Uses OpenUI's tested, hard-clipped ping-pong animation; fitting text stays still. */
+    private static void renderMarquee(TextWidget text, GuiGraphics g, Font font,
+                                      int x, int y, int width, int color, int mx, int my, float pt) {
+        text.color(color);
+        text.layout(x, y, Math.max(1, width), font.lineHeight);
+        text.render(g, font, mx, my, pt);
+    }
+
     private final class TankInfoText extends UIComponent {
+        private final TextWidget nameLabel = Ui.text(Component.empty()).nowrap().marquee();
+        private final TextWidget amountLabel = Ui.text(Component.empty()).nowrap().marquee();
+        private final TextWidget percentLabel = Ui.text(Component.empty()).nowrap().marquee();
+
+        private void updateLabel(TextWidget label, String value) {
+            if (!label.getText().getString().equals(value)) label.setText(value);
+        }
         @Override public int preferredWidth(Font f) { return 72; }
         @Override public int preferredHeight(Font f) { return 48; }
         @Override public void render(GuiGraphics g, Font f, int mx, int my, float pt) {
@@ -156,12 +172,15 @@ public class TankScreen extends EconomyUiContainerScreen<TankMenu> {
             float fill = Math.min(1f, amount / (float) capacity);
             String name = fluid.isEmpty() ? Component.translatable("ui.economy.tank.empty").getString()
                     : com.nstut.economy.platform.Services.FLUID.displayName(fluid.getFluid()).getString();
-            UiRender.text(g, f, f.plainSubstrByWidth(name, Math.max(1, width)), x, y + 4, c.onSurface());
+            updateLabel(nameLabel, name);
+            renderMarquee(nameLabel, g, f, x, y + 4, width, c.onSurface(), mx, my, pt);
             String amountText = EconomyFormatUtil.formatFluidAmount(amount) + " / " + EconomyFormatUtil.formatFluidAmount(capacity);
-            UiRender.text(g, f, f.plainSubstrByWidth(amountText, Math.max(1, width)), x, y + 18, c.onSurfaceMuted());
+            updateLabel(amountLabel, amountText);
+            renderMarquee(amountLabel, g, f, x, y + 18, width, c.onSurfaceMuted(), mx, my, pt);
             String percentText = Component.translatable("ui.economy.tank.percent_full",
                     String.format(java.util.Locale.ROOT, "%.1f%%", fill * 100.0F)).getString();
-            UiRender.text(g, f, percentText, x, y + 32, c.onSurfaceMuted());
+            updateLabel(percentLabel, percentText);
+            renderMarquee(percentLabel, g, f, x, y + 32, width, c.onSurfaceMuted(), mx, my, pt);
         }
     }
 
