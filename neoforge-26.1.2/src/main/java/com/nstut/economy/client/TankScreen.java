@@ -37,7 +37,7 @@ public class TankScreen extends EconomyUiContainerScreen<TankMenu> {
     static final int TRANSFER_TITLE_Y = TankMenu.TRANSFER_SLOT_Y - 12;
     static final int TRANSFER_HINT_X = TankMenu.INPUT_SLOT_X - 8;
     static final int TRANSFER_HINT_Y = TankMenu.TRANSFER_SLOT_Y + 26;
-    private static final int TRANSFER_SECTION_WIDTH = 90;
+    static final int TRANSFER_SECTION_WIDTH = TankMenu.IMAGE_WIDTH - 10 - TRANSFER_HINT_X;
 
     private final TextWidget transferHint = Ui.text(Component.translatable("ui.economy.tank.transfer_hint"))
             .nowrap().marquee();
