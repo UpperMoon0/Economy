@@ -5,6 +5,7 @@ import com.nstut.economy.blocks.VaultMenu;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ContainerScreenGeometryTest {
     private static final int LABEL_HEIGHT = 10;
@@ -34,6 +35,21 @@ class ContainerScreenGeometryTest {
         assertFalse(inventoryLabel.intersects(firstPlayerSlot));
         assertFalse(transferTitle.intersects(transferSlot));
         assertFalse(transferHint.intersects(transferSlot));
+        Rect outputSlot = new Rect(TankMenu.OUTPUT_SLOT_X - 1,
+                TankMenu.TRANSFER_SLOT_Y - 1, SLOT_SIZE, SLOT_SIZE);
+        assertFalse(transferHint.intersects(outputSlot));
+        assertFalse(transferHint.intersects(inventoryLabel));
+        assertTrue(transferHint.y + transferHint.height <= TankScreen.INVENTORY_LABEL_Y);
+        assertTrue(transferHint.x + transferHint.width <= TankMenu.IMAGE_WIDTH - 10);
+
+        // HStack: 10px inset, 32px gauge, two 8px gaps and the reserved transfer column.
+        Rect info = new Rect(10 + 32 + 8, TankScreen.FLUID_PANEL_Y,
+                TankMenu.IMAGE_WIDTH - 20 - 32 - 16 - TankScreen.TRANSFER_SECTION_WIDTH, 48);
+        assertTrue(info.width > 0);
+        assertTrue(info.x + info.width <= TankScreen.TRANSFER_HINT_X);
+        assertFalse(info.intersects(new Rect(TankMenu.INPUT_SLOT_X - 1,
+                TankMenu.TRANSFER_SLOT_Y - 1, SLOT_SIZE, SLOT_SIZE)));
+        assertFalse(info.intersects(outputSlot));
     }
 
     @Test
