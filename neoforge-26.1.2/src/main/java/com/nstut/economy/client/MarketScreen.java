@@ -171,7 +171,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
     private final Computed<List<MarketNetwork.ItemCardData>> visibleBrowseCards = computed(() ->
             filterCards(browseQuery.get(), browseActivity.get(), browseType.get(), browseSort.get(), MarketClientStore.cards.get()));
     private final Computed<List<BrowseGroup>> visibleBrowseGroups = computed(() ->
-            groupBrowseCards(visibleBrowseCards.get(), browseSort.get()));
+            groupBrowseCards(visibleBrowseCards.get(), MarketClientStore.cards.get(), browseSort.get()));
     private final Computed<List<HistoryEntry>> visibleHistory = computed(() ->
             filterHistory(historyQuery.get(), historyFilter.get(), historyType.get(), historySort.get(), MarketClientStore.history.get()));
     private final Computed<List<MarketNetwork.ActiveOrderEntry>> visibleActiveOrders = computed(() ->
@@ -3064,7 +3064,14 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         return f;
     }
 
-    private List<BrowseGroup> groupBrowseCards(List<MarketNetwork.ItemCardData> cards, BrowseSort sort) {
+    private List<BrowseGroup> groupBrowseCards(List<MarketNetwork.ItemCardData> cards,
+                                               List<MarketNetwork.ItemCardData> catalog, BrowseSort sort) {
+        // Browse controls product visibility and summaries; the picker owns variant filtering.
+        Map<String, List<MarketNetwork.ItemCardData>> fullGroups =
+                com.nstut.economy.util.BrowseGrouping.visibleCatalogGroups(cards, catalog, card -> {
+                    String base = "ITEM".equalsIgnoreCase(card.commodityType) ? baseCommodityId(card.itemId) : card.itemId;
+                    return card.commodityType + "|" + base;
+                });
         Map<String, List<MarketNetwork.ItemCardData>> grouped = new LinkedHashMap<>();
         for (MarketNetwork.ItemCardData card : cards) {
             boolean item = "ITEM".equalsIgnoreCase(card.commodityType);
@@ -3087,7 +3094,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                     bestPrice = variant;
                 }
             }
-            groups.add(new BrowseGroup(base, first.commodityType, displayName, List.copyOf(variants),
+            groups.add(new BrowseGroup(base, first.commodityType, displayName, List.copyOf(fullGroups.get(first.commodityType + "|" + base)),
                     offers, bestPrice.globalPrice, bestPrice.priceChangePercent));
         }
 

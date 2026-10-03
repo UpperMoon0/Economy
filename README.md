@@ -42,7 +42,7 @@ Install the file matching both your Minecraft version and loader. A jar built fo
 - Open the terminal through the Market block or `/economy balance`.
 - Browse active and previously traded commodities without filling the catalog with products that have never had market activity.
 - Browse defaults to **Active**, showing products with at least one order. Switch Activity to **All** to include previously traded products with no current orders.
-- The exact-variant picker places **Status** first: **Active** (default), **Inactive** (no orders), or **All**. Status works together with metadata search, metadata filters, and sorting; select Inactive or All to open an inactive variant and create an order.
+- The exact-variant picker places **Status** first: **Active** (default), **Inactive** (no orders), or **All**. Browse filters which products appear, while the picker retains every variant of each visible product, including inactive siblings. Status works together with metadata search, metadata filters, and sorting; select Inactive or All to open an inactive variant and create an order.
 - Filter Browse by activity and product type, and filter Active Orders and Trade History by order/trade and product type.
 - Compact two-line controls keep `Activity`, `Order`/`Trade`, `Product`, and `Sort` filters on one row.
 - Browse defaults to a compact grid view, with a persistent Grid/Rows toggle saved in the client configuration.
