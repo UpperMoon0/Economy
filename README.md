@@ -2,7 +2,7 @@
 
 ![Minecraft](https://img.shields.io/badge/Minecraft-multi--version-brightgreen)
 ![Loaders](https://img.shields.io/badge/loaders-Fabric%20%7C%20Forge%20%7C%20NeoForge-orange)
-![License](https://img.shields.io/badge/License-All%20Rights%20Reserved-lightgrey)
+![License](https://img.shields.io/badge/License-MIT-green)
 
 A modern multi-loader order-book economy for Minecraft, with physical item and fluid storage, automated order matching, portfolio tracking, and a full in-game market terminal.
 
@@ -189,4 +189,4 @@ Each loader module writes its compiled JAR to its own `build/libs/` directory. T
 
 ## License
 
-All Rights Reserved, matching the mod metadata. Created by **NsTut**.
+Licensed under the [MIT License](LICENSE). Created by **NsTut**.

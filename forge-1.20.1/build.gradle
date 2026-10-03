@@ -135,7 +135,7 @@ processResources {
     inputs.property 'loader_version_range', project.findProperty('loader_version_range') ?: '[47,48)'
     inputs.property 'minecraft_version_range', project.findProperty('minecraft_version_range') ?: '[1.20.1,1.21)'
     inputs.property 'openui_version', rootProject.openui_version
-    inputs.property 'mod_license', rootProject.findProperty('mod_license') ?: 'All Rights Reserved'
+    inputs.property 'mod_license', rootProject.findProperty('mod_license') ?: 'MIT'
     inputs.property 'issue_tracker_url', rootProject.findProperty('issue_tracker_url') ?: 'https://github.com/UpperMoon0/Economy/issues'
 
     filesMatching('META-INF/mods.toml') {
@@ -149,7 +149,7 @@ processResources {
                 loader_version_range: project.findProperty('loader_version_range') ?: '[47,48)',
                 minecraft_version_range: project.findProperty('minecraft_version_range') ?: '[1.20.1,1.21)',
                 openui_version: rootProject.openui_version,
-                mod_license: rootProject.findProperty('mod_license') ?: 'All Rights Reserved',
+                mod_license: rootProject.findProperty('mod_license') ?: 'MIT',
                 issue_tracker_url: rootProject.findProperty('issue_tracker_url') ?: 'https://github.com/UpperMoon0/Economy/issues'
     }
 }

@@ -9,7 +9,7 @@
     "sources": "https://github.com/UpperMoon0/Economy",
     "issues": "https://github.com/UpperMoon0/Economy/issues"
   },
-  "license": "All Rights Reserved",
+  "license": "MIT",
   "environment": "*",
   "entrypoints": {
     "main": ["com.nstut.fabric.EconomyFabric"],
