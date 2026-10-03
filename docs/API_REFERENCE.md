@@ -4,6 +4,18 @@ This is a practical catalog of the supported addon-facing API. The canonical sig
 
 Read [Getting Started](GETTING_STARTED.md) for integration setup and [Extending Economy](EXTENDING_ECONOMY.md) for extension contracts and persistence rules.
 
+## Threading, handle lifetime, and synchronous callbacks
+
+Call account-manager, order-book, storage, and world operations on the server thread. Thread-safe extension registries and internal account locks do not make those services or Minecraft world access safe for asynchronous mutation. Schedule asynchronous work back onto the server thread before using these services.
+
+Raw account access is a trusted addon capability. Addons must check permissions before exposing credit, debit, transfers, or arbitrary account creation to players.
+
+Built-in player/team account handles are retired when deleted or replaced by an account reload. A retired handle retains its last readable balance/history but rejects credit, debit, and transfers, including incoming transfers. Reacquire handles after deletion/recreation or reload. Built-in direct admin balance writes also reject retired handles. Server/tax handles are manager-owned and retained across reloads; do not retain service handles across server-runtime replacement.
+
+New player accounts are installed before starting-balance events fire. A listener may look up the same handle or initialize a different account; the starting-credit attempt occurs once per creation. A pre-balance veto leaves the installed account at zero. Reentrant mutation of accounts participating in credit/debit/transfer is rejected. Deleting a participating account returns false; account reload during a mutation throws `IllegalStateException` before changing the loaded view.
+
+Settlement guards both orders in creation-time and periodic order-book matches through payment, storage delivery/refunds, event callbacks, and quantity accounting. Cancellation/editing of participating orders returns false, and recursive execution fails, while that guard is held. To veto payment, cancel `EconomyEvents.TransferPre` or `BalanceChangePre`; retry order mutations after the settlement call returns. Unrelated accounts and orders can still be used on the server thread. Internal concrete `Order` setters and mutable escrow collections are not supported addon mutation APIs; use `IOrderManager`.
+
 ## Service entry point
 
 ### `EconomyApi`

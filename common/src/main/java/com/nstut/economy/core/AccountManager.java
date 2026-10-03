@@ -30,7 +30,21 @@ public class AccountManager implements IAccountManager {
     }
 
     private BankAccount createAccount(AccountRef owner, BigDecimal initialBalance) {
-        return new BankAccount(owner, initialBalance, bal -> persistBalance(owner, bal));
+        // Bind persistence to this exact handle, rather than only its reusable identity.
+        BankAccount[] handle = new BankAccount[1];
+        handle[0] = new BankAccount(owner, initialBalance, bal -> {
+            if (accounts.get(owner) == handle[0]) persistBalance(owner, bal);
+        });
+        return handle[0];
+    }
+
+    private void retireLoadedAccounts() {
+        if (serverAccount.isMutationInProgress() || taxAccount.isMutationInProgress()
+                || accounts.values().stream().anyMatch(BankAccount::isMutationInProgress)) {
+            throw new IllegalStateException("Cannot reload accounts during an in-flight account mutation");
+        }
+        accounts.values().forEach(BankAccount::retire);
+        accounts.clear();
     }
 
     private void persistBalance(AccountRef owner, BigDecimal balance) {
@@ -66,8 +80,8 @@ public class AccountManager implements IAccountManager {
                 ? Map.of() : new HashMap<>(data.getAccountBalances());
 
         // Suppress persistence callbacks while reconstructing the in-memory view.
+        retireLoadedAccounts();
         this.backingData = null;
-        accounts.clear();
         serverAccount.setBalance(saved.getOrDefault(serverAccount.getAccountRef(), SERVER_INITIAL_BALANCE));
         taxAccount.setBalance(saved.getOrDefault(taxAccount.getAccountRef(), BigDecimal.ZERO));
 
@@ -98,16 +112,16 @@ public class AccountManager implements IAccountManager {
     public IBankAccount getOrCreatePlayerAccount(UUID player) {
         if (player == null) throw new IllegalArgumentException("player cannot be null");
         AccountRef ref = AccountRef.player(player);
-        return accounts.computeIfAbsent(ref, key -> {
-            BigDecimal startingBalance = EconomyConfig.getInstance().getStartingBalance();
-            BankAccount account = createAccount(key, BigDecimal.ZERO);
-            if (startingBalance.compareTo(BigDecimal.ZERO) > 0) {
-                account.credit(startingBalance, TransactionContext.startingBalance());
-            } else {
-                persistBalance(key, BigDecimal.ZERO);
-            }
-            return account;
-        });
+        BankAccount existing = accounts.get(ref);
+        if (existing != null) return existing;
+        BankAccount account = createAccount(ref, BigDecimal.ZERO);
+        accounts.put(ref, account);
+        persistBalance(ref, BigDecimal.ZERO);
+        BigDecimal startingBalance = EconomyConfig.getInstance().getStartingBalance();
+        if (startingBalance.signum() > 0) {
+            account.credit(startingBalance, TransactionContext.startingBalance());
+        }
+        return account;
     }
 
     @Override
@@ -125,11 +139,14 @@ public class AccountManager implements IAccountManager {
         if (account == null) throw new IllegalArgumentException("account cannot be null");
         return switch (account.kind()) {
             case PLAYER -> getOrCreatePlayerAccount(account.id());
-            case TEAM -> accounts.computeIfAbsent(account, key -> {
-                BankAccount created = createAccount(key, BigDecimal.ZERO);
-                persistBalance(key, BigDecimal.ZERO);
-                return created;
-            });
+            case TEAM -> {
+                BankAccount current = accounts.get(account);
+                if (current != null) yield current;
+                BankAccount created = createAccount(account, BigDecimal.ZERO);
+                accounts.put(account, created);
+                persistBalance(account, BigDecimal.ZERO);
+                yield created;
+            }
             case SERVER -> {
                 if (!serverAccount.getAccountRef().equals(account)) throw new IllegalArgumentException("Unknown server account");
                 yield serverAccount;
@@ -171,7 +188,9 @@ public class AccountManager implements IAccountManager {
         if (account == null || (account.kind() != AccountKind.PLAYER && account.kind() != AccountKind.TEAM)) {
             return false;
         }
-        boolean removed = accounts.remove(account) != null;
+        BankAccount current = accounts.get(account);
+        if (current == null || !current.retire()) return false;
+        boolean removed = accounts.remove(account, current);
         if (removed && backingData != null) {
             if (account.kind() == AccountKind.PLAYER) backingData.removeBalance(account.id());
             else if (backingData.supportsTypedAccounts()) backingData.removeAccountBalance(account);
@@ -197,7 +216,7 @@ public class AccountManager implements IAccountManager {
 
     /** Legacy load helper: every UUID is deterministically a PLAYER principal. */
     public void loadAccounts(Map<UUID, BigDecimal> savedBalances) {
-        accounts.clear();
+        retireLoadedAccounts();
         if (savedBalances == null) return;
         for (Map.Entry<UUID, BigDecimal> entry : savedBalances.entrySet()) {
             AccountRef ref = AccountRef.player(entry.getKey());

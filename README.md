@@ -8,7 +8,7 @@ A modern multi-loader order-book economy for Minecraft, with physical item and f
 
 ## Dependency
 
-The client UI requires [OpenUI MC](https://github.com/UpperMoon0/OpenUI-MC), which must be installed alongside Economy. Economy owns the market-specific screens and logic; reusable layout, widget, rendering, scrolling, and animation primitives live in OpenUI MC. Use the dependency version declared by the Economy jar or its release page.
+The client UI requires [OpenUI MC](https://github.com/UpperMoon0/OpenUI-MC) 0.0.12 or newer, which must be installed alongside Economy. Economy owns the market-specific screens and logic; reusable layout, widget, rendering, scrolling, and animation primitives live in OpenUI MC. Use the dependency version declared by the Economy jar or its release page.
 
 ## Supported targets
 
@@ -41,6 +41,8 @@ Install the file matching both your Minecraft version and loader. A jar built fo
 
 - Open the terminal through the Market block or `/economy balance`.
 - Browse active and previously traded commodities without filling the catalog with products that have never had market activity.
+- Browse defaults to **Active**, showing products with at least one order. Switch Activity to **All** to include previously traded products with no current orders.
+- The exact-variant picker places **Status** first: **Active** (default), **Inactive** (no orders), or **All**. Browse filters which products appear, while the picker retains every variant of each visible product, including inactive siblings. Status works together with metadata search, metadata filters, and sorting; select Inactive or All to open an inactive variant and create an order.
 - Filter Browse by activity and product type, and filter Active Orders and Trade History by order/trade and product type.
 - Compact two-line controls keep `Activity`, `Order`/`Trade`, `Product`, and `Sort` filters on one row.
 - Browse defaults to a compact grid view, with a persistent Grid/Rows toggle saved in the client configuration.
@@ -67,6 +69,7 @@ Install the file matching both your Minecraft version and loader. A jar built fo
 - Uses distinct **Input** and **Output** container slots. Filled/empty compatible containers are consumed from Input and their result containers accumulate in Output; stackable modded containers are processed as a batch while Output has room.
 - Exposes the loader's standard fluid API for compatible pipes and automation.
 - Uses a centered custom screen with a tiled/cropped fluid texture, explicit Input/Output slots, and a single `current / maximum` amount display.
+- Long fluid names, amounts, percentage labels, and subtitles scroll within their own text area. The Input/Output labels identify container slots without an extra transfer instruction line.
 - Renders its fluid on the Tank's front face using the fluid's true texture proportions.
 - Supports the same `BOTH`, `INPUT ONLY`, and `OUTPUT ONLY` market behavior as Vaults.
 - Storage modes govern market supply and delivery; direct inventory and fluid automation remains available independently.

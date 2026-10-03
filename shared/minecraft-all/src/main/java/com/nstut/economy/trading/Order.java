@@ -53,6 +53,16 @@ public class Order implements IOrder {
     private final Instant createdAt;
     private final Instant expiresAt;
     private boolean cancelled;
+    private boolean executionInProgress;
+
+    boolean beginExecution() {
+        if (executionInProgress) return false;
+        executionInProgress = true;
+        return true;
+    }
+
+    void endExecution() { executionInProgress = false; }
+    boolean isExecutionInProgress() { return executionInProgress; }
     private boolean serverOrder;
     private boolean infinite;
     private final NonNullList<ItemStack> reservedItems;
@@ -284,6 +294,15 @@ public class Order implements IOrder {
     }
 
     private TransactionResult executeAmount(MarketIdentity trader, int requested, ServerLevel level) {
+        if (!beginExecution()) return TransactionResult.failure("Order execution is already in progress");
+        try {
+            return executeGuarded(trader, requested, level);
+        } finally {
+            endExecution();
+        }
+    }
+
+    private TransactionResult executeGuarded(MarketIdentity trader, int requested, ServerLevel level) {
         if (!isValid() || !isAuthorized() || !trader.authorized(EconomyApi.teamEconomy())
                 || getPrincipal().equals(trader.principal()) || requested <= 0) return TransactionResult.failure("Invalid execution request");
         int amount = infinite ? requested : Math.min(quantity, requested);
@@ -567,7 +586,8 @@ public class Order implements IOrder {
     private BigDecimal totalFor(int amount) { return pricePerUnit.multiply(BigDecimal.valueOf(amount)); }
     private int capByFunds(int requested, IBankAccount account) {
         if (pricePerUnit == null || pricePerUnit.signum() <= 0 || account.getBalance().signum() <= 0) return 0;
-        return Math.min(requested, account.getBalance().divide(pricePerUnit, 0, java.math.RoundingMode.DOWN).max(BigDecimal.ZERO).intValue());
+        return account.getBalance().divide(pricePerUnit, 0, java.math.RoundingMode.DOWN)
+                .max(BigDecimal.ZERO).min(BigDecimal.valueOf(requested)).intValueExact();
     }
     private void reduceAfterFill(int delivered) { if (!infinite) quantity = Math.max(0, quantity - delivered); }
 
@@ -693,7 +713,7 @@ public class Order implements IOrder {
     public int getEscrowedItemCount() { return VaultInventoryOps.total(reservedItems); }
     public NonNullList<ItemStack> getReservedItems() { return reservedItems; }
     public List<EconomyFluidStack> getReservedFluids() { return reservedFluids; }
-    public boolean canCancel() { return !cancelled && (quantity > 0 || infinite); }
+    public boolean canCancel() { return !executionInProgress && !cancelled && (quantity > 0 || infinite); }
 
     @Override
     public boolean cancel() {

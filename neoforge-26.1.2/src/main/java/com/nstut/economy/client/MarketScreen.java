@@ -97,6 +97,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
     enum ActiveOrderFilter { ALL, SELL, BUY, INFINITE }
     enum ActiveOrderSort { NEWEST, OLDEST, PRICE_ASC, PRICE_DESC }
     enum BrowseLayout { GRID, LIST }
+    enum VariantStatus { ACTIVE, INACTIVE, ALL }
     enum VariantFilter { ALL, ENCHANTED, DAMAGED, NAMED, OTHER_METADATA }
     enum VariantSort { PRICE_ASC, PRICE_DESC, MOST_ORDERS, NAME_ASC, DURABILITY_DESC }
 
@@ -119,7 +120,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
     private final Signal<MarketView> view = Signals.of(MarketView.BROWSE);
     private final Signal<OrdersTab> ordersTab = Signals.of(OrdersTab.ACTIVE);
     private final Signal<String> browseQuery = Signals.of("");
-    private final Signal<BrowseActivityFilter> browseActivity = Signals.of(BrowseActivityFilter.ALL);
+    private final Signal<BrowseActivityFilter> browseActivity = Signals.of(BrowseActivityFilter.ACTIVE);
     private final Signal<CommodityTypeFilter> browseType = Signals.of(CommodityTypeFilter.ALL);
     private final Signal<BrowseSort> browseSort = Signals.of(BrowseSort.PRICE_ASC);
     private final Signal<BrowseLayout> browseLayout = Signals.of(
@@ -170,7 +171,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
     private final Computed<List<MarketNetwork.ItemCardData>> visibleBrowseCards = computed(() ->
             filterCards(browseQuery.get(), browseActivity.get(), browseType.get(), browseSort.get(), MarketClientStore.cards.get()));
     private final Computed<List<BrowseGroup>> visibleBrowseGroups = computed(() ->
-            groupBrowseCards(visibleBrowseCards.get(), browseSort.get()));
+            groupBrowseCards(visibleBrowseCards.get(), MarketClientStore.cards.get(), browseSort.get()));
     private final Computed<List<HistoryEntry>> visibleHistory = computed(() ->
             filterHistory(historyQuery.get(), historyFilter.get(), historyType.get(), historySort.get(), MarketClientStore.history.get()));
     private final Computed<List<MarketNetwork.ActiveOrderEntry>> visibleActiveOrders = computed(() ->
@@ -795,10 +796,10 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         int limit = Math.min(6, group.variants().size());
         for (int i = 0; i < limit; i++) {
             MarketNetwork.ItemCardData card = group.variants().get(i);
-            text.append("\nÃ¢â‚¬Â¢ ").append(getItemDisplayName(card.itemId, card.displayName));
+            text.append("\n\u2022 ").append(getItemDisplayName(card.itemId, card.displayName));
         }
         if (group.variants().size() > limit) {
-            text.append("\nÃ¢â‚¬Â¦ +").append(group.variants().size() - limit);
+            text.append("\n\u2026 +").append(group.variants().size() - limit);
         }
         return Component.literal(text.toString());
     }
@@ -812,6 +813,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         // Picker controls are modal-local. Opening a different product must start
         // from a clean query/filter/sort state rather than inheriting transient UI.
         Signal<String> variantQuery = Signals.of("");
+        Signal<VariantStatus> variantStatus = Signals.of(VariantStatus.ACTIVE);
         Signal<VariantFilter> variantFilter = Signals.of(VariantFilter.ALL);
         Signal<VariantSort> variantSort = Signals.of(VariantSort.PRICE_ASC);
 
@@ -819,7 +821,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         Map<VariantSort, String> sortLabels = availableVariantSorts(variants, traitsCache);
 
         Computed<List<MarketNetwork.ItemCardData>> rows = Signals.computed(() ->
-                filterVariantRows(variants, variantQuery, variantFilter, variantSort,
+                filterVariantRows(variants, variantQuery, variantStatus, variantFilter, variantSort,
                         presentationCache, traitsCache, searchCache));
         Computed<Boolean> rowsEmpty = Signals.computed(() -> rows.get().isEmpty());
         OverlayHandle[] holder = new OverlayHandle[1];
@@ -842,6 +844,11 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         body.addChild(search);
 
         HStack controls = new HStack().gap(4);
+        Map<VariantStatus, String> statusLabels = new LinkedHashMap<>();
+        statusLabels.put(VariantStatus.ACTIVE, t("ui.economy.variant.status.active"));
+        statusLabels.put(VariantStatus.INACTIVE, t("ui.economy.variant.status.inactive"));
+        statusLabels.put(VariantStatus.ALL, t("ui.economy.opt.all"));
+        controls.addChild(filterSelect(t("ui.economy.variant.status"), variantStatus, statusLabels));
         controls.addChild(filterSelect(t("ui.economy.variant.filter"), variantFilter, filterLabels));
         controls.addChild(filterSelect(t("ui.economy.filter.sort"), variantSort, sortLabels));
         body.addChild(controls);
@@ -926,6 +933,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
     private List<MarketNetwork.ItemCardData> filterVariantRows(
             List<MarketNetwork.ItemCardData> variants,
             Signal<String> querySignal,
+            Signal<VariantStatus> statusSignal,
             Signal<VariantFilter> filterSignal,
             Signal<VariantSort> sortSignal,
             Map<String, VariantPresentation> presentationCache,
@@ -934,11 +942,14 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         String rawQuery = querySignal.get();
         String query = rawQuery == null ? "" : rawQuery.trim().toLowerCase(Locale.ROOT);
         String[] terms = query.isEmpty() ? new String[0] : query.split("\\s+");
+        VariantStatus status = statusSignal.get();
         VariantFilter filter = filterSignal.get();
         List<MarketNetwork.ItemCardData> result = new ArrayList<>();
 
         for (MarketNetwork.ItemCardData card : variants) {
             VariantTraits traits = traitsCache.computeIfAbsent(card.itemId, this::variantTraits);
+            if (status == VariantStatus.ACTIVE && card.offerCount <= 0) continue;
+            if (status == VariantStatus.INACTIVE && card.offerCount > 0) continue;
             if (!matchesVariantFilter(traits, filter)) continue;
             if (terms.length > 0) {
                 String haystack = searchCache.computeIfAbsent(card.itemId, ignored -> {
@@ -1200,7 +1211,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                     UiRender.roundedRect(g, x, y + 1, width, 16, 2, c.surfaceRaised());
                 }
                 int clr = e.isServerOrder ? c.primary() : (isAsks ? c.danger() : c.success());
-                String line = e.price + " x " + (e.isInfinite ? "Ã¢Ë†Å¾" : (isFluidCommodity(MarketClientStore.detail.get() == null ? "" : MarketClientStore.detail.get().itemId)
+                String line = e.price + " x " + (e.isInfinite ? "\u221e" : (isFluidCommodity(MarketClientStore.detail.get() == null ? "" : MarketClientStore.detail.get().itemId)
                         ? formatFluidAmount(e.quantity) : formatItemAmount(e.quantity)));
                 String sellerName = e.isServerOrder
                         ? t("ui.economy.orders.server_badge")
@@ -1233,7 +1244,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                     UiRender.roundedRect(g, x, y + 1, width, 16, 2, c.surfaceRaised());
                 }
                 String detailItemId = MarketClientStore.detail.get() == null ? "" : MarketClientStore.detail.get().itemId;
-                String line = e.price + " x " + (e.isInfinite ? "Ã¢Ë†Å¾" : (isFluidCommodity(detailItemId)
+                String line = e.price + " x " + (e.isInfinite ? "\u221e" : (isFluidCommodity(detailItemId)
                         ? formatFluidAmount(e.quantity) : formatItemAmount(e.quantity)));
                 String sideLabel = o.isSell() ? t("ui.economy.opt.sell") : t("ui.economy.opt.buy");
                 int lineWidth = Math.max(0, width - 6 - f.width(sideLabel) - 6 - 10);
@@ -1605,7 +1616,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         String commodityType = isFluidCommodity(id) ? "FLUID" : "ITEM";
         String dispName = getItemDisplayName(id, id);
         boolean fluid = isFluidCommodity(id);
-        String totalStr = inf ? "Ã¢Ë†Å¾ (" + (fluid ? "Per bucket: " : "Per unit: ") + price.toPlainString() + ")"
+        String totalStr = inf ? "\u221e (" + (fluid ? "Per bucket: " : "Per unit: ") + price.toPlainString() + ")"
                 : formatMoney(totalPrice(price, qty, id));
         pendingConfirmation.set(new PendingConfirmation(id, qty, price.toPlainString(), createSellMode.get(), inf,
                  createSellMode.get() ? t("ui.economy.opt.sell") : t("ui.economy.opt.buy"), dispName, totalStr, commodityType));
@@ -1616,7 +1627,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         PendingConfirmation p = pendingConfirmation.get();
         if (p == null) return;
         boolean fluid = isFluidCommodity(p.itemId);
-        String qtyStr = p.isInfinite ? "Ã¢Ë†Å¾" : EconomyFormatUtil.formatCommodityQuantity(p.quantity, fluid);
+        String qtyStr = p.isInfinite ? "\u221e" : EconomyFormatUtil.formatCommodityQuantity(p.quantity, fluid);
         String msg = Component.translatable("ui.economy.confirm.message", p.action, qtyStr, getItemDisplayName(p.itemId, p.itemName)).getString();
         OverlayHandle[] holder = new OverlayHandle[1];
         boolean[] actionTaken = new boolean[1];
@@ -1757,7 +1768,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                         : Component.translatable("ui.economy.orders.quantity_progress",
                                 isFluidCommodity(e.itemId) ? formatFluidAmount(e.quantity) : formatItemAmount(e.quantity),
                                 isFluidCommodity(e.itemId) ? formatFluidAmount(e.initialQuantity) : formatItemAmount(e.initialQuantity)).getString();
-                drawPriceChangeRowMarquee(g, f, e.price, " Ã¢â‚¬Â¢ " + qty,
+                drawPriceChangeRowMarquee(g, f, e.price, " \u2022 " + qty,
                         x + 24, y + 17, Math.max(0, width - 28),
                         c.primary(), c.onSurfaceMuted());
             }
@@ -3053,7 +3064,14 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         return f;
     }
 
-    private List<BrowseGroup> groupBrowseCards(List<MarketNetwork.ItemCardData> cards, BrowseSort sort) {
+    private List<BrowseGroup> groupBrowseCards(List<MarketNetwork.ItemCardData> cards,
+                                               List<MarketNetwork.ItemCardData> catalog, BrowseSort sort) {
+        // Browse controls product visibility and summaries; the picker owns variant filtering.
+        Map<String, List<MarketNetwork.ItemCardData>> fullGroups =
+                com.nstut.economy.util.BrowseGrouping.visibleCatalogGroups(cards, catalog, card -> {
+                    String base = "ITEM".equalsIgnoreCase(card.commodityType) ? baseCommodityId(card.itemId) : card.itemId;
+                    return card.commodityType + "|" + base;
+                });
         Map<String, List<MarketNetwork.ItemCardData>> grouped = new LinkedHashMap<>();
         for (MarketNetwork.ItemCardData card : cards) {
             boolean item = "ITEM".equalsIgnoreCase(card.commodityType);
@@ -3076,7 +3094,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                     bestPrice = variant;
                 }
             }
-            groups.add(new BrowseGroup(base, first.commodityType, displayName, List.copyOf(variants),
+            groups.add(new BrowseGroup(base, first.commodityType, displayName, List.copyOf(fullGroups.get(first.commodityType + "|" + base)),
                     offers, bestPrice.globalPrice, bestPrice.priceChangePercent));
         }
 

@@ -186,10 +186,9 @@ public class OrderManager implements IOrderManager {
         for (Order buyOrder : matchingBuyOrders) {
             if (order.getQuantity() <= 0) break;
             int matchQty = Math.min(order.getQuantity(), buyOrder.getQuantity());
-            IOrder.TransactionResult result = order.executePartial(buyOrder.getIdentity(), matchQty, level);
+            IOrder.TransactionResult result = executeMatch(order, buyOrder, matchQty, level);
             if (result.success) {
                 filled += result.quantityTransferred;
-                buyOrder.reduceQuantity(result.quantityTransferred);
                 if (backingData != null) {
                     if (buyOrder.getQuantity() == 0) backingData.removeOrder(buyOrder.getOrderId());
                     else backingData.putOrder(buyOrder.toSnapshot());
@@ -310,10 +309,9 @@ public class OrderManager implements IOrderManager {
         for (Order sellOrder : matchingSellOrders) {
             if (!order.isInfinite() && order.getQuantity() <= 0) break;
             int matchQty = order.isInfinite() ? sellOrder.getQuantity() : Math.min(order.getQuantity(), sellOrder.getQuantity());
-            IOrder.TransactionResult result = sellOrder.executePartial(identity, matchQty, level);
+            IOrder.TransactionResult result = executeMatch(sellOrder, order, matchQty, level);
             if (result.success) {
                 filled += result.quantityTransferred;
-                if (!order.isInfinite()) order.reduceQuantity(result.quantityTransferred);
                 if (backingData != null) {
                     if (sellOrder.getQuantity() == 0) backingData.removeOrder(sellOrder.getOrderId());
                     else backingData.putOrder(sellOrder.toSnapshot());
@@ -335,6 +333,20 @@ public class OrderManager implements IOrderManager {
         return CreateOrderResult.rejected(quantity, "ui.economy.error.order_rejected", List.of());
     }
 
+    /** Guard both book entries through payment, delivery, callbacks and quantity accounting. */
+    private IOrder.TransactionResult executeMatch(Order sell, Order buy, int quantity,
+                                                  net.minecraft.server.level.ServerLevel level) {
+        if (!buy.beginExecution()) return IOrder.TransactionResult.failure("Buy order execution is already in progress");
+        try {
+            if (!buy.isValid() || !buy.isAuthorized()) return IOrder.TransactionResult.failure("Invalid buy order");
+            IOrder.TransactionResult result = sell.executePartial(buy.getIdentity(), quantity, level);
+            if (result.success) buy.reduceQuantity(result.quantityTransferred);
+            return result;
+        } finally {
+            buy.endExecution();
+        }
+    }
+
     @Override
     public boolean editOrder(UUID orderId, UUID requester, int newQuantity, java.math.BigDecimal newPrice, boolean isInfinite) {
         return editOrder(orderId, requester, newQuantity, newPrice, isInfinite, EconomyApi.serverLevel().orElse(null));
@@ -343,7 +355,7 @@ public class OrderManager implements IOrderManager {
     public boolean editOrder(UUID orderId, UUID requester, int newQuantity, java.math.BigDecimal newPrice,
                              boolean isInfinite, net.minecraft.server.level.ServerLevel level) {
         Order order = orders.get(orderId);
-        if (order == null || !order.getIdentity().canManage(requester, EconomyApi.teamEconomy()) || !order.isAuthorized() || !order.isValid()) return false;
+        if (order == null || order.isExecutionInProgress() || !order.getIdentity().canManage(requester, EconomyApi.teamEconomy()) || !order.isAuthorized() || !order.isValid()) return false;
         if (!com.nstut.economy.util.OrderInputValidator.isValidNewOrder(
                 Math.max(1, newQuantity), newPrice, order.getCommodity() instanceof FluidCommodity)) return false;
         boolean requiresQuantity = order.getType() == IOrder.OrderType.SELL || !isInfinite;
@@ -485,7 +497,7 @@ public class OrderManager implements IOrderManager {
 
     public boolean cancelOrder(UUID orderId, UUID requester, net.minecraft.server.level.ServerLevel level) {
         Order order = orders.get(orderId);
-        if (order == null || !order.getIdentity().canManage(requester, EconomyApi.teamEconomy())) return false;
+        if (order == null || order.isExecutionInProgress() || !order.getIdentity().canManage(requester, EconomyApi.teamEconomy())) return false;
         return cancelForRecovery(order, level);
     }
 
@@ -566,7 +578,7 @@ public class OrderManager implements IOrderManager {
     }
 
     public void cleanupOrders() {
-        List<Order> toRemove = orders.values().stream().filter(o -> !o.isValid()).collect(Collectors.toList());
+        List<Order> toRemove = orders.values().stream().filter(o -> !o.isExecutionInProgress() && !o.isValid()).collect(Collectors.toList());
         for (Order order : toRemove) {
             boolean holdsRecovery = !order.getReservedItems().isEmpty() || !order.getReservedFluids().isEmpty()
                     || order.getExternalReservation() != null || order.hasCompensationDue();
@@ -640,9 +652,8 @@ public class OrderManager implements IOrderManager {
                 if (!sellOrder.isValid()) break;
                 int matchQty = buyOrder.isInfinite() ? sellOrder.getQuantity() : Math.min(sellOrder.getQuantity(), buyOrder.getQuantity());
                 if (matchQty <= 0) continue;
-                IOrder.TransactionResult result = sellOrder.executePartial(buyOrder.getIdentity(), matchQty, level);
+                IOrder.TransactionResult result = executeMatch(sellOrder, buyOrder, matchQty, level);
                 if (result.success) {
-                    if (!buyOrder.isInfinite()) buyOrder.reduceQuantity(result.quantityTransferred);
                     if (backingData != null) {
                         if (!buyOrder.isInfinite() && buyOrder.getQuantity() == 0) backingData.removeOrder(buyOrder.getOrderId());
                         else backingData.putOrder(buyOrder.toSnapshot());

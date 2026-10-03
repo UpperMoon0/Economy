@@ -6,7 +6,13 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
 
-/** Read/operation contract for a buy or sell order. */
+/**
+ * Read/operation contract for a buy or sell order. Use on the server thread.
+ * Built-in settlement rejects recursive execution and cancellation/editing of
+ * either participating order until payment, delivery and quantity accounting finish.
+ * Payment listeners can veto using the cancellable pre-transfer/balance event;
+ * retry order mutations after settlement returns rather than from its callbacks.
+ */
 public interface IOrder {
     UUID getOrderId();
     UUID getOwner();

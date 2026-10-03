@@ -60,7 +60,7 @@ From Economy, publish the target you need:
 
 Then make sure the consuming project has `mavenLocal()` and depend on `com.nstut:<artifact>:<version>`.
 
-End users need the matching Economy jar installed. Economy itself uses OpenUI MC for its client UI, so modpacks must also satisfy Economy's OpenUI dependency.
+End users need the matching Economy jar installed. Economy 0.0.15 requires OpenUI MC 0.0.12 or newer for its client UI; install the OpenUI jar matching the same Minecraft version and loader.
 
 ## 2. Wait for the server runtime
 
