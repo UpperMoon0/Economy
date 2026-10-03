@@ -40,8 +40,8 @@ class TradeCancellationPersistenceRegressionTest extends MinecraftTestBase {
     }
 
     @Test
-    @DisplayName("Cancelling an infinite BUY from TradeCompleted cannot resurrect it from SavedData")
-    void tradeCompletedCancellationDoesNotResurrectInfiniteBuy() {
+    @DisplayName("Infinite BUY cancellation is guarded during TradeCompleted and durable after settlement")
+    void cancellationAfterTradeCompletedDoesNotResurrectInfiniteBuy() {
         ItemCommodity iron = new ItemCommodity(
                 new ResourceLocation("minecraft", "iron_ingot"), Items.IRON_INGOT, BigDecimal.ZERO);
         UUID buyer = UUID.randomUUID();
@@ -66,12 +66,21 @@ class TradeCancellationPersistenceRegressionTest extends MinecraftTestBase {
         assertNotNull(serverSell);
 
         AtomicBoolean cancelledInCallback = new AtomicBoolean();
+        AtomicBoolean callbackObserved = new AtomicBoolean();
         try (EconomyEvents.Subscription ignored = EconomyEvents.listen(MarketEvents.TradeCompleted.class,
-                event -> cancelledInCallback.set(manager.cancelOrder(buyOrderId, buyer)))) {
+                event -> {
+                    callbackObserved.set(true);
+                    cancelledInCallback.set(manager.cancelOrder(buyOrderId, buyer));
+                })) {
             manager.matchAllPendingOrders(null);
         }
 
-        assertTrue(cancelledInCallback.get(), "TradeCompleted listener must cancel the infinite BUY");
+        assertTrue(callbackObserved.get(), "TradeCompleted callback must run");
+        assertFalse(cancelledInCallback.get(), "TradeCompleted runs within the settlement guard");
+        assertTrue(manager.getOrder(buyOrderId).isPresent());
+        assertTrue(data.getOrders().containsKey(buyOrderId), "infinite BUY remains durably registered after fill");
+        assertEquals(1, infiniteBuy.getQuantity(), "infinite BUY quantity is not reduced");
+        assertTrue(manager.cancelOrder(buyOrderId, buyer), "cancellation succeeds once settlement returns");
         assertTrue(manager.getOrder(buyOrderId).isEmpty(), "cancelled order must leave the live book");
         assertFalse(data.getOrders().containsKey(buyOrderId),
                 "outer matching code must not write a cancelled infinite order back to SavedData");

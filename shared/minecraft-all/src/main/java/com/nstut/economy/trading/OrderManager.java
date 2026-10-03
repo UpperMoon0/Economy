@@ -652,9 +652,8 @@ public class OrderManager implements IOrderManager {
                 if (!sellOrder.isValid()) break;
                 int matchQty = buyOrder.isInfinite() ? sellOrder.getQuantity() : Math.min(sellOrder.getQuantity(), buyOrder.getQuantity());
                 if (matchQty <= 0) continue;
-                IOrder.TransactionResult result = sellOrder.executePartial(buyOrder.getIdentity(), matchQty, level);
+                IOrder.TransactionResult result = executeMatch(sellOrder, buyOrder, matchQty, level);
                 if (result.success) {
-                    if (!buyOrder.isInfinite()) buyOrder.reduceQuantity(result.quantityTransferred);
                     if (backingData != null) {
                         if (!buyOrder.isInfinite() && buyOrder.getQuantity() == 0) backingData.removeOrder(buyOrder.getOrderId());
                         else backingData.putOrder(buyOrder.toSnapshot());

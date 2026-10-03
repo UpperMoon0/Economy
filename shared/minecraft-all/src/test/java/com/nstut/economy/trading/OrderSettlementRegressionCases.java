@@ -104,6 +104,59 @@ public abstract class OrderSettlementRegressionCases {
         assertEquals(BigDecimal.ONE, accounts.getOrCreatePlayerAccount(seller).getBalance());
     }
 
+    private Order pendingPeriodicBuy() {
+        NonNullList<ItemStack> escrow = NonNullList.create();
+        escrow.add(new ItemStack(Items.IRON_INGOT));
+        assertEquals(0, manager.createSellOrder(buyer, iron(), 1, BigDecimal.ONE, escrow, null).filledQuantity());
+        // Server order creation registers the book entry without immediately matching it.
+        return manager.createServerBuyOrder(iron(), 2, BigDecimal.ONE);
+    }
+
+    @Test void periodicMatchingRejectsBuyCancellationDuringPayment() {
+        Order buy = pendingPeriodicBuy();
+        AtomicBoolean cancelled = new AtomicBoolean(true);
+        AtomicInteger transfers = new AtomicInteger();
+        try (var subscription = EconomyEvents.listen(EconomyEvents.TransferPre.class, event -> {
+            transfers.incrementAndGet();
+            cancelled.set(manager.cancelOrder(buy.getOrderId(), OrderManager.SERVER_ID));
+        })) {
+            manager.matchAllPendingOrders(null);
+        }
+        assertEquals(1, transfers.get());
+        assertFalse(cancelled.get());
+        assertEquals(1, buy.getQuantity());
+        assertEquals(BigDecimal.ONE, accounts.getOrCreatePlayerAccount(buyer).getBalance());
+        assertTrue(manager.cancelOrder(buy.getOrderId(), OrderManager.SERVER_ID));
+    }
+
+    @Test void periodicMatchingRejectsBuyEditingDuringPayment() {
+        Order buy = pendingPeriodicBuy();
+        AtomicBoolean edited = new AtomicBoolean(true);
+        AtomicInteger transfers = new AtomicInteger();
+        try (var subscription = EconomyEvents.listen(EconomyEvents.TransferPre.class, event -> {
+            transfers.incrementAndGet();
+            edited.set(manager.editOrder(buy.getOrderId(), OrderManager.SERVER_ID, 9, BigDecimal.TEN, false));
+        })) {
+            manager.matchAllPendingOrders(null);
+        }
+        assertEquals(1, transfers.get());
+        assertFalse(edited.get());
+        assertEquals(1, buy.getQuantity());
+        assertEquals(BigDecimal.ONE, buy.getPricePerUnit());
+        assertEquals(BigDecimal.ONE, accounts.getOrCreatePlayerAccount(buyer).getBalance());
+        assertTrue(manager.editOrder(buy.getOrderId(), OrderManager.SERVER_ID, 2, BigDecimal.ONE, false));
+    }
+
+    @Test void periodicMatchingKeepsInfiniteBuyQuantityAndReleasesGuard() {
+        Order buy = pendingPeriodicBuy();
+        buy.setInfinite(true);
+        manager.matchAllPendingOrders(null);
+        assertEquals(2, buy.getQuantity());
+        assertEquals(BigDecimal.ONE, accounts.getOrCreatePlayerAccount(buyer).getBalance());
+        assertFalse(buy.isExecutionInProgress());
+        assertTrue(manager.cancelOrder(buy.getOrderId(), OrderManager.SERVER_ID));
+    }
+
     @Test void wealthyBuyerCanPurchaseOneCheapItem() {
         accounts.getOrCreatePlayerAccount(buyer).credit(new BigDecimal("21474836.48"), null);
         Order sell = manager.createServerSellOrder(iron(), 1, new BigDecimal("0.01"));
