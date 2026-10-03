@@ -4,7 +4,16 @@ import java.math.BigDecimal;
 import java.util.Optional;
 import java.util.UUID;
 
-/** Central service for virtual Economy bank accounts. */
+/**
+ * Central service for virtual Economy bank accounts. Use on the server thread;
+ * account locks do not make the manager or world persistence thread-safe.
+ * Built-in player/team handles are retired on deletion or account reload. Obtain
+ * a fresh handle afterward; retired handles reject credit, debit and transfers.
+ * Creation installs the handle before synchronous starting-balance callbacks.
+ * Callbacks may look up that handle or initialize another account. Deleting an
+ * account participating in a mutation returns false; reloading during a mutation
+ * throws IllegalStateException before replacing the loaded view.
+ */
 public interface IAccountManager {
     Optional<IBankAccount> getPlayerAccount(UUID player);
     IBankAccount getOrCreatePlayerAccount(UUID player);

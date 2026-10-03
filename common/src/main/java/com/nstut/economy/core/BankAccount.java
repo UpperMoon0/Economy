@@ -29,6 +29,16 @@ public class BankAccount implements IBankAccount {
     private final int maxHistory;
     private final Consumer<BigDecimal> onBalanceChanged;
     private boolean mutationInProgress;
+    private boolean retired;
+
+    /** Manager-owned handles must not survive deletion or replacement of the loaded view. */
+    synchronized boolean retire() {
+        if (mutationInProgress) return false;
+        retired = true;
+        return true;
+    }
+
+    synchronized boolean isMutationInProgress() { return mutationInProgress; }
 
     public BankAccount(UUID owner, BigDecimal initialBalance) {
         this(AccountRef.player(owner), initialBalance, null);
@@ -68,7 +78,7 @@ public class BankAccount implements IBankAccount {
 
     @Override
     public synchronized boolean credit(BigDecimal amount, ITransactionContext ctx) {
-        if (!validAmount(amount) || mutationInProgress) {
+        if (retired || !validAmount(amount) || mutationInProgress) {
             return false;
         }
         mutationInProgress = true;
@@ -93,7 +103,7 @@ public class BankAccount implements IBankAccount {
 
     @Override
     public synchronized boolean debit(BigDecimal amount, ITransactionContext ctx) {
-        if (!validAmount(amount) || mutationInProgress || balance.compareTo(amount) < 0) {
+        if (retired || !validAmount(amount) || mutationInProgress || balance.compareTo(amount) < 0) {
             return false;
         }
         mutationInProgress = true;
@@ -120,7 +130,9 @@ public class BankAccount implements IBankAccount {
     @Override
     public boolean transferTo(IBankAccount target, BigDecimal amount, ITransactionContext ctx) {
         if (target == null || target == this || !validAmount(amount)) {
-            return target == this && validAmount(amount);
+            synchronized (this) {
+                return target == this && !retired && !mutationInProgress && validAmount(amount);
+            }
         }
         ctx = contextOrDefault(ctx, TransactionCauses.TRANSFER, "Legacy transfer");
         if (target instanceof BankAccount bankTarget) {
@@ -152,7 +164,7 @@ public class BankAccount implements IBankAccount {
 
     /** Both this account and target are locked by the caller. */
     private boolean transferLocked(BankAccount target, BigDecimal amount, ITransactionContext ctx) {
-        if (mutationInProgress || target.mutationInProgress || balance.compareTo(amount) < 0) {
+        if (retired || target.retired || mutationInProgress || target.mutationInProgress || balance.compareTo(amount) < 0) {
             return false;
         }
 
@@ -206,7 +218,7 @@ public class BankAccount implements IBankAccount {
      */
     private synchronized boolean transferToExternal(IBankAccount target, BigDecimal amount,
                                                     ITransactionContext ctx) {
-        if (mutationInProgress || balance.compareTo(amount) < 0) {
+        if (retired || mutationInProgress || balance.compareTo(amount) < 0) {
             return false;
         }
         mutationInProgress = true;
@@ -306,8 +318,8 @@ public class BankAccount implements IBankAccount {
 
     /** Sets the balance directly for trusted server/admin operations. */
     public synchronized void setBalance(BigDecimal newBalance) {
-        if (mutationInProgress) {
-            throw new IllegalStateException("Cannot set balance during an in-flight account mutation");
+        if (retired || mutationInProgress) {
+            throw new IllegalStateException("Cannot set balance on a retired or in-flight account");
         }
         this.balance = Objects.requireNonNull(newBalance, "newBalance");
         notifyBalanceChanged();

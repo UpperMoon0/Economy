@@ -7,6 +7,10 @@ import java.util.UUID;
 /**
  * Represents a virtual bank account for storing currency.
  * All operations are server-side only - no physical items involved.
+ * Manager-owned handles are scoped to the current loaded account. After deletion
+ * or reload, built-in player/team handles remain readable but reject mutations,
+ * including transfers to a retired target. Reacquire handles from IAccountManager.
+ * Synchronous callbacks cannot mutate an account already participating in a mutation.
  */
 public interface IBankAccount {
     
