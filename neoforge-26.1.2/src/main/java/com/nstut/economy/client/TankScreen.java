@@ -35,12 +35,8 @@ public class TankScreen extends EconomyUiContainerScreen<TankMenu> {
     static final int PLAYER_PANEL_HEIGHT = 79;
     static final int TRANSFER_TITLE_X = TankMenu.TRANSFER_SLOT_X;
     static final int TRANSFER_TITLE_Y = TankMenu.TRANSFER_SLOT_Y - 12;
-    static final int TRANSFER_HINT_X = TankMenu.INPUT_SLOT_X - 8;
-    static final int TRANSFER_HINT_Y = TankMenu.TRANSFER_SLOT_Y + 26;
-    static final int TRANSFER_SECTION_WIDTH = TankMenu.IMAGE_WIDTH - 10 - TRANSFER_HINT_X;
-
-    private final TextWidget transferHint = Ui.text(Component.translatable("ui.economy.tank.transfer_hint"))
-            .nowrap().marquee();
+    static final int TRANSFER_SECTION_X = TankMenu.INPUT_SLOT_X - 8;
+    static final int TRANSFER_SECTION_WIDTH = TankMenu.IMAGE_WIDTH - 10 - TRANSFER_SECTION_X;
 
     private ButtonWidget modeBtn;
     private ButtonWidget ownerBtn;
@@ -94,8 +90,6 @@ public class TankScreen extends EconomyUiContainerScreen<TankMenu> {
                 x + TankMenu.INPUT_SLOT_X - 4, y + TRANSFER_TITLE_Y, c.onSurface());
         UiRender.text(g, font, Component.translatable("ui.economy.tank.output"),
                 x + TankMenu.OUTPUT_SLOT_X - 6, y + TRANSFER_TITLE_Y, c.onSurface());
-        renderMarquee(transferHint, g, font, x + TRANSFER_HINT_X, y + TRANSFER_HINT_Y,
-                imageWidth - 10 - TRANSFER_HINT_X, c.onSurfaceMuted(), mouseX, mouseY, partialTick);
     }
 
     @Override

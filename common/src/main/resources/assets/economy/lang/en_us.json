@@ -35,6 +35,9 @@
   "ui.economy.variant.additional_metadata": "Additional custom metadata",
   "ui.economy.variant.more": "+%s more",
   "ui.economy.variant.search_placeholder": "Search variants...",
+  "ui.economy.variant.status": "Status",
+  "ui.economy.variant.status.active": "Active",
+  "ui.economy.variant.status.inactive": "Inactive",
   "ui.economy.variant.filter": "Filter",
   "ui.economy.variant.filter.enchanted": "Enchanted",
   "ui.economy.variant.filter.damaged": "Damaged",
@@ -285,7 +288,6 @@
   "ui.economy.tank.transfer": "TRANSFER",
   "ui.economy.tank.input": "Input",
   "ui.economy.tank.output": "Output",
-  "ui.economy.tank.transfer_hint": "Fluid containers move Input ? Output",
   "ui.economy.tank.empty": "Empty tank",
   "ui.economy.tank.percent_full": "%s full",
 
