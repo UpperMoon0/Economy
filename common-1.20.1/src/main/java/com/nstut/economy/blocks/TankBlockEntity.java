@@ -326,6 +326,7 @@ public class TankBlockEntity extends BlockEntity implements WorldlyContainer {
     @Override
     public void setLevel(Level level) {
         super.setLevel(level);
+        applyConfiguredCapacity();
         if (!level.isClientSide && owner != null) {
             AccountRef current = getOwnerRef();
             AccountRef normalized = com.nstut.economy.server.TeamWalletLifecycle.replacementOwner(current).orElse(current);
@@ -365,6 +366,17 @@ public class TankBlockEntity extends BlockEntity implements WorldlyContainer {
         }
         if (tag.contains("Mode")) {
             mode = TankMode.byId(tag.getInt("Mode"));
+        }
+        applyConfiguredCapacity();
+    }
+
+    private void applyConfiguredCapacity() {
+        // Disk data may load before or after setLevel. Clients retain the server's snapshot.
+        if (level == null || level.isClientSide) return;
+        int upgraded = Math.max(capacity, Math.max(fluid.getAmount(), EconomyConfig.getInstance().getTankCapacity()));
+        if (upgraded != capacity) {
+            capacity = upgraded;
+            setChanged();
         }
     }
 

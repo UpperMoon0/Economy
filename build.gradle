@@ -22,6 +22,12 @@ allprojects {
     repositories {
         mavenLocal()
         mavenCentral()
+        exclusiveContent {
+            forRepository {
+                maven { url 'https://maven.fabricmc.net/' }
+            }
+            filter { includeGroupByRegex 'net\\.fabricmc(\\..*)?' }
+        }
         maven { url 'https://maven.architectury.dev/' }
         maven { url 'https://maven.neoforged.net/releases' }
     }

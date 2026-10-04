@@ -107,6 +107,47 @@ public final class EconomyGameTests {
     }
 
     @GameTest(template = "economy_gametest_empty", timeoutTicks = 60)
+    public static void savedTanksAdoptIncreasedCapacityWithoutLosingFluid(GameTestHelper helper) {
+        var config = com.nstut.economy.config.EconomyConfig.getInstance();
+        int previousCapacity = config.getTankCapacity();
+        try {
+            config.setTankCapacity(512000);
+            BlockPos tankPos = new BlockPos(3, 1, 0);
+            helper.setBlock(tankPos, BlockRegistries.TANK.get());
+            TankBlockEntity tank = (TankBlockEntity) helper.getLevel().getBlockEntity(helper.absolutePos(tankPos));
+            tank.fill(new EconomyFluidStack(Fluids.WATER, 125000));
+            var saved = tank.getUpdateTag();
+            saved.putInt("Capacity", 128000);
+            tank.load(saved);
+            helper.assertTrue(tank.getCapacity() == 512000 && tank.getFluidAmount() == 125000,
+                    "Loading an existing tank must raise capacity and preserve fluid");
+            helper.assertTrue(tank.simulateFill(new EconomyFluidStack(Fluids.WATER, 512000)) == 387000,
+                    "Existing tanks must accept fluid up to the upgraded capacity");
+
+            TankBlockEntity detached = new TankBlockEntity(tank.getType(), tank.getBlockPos(), tank.getBlockState());
+            detached.load(saved);
+            helper.assertTrue(detached.getCapacity() == 128000, "Unattached data must wait for an authoritative level");
+            detached.setLevel(helper.getLevel());
+            helper.assertTrue(detached.getCapacity() == 512000 && detached.getFluidAmount() == 125000,
+                    "Attaching a loaded tank to the server must upgrade it");
+            saved.putInt("Capacity", 768000);
+            tank.load(saved);
+            helper.assertTrue(tank.getCapacity() == 768000 && tank.getFluidAmount() == 125000,
+                    "A larger existing capacity and its contents must survive migration");
+            saved.putInt("Capacity", 128000);
+            var fluidTag = new net.minecraft.nbt.CompoundTag();
+            new EconomyFluidStack(Fluids.WATER, 600000).writeTo(fluidTag);
+            saved.put("Fluid", fluidTag);
+            tank.load(saved);
+            helper.assertTrue(tank.getCapacity() == 600000 && tank.getFluidAmount() == 600000,
+                    "Migration must never discard existing over-capacity fluid");
+        } finally {
+            config.setTankCapacity(previousCapacity);
+        }
+        helper.succeed();
+    }
+
+    @GameTest(template = "economy_gametest_empty", timeoutTicks = 60)
     public static void exactEnchantedBooksRemainDistinctThroughVaultCodecOrdersAndHistory(GameTestHelper helper) {
         helper.assertTrue(EconomyApi.isReady(), "Economy API must be ready for variant integration coverage");
 
