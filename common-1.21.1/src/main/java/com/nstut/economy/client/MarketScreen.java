@@ -104,19 +104,19 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
     private final Signal<MarketView> view = Signals.of(MarketView.BROWSE);
     private final Signal<OrdersTab> ordersTab = Signals.of(OrdersTab.ACTIVE);
     private final Signal<String> browseQuery = Signals.of("");
-    private final Signal<BrowseActivityFilter> browseActivity = Signals.of(BrowseActivityFilter.ACTIVE);
-    private final Signal<CommodityTypeFilter> browseType = Signals.of(CommodityTypeFilter.ALL);
-    private final Signal<BrowseSort> browseSort = Signals.of(BrowseSort.PRICE_ASC);
+    private final Signal<BrowseActivityFilter> browseActivity = MarketClientPreferences.filterSignal("market.browse.activity", BrowseActivityFilter.ACTIVE);
+    private final Signal<CommodityTypeFilter> browseType = MarketClientPreferences.filterSignal("market.browse.product", CommodityTypeFilter.ALL);
+    private final Signal<BrowseSort> browseSort = MarketClientPreferences.filterSignal("market.browse.sort", BrowseSort.PRICE_ASC);
     private final Signal<BrowseLayout> browseLayout = Signals.of(
             MarketClientPreferences.isBrowseGridView() ? BrowseLayout.GRID : BrowseLayout.LIST);
     private final Signal<String> historyQuery = Signals.of("");
-    private final Signal<HistoryFilter> historyFilter = Signals.of(HistoryFilter.ALL);
-    private final Signal<CommodityTypeFilter> historyType = Signals.of(CommodityTypeFilter.ALL);
-    private final Signal<HistorySort> historySort = Signals.of(HistorySort.NEWEST);
+    private final Signal<HistoryFilter> historyFilter = MarketClientPreferences.filterSignal("market.history.trade", HistoryFilter.ALL);
+    private final Signal<CommodityTypeFilter> historyType = MarketClientPreferences.filterSignal("market.history.product", CommodityTypeFilter.ALL);
+    private final Signal<HistorySort> historySort = MarketClientPreferences.filterSignal("market.history.sort", HistorySort.NEWEST);
     private final Signal<String> activeOrdersQuery = Signals.of("");
-    private final Signal<ActiveOrderFilter> activeOrderFilter = Signals.of(ActiveOrderFilter.ALL);
-    private final Signal<CommodityTypeFilter> activeOrderType = Signals.of(CommodityTypeFilter.ALL);
-    private final Signal<ActiveOrderSort> activeOrderSort = Signals.of(ActiveOrderSort.NEWEST);
+    private final Signal<ActiveOrderFilter> activeOrderFilter = MarketClientPreferences.filterSignal("market.orders.order", ActiveOrderFilter.ALL);
+    private final Signal<CommodityTypeFilter> activeOrderType = MarketClientPreferences.filterSignal("market.orders.product", CommodityTypeFilter.ALL);
+    private final Signal<ActiveOrderSort> activeOrderSort = MarketClientPreferences.filterSignal("market.orders.sort", ActiveOrderSort.NEWEST);
     private final Signal<String> selectedItemId = Signals.of(null);
     private final Signal<String> selectedCommodityType = Signals.of(null);
 
