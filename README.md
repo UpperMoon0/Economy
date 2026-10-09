@@ -44,6 +44,7 @@ Install the file matching both your Minecraft version and loader. A jar built fo
 - Browse defaults to **Active**, showing products with at least one order. Switch Activity to **All** to include previously traded products with no current orders.
 - The exact-variant picker places **Status** first: **Active** (default), **Inactive** (no orders), or **All**. Browse filters which products appear, while the picker retains every variant of each visible product, including inactive siblings. Status works together with metadata search, metadata filters, and sorting; select Inactive or All to open an inactive variant and create an order.
 - Filter Browse by activity and product type, and filter Active Orders and Trade History by order/trade and product type.
+- Browse, Active Orders, and Trade History remember their filters and sorting when the market is reopened, including after a client restart. Browse activity defaults to **Active** until changed. These choices are saved alongside layout and theme in `config/economy-client.properties`. The product-specific variant picker starts fresh for each product.
 - Compact two-line controls keep `Activity`, `Order`/`Trade`, `Product`, and `Sort` filters on one row.
 - Browse defaults to a compact grid view, with a persistent Grid/Rows toggle saved in the client configuration.
 - Row view keeps the order count right-aligned; grid view places it below the price for compact cards.

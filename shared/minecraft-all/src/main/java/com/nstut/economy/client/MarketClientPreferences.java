@@ -2,6 +2,8 @@ package com.nstut.economy.client;
 import com.nstut.economy.platform.Services;
 
 import com.nstut.Economy;
+import com.nstut.openui.state.Signal;
+import com.nstut.openui.state.Signals;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -12,7 +14,7 @@ import java.util.Properties;
 
 /**
  * Small client-only preference store for market presentation choices.
- * Both settings live in the same economy-client.properties file so that
+ * All settings live in the same economy-client.properties file so that
  * writing one never clobbers the other.
  */
 public final class MarketClientPreferences {
@@ -27,6 +29,36 @@ public final class MarketClientPreferences {
 
     static Path preferencesPath() {
         return Services.PLATFORM.configDir().resolve(FILE_NAME);
+    }
+
+    /** Restores a screen control and saves each selection immediately. */
+    public static <T extends Enum<T>> Signal<T> filterSignal(String key, T defaultValue) {
+        return filterSignal(preferencesPath(), key, defaultValue);
+    }
+
+    static <T extends Enum<T>> Signal<T> filterSignal(Path path, String key, T defaultValue) {
+        T value = defaultValue;
+        if (Files.isRegularFile(path)) {
+            try (InputStream input = Files.newInputStream(path)) {
+                Properties properties = new Properties();
+                properties.load(input);
+                String saved = properties.getProperty(key);
+                // Unknown/obsolete values retain the control's normal default.
+                for (T candidate : defaultValue.getDeclaringClass().getEnumConstants()) {
+                    if (candidate.name().equals(saved)) {
+                        value = candidate;
+                        break;
+                    }
+                }
+            } catch (IOException ex) {
+                Economy.LOGGER.warn("Could not read market filter from {}", path, ex);
+            }
+        }
+        Signal<T> signal = Signals.of(value);
+        // The subscription belongs to this signal, so a discarded screen does
+        // not leave any listeners registered with a global store.
+        signal.subscribe(selected -> writePreference(path, key, selected.name()));
+        return signal;
     }
 
     // ── Theme ────────────────────────────────────────────────────────────
