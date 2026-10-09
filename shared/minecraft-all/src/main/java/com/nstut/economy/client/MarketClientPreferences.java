@@ -43,9 +43,13 @@ public final class MarketClientPreferences {
                 Properties properties = new Properties();
                 properties.load(input);
                 String saved = properties.getProperty(key);
-                if (saved != null) value = Enum.valueOf(defaultValue.getDeclaringClass(), saved);
-            } catch (IllegalArgumentException ex) {
-                // Unknown/obsolete values use the control's normal default.
+                // Unknown/obsolete values retain the control's normal default.
+                for (T candidate : defaultValue.getDeclaringClass().getEnumConstants()) {
+                    if (candidate.name().equals(saved)) {
+                        value = candidate;
+                        break;
+                    }
+                }
             } catch (IOException ex) {
                 Economy.LOGGER.warn("Could not read market filter from {}", path, ex);
             }
