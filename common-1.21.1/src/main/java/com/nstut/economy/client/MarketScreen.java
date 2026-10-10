@@ -1528,11 +1528,11 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
     }
 
     private void requestCommodityDetailIfExact(String query) {
-        if (query == null || query.isBlank()) return;
-        ResourceLocation id = ResourceLocation.tryParse(query.trim());
+        var economyId = CommoditySearchInput.tryParseExactId(query);
+        if (economyId == null) return;
+        ResourceLocation id = ResourceLocation.tryParse(economyId.toString());
         if (id == null) return;
-        String base = com.nstut.economy.trading.ItemVariant.baseItemId(
-                com.nstut.economy.api.EconomyId.parse(id.toString())).toString();
+        String base = com.nstut.economy.trading.ItemVariant.baseItemId(economyId).toString();
         var baseId = ResourceLocation.parse(base);
         boolean knownItem = BuiltInRegistries.ITEM.containsKey(baseId);
         boolean knownFluid = base.equals(id.toString()) && BuiltInRegistries.FLUID.containsKey(id)
