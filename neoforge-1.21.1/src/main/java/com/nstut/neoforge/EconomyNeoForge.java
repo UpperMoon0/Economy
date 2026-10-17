@@ -72,19 +72,21 @@ public final class EconomyNeoForge {
 
                         @Override
                         public boolean isFluidValid(int tankIndex, net.neoforged.neoforge.fluids.FluidStack stack) {
-                            return tankIndex == 0 && !stack.isEmpty()
+                            return tankIndex == 0 && !stack.isEmpty() && stack.getComponentsPatch().isEmpty()
                                     && (tank.getFluid().isEmpty() || tank.getFluid().getFluid() == stack.getFluid());
                         }
 
                         @Override
                         public int fill(net.neoforged.neoforge.fluids.FluidStack resource, FluidAction action) {
-                            if (resource.isEmpty()) return 0;
+                            if (resource.isEmpty() || !resource.getComponentsPatch().isEmpty()) return 0;
                             com.nstut.economy.trading.EconomyFluidStack probe = new com.nstut.economy.trading.EconomyFluidStack(resource.getFluid(), resource.getAmount());
                             return action.simulate() ? tank.simulateFill(probe) : tank.fill(probe);
                         }
 
                         @Override
                         public net.neoforged.neoforge.fluids.FluidStack drain(net.neoforged.neoforge.fluids.FluidStack resource, FluidAction action) {
+                            if (resource.isEmpty() || !resource.getComponentsPatch().isEmpty())
+                                return net.neoforged.neoforge.fluids.FluidStack.EMPTY;
                             if (action.simulate()) {
                                 com.nstut.economy.trading.EconomyFluidStack have = tank.getFluid();
                                 if (have.isEmpty() || have.getFluid() != resource.getFluid()) {

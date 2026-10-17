@@ -68,13 +68,13 @@ public class FabricTankStorage extends SnapshotParticipant<FabricTankSnapshot> i
 
     @Override
     public long insert(FluidVariant resource, long maxAmount, TransactionContext transaction) {
-        if (resource.isBlank() || maxAmount <= 0) return 0;
+        if (resource.isBlank() || maxAmount <= 0 || !FabricFluidVariantSupport.isPlain(resource)) return 0;
         EconomyFluidStack cur = getCurrentFluid();
         if (!cur.isEmpty() && cur.getFluid() != resource.getFluid()) {
             return 0;
         }
 
-        int maxMb = (int) (maxAmount / DROPLETS_PER_MB);
+        int maxMb = (int) Math.min(Integer.MAX_VALUE, maxAmount / DROPLETS_PER_MB);
         if (maxMb <= 0) return 0;
 
         int room = tank.getCapacity() - cur.getAmount();
@@ -91,10 +91,11 @@ public class FabricTankStorage extends SnapshotParticipant<FabricTankSnapshot> i
     @Override
     public long extract(FluidVariant resource, long maxAmount, TransactionContext transaction) {
         EconomyFluidStack cur = getCurrentFluid();
-        if (resource.isBlank() || maxAmount <= 0 || cur.isEmpty()) return 0;
+        if (resource.isBlank() || maxAmount <= 0 || cur.isEmpty()
+                || !FabricFluidVariantSupport.isPlain(resource)) return 0;
         if (cur.getFluid() != resource.getFluid()) return 0;
 
-        int maxMb = (int) (maxAmount / DROPLETS_PER_MB);
+        int maxMb = (int) Math.min(Integer.MAX_VALUE, maxAmount / DROPLETS_PER_MB);
         if (maxMb <= 0) return 0;
 
         int toExtract = Math.min(cur.getAmount(), maxMb);

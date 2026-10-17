@@ -39,19 +39,20 @@ public class ForgeTankBlockEntity extends TankBlockEntity {
 
         @Override
         public boolean isFluidValid(int tank, @NotNull net.minecraftforge.fluids.FluidStack stack) {
-            return tank == 0 && !stack.isEmpty()
+            return tank == 0 && !stack.isEmpty() && !stack.hasTag()
                     && (getFluid().isEmpty() || getFluid().getFluid() == stack.getFluid());
         }
 
         @Override
         public int fill(net.minecraftforge.fluids.FluidStack resource, FluidAction action) {
-            if (resource.isEmpty()) return 0;
+            if (resource.isEmpty() || resource.hasTag()) return 0;
             EconomyFluidStack probe = new EconomyFluidStack(resource.getFluid(), resource.getAmount());
             return action.simulate() ? simulateFill(probe) : ForgeTankBlockEntity.this.fill(probe);
         }
 
         @Override
         public @NotNull net.minecraftforge.fluids.FluidStack drain(net.minecraftforge.fluids.FluidStack resource, FluidAction action) {
+            if (resource.isEmpty() || resource.hasTag()) return net.minecraftforge.fluids.FluidStack.EMPTY;
             if (action.simulate()) {
                 EconomyFluidStack have = getFluid();
                 if (have.isEmpty() || have.getFluid() != resource.getFluid()) {

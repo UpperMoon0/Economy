@@ -75,6 +75,7 @@ Install the file matching both your Minecraft version and loader. A jar built fo
 - Supports the same `BOTH`, `INPUT ONLY`, and `OUTPUT ONLY` market behavior as Vaults.
 - Storage modes govern market supply and delivery; direct inventory and fluid automation remains available independently.
 - Vaults expose item insertion/extraction and Tanks expose fluid filling/draining on every face through the loader's standard automation API, including compatible GregTech pipes and machine auto I/O. Vaults also support sided inventory automation such as hoppers.
+- Tanks store base fluids only. Automation rejects NBT/component-bearing fluid variants rather than discarding their metadata.
 - Item and fluid logistics are always enabled on every face for both new and existing storage. There is no automation toggle; the old `allowExternalAutomation` setting is removed automatically. Compatibility uses the standard Forge capabilities, NeoForge capabilities/transfer API, Fabric Transfer API, and vanilla sided inventory interfaces, so logistics mods using those APIs can connect without a GregTech-specific adapter.
 - Includes its block/item model, texture, recipe, loot table, mining tags, and creative-tab entry.
 

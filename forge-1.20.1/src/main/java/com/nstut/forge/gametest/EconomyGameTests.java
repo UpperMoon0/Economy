@@ -83,7 +83,18 @@ public final class EconomyGameTests {
                 var execute = net.minecraftforge.fluids.capability.IFluidHandler.FluidAction.EXECUTE;
                 helper.assertTrue(fluids.fill(water, simulate) == 1000 && tank.getFluidAmount() == 0,
                         "Simulated fill must not mutate tank");
+                var taggedWater = water.copy();
+                var variantTag = new net.minecraft.nbt.CompoundTag();
+                variantTag.putString("variant", "special");
+                taggedWater.setTag(variantTag);
+                helper.assertTrue(!fluids.isFluidValid(0, taggedWater)
+                        && fluids.fill(taggedWater, simulate) == 0
+                        && fluids.fill(taggedWater, execute) == 0 && tank.getFluidAmount() == 0,
+                        "Metadata-bearing fluids must not be accepted and silently stripped");
                 helper.assertTrue(fluids.fill(water, execute) == 1000, "Machine output must fill tank");
+                helper.assertTrue(fluids.drain(taggedWater, simulate).isEmpty()
+                        && fluids.drain(taggedWater, execute).isEmpty() && tank.getFluidAmount() == 1000,
+                        "Variant-specific extraction must not consume untagged stored fluid");
                 helper.assertTrue(fluids.fill(new net.minecraftforge.fluids.FluidStack(Fluids.LAVA, 1000), execute) == 0,
                         "Incompatible fluid must be rejected");
                 helper.assertTrue(fluids.drain(250, simulate).getAmount() == 250 && tank.getFluidAmount() == 1000,
