@@ -15,7 +15,6 @@ class TeamEconomyConfigTest {
     @AfterEach void restoreDefaults() throws Exception {
         config.loadTeamConfig(directory.resolve("defaults.properties"));
         config.setTankCapacity(128000);
-        config.setAllowExternalAutomation(false);
     }
 
     @Test void freshConfigEnablesOptionalSupportWithoutRequiringAProvider() throws Exception {
@@ -68,24 +67,29 @@ class TeamEconomyConfigTest {
         Files.writeString(file, "enabled=typo\n");
         assertThrows(IllegalArgumentException.class, () -> config.loadTeamConfig(file));
     }
-    @Test void storageConfigControlsTankCapacityAndAutomation() throws Exception {
+    @Test void legacyAutomationSwitchIsRemovedWithoutChangingCapacityOrOtherSettings() throws Exception {
         Path file = directory.resolve("economy-storage.properties");
-        Files.writeString(file, "tankCapacity=256000\nallowExternalAutomation=true\n");
-        config.loadStorageConfig(file);
-        assertEquals(256000, config.getTankCapacity());
-        assertTrue(config.isExternalAutomationAllowed());
+        for (String legacyValue : new String[]{"false", "true", "invalid"}) {
+            Files.writeString(file, "tankCapacity=256000\nallowExternalAutomation=" + legacyValue + "\ncustomSetting=keep\n");
+            config.loadStorageConfig(file);
+            assertEquals(256000, config.getTankCapacity());
+            String migrated = Files.readString(file);
+            assertFalse(migrated.contains("allowExternalAutomation"));
+            assertTrue(migrated.contains("customSetting=keep"));
+            config.loadStorageConfig(file);
+            assertEquals(migrated, Files.readString(file));
+        }
     }
 
-    @Test void storageConfigWritesDefaultsAndRejectsInvalidCapacity() throws Exception {
+    @Test void storageConfigWritesOnlyCapacityAndRejectsInvalidCapacity() throws Exception {
         Path file = directory.resolve("economy-storage-defaults.properties");
         config.setTankCapacity(128000);
-        config.setAllowExternalAutomation(false);
         config.loadStorageConfig(file);
-        String written = Files.readString(file);
-        assertTrue(written.contains("tankCapacity=128000"));
-        assertTrue(written.contains("allowExternalAutomation=false"));
-        Files.writeString(file, "tankCapacity=oops\nallowExternalAutomation=false\n");
+        var written = new java.util.Properties();
+        try (var input = Files.newInputStream(file)) { written.load(input); }
+        assertEquals(java.util.Set.of("tankCapacity"), written.stringPropertyNames());
+        assertEquals("128000", written.getProperty("tankCapacity"));
+        Files.writeString(file, "tankCapacity=oops\n");
         assertThrows(IllegalArgumentException.class, () -> config.loadStorageConfig(file));
     }
-
 }

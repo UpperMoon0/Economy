@@ -42,12 +42,15 @@ public final class EconomyNeoForge {
 
     private void registerCapabilities(net.neoforged.neoforge.capabilities.RegisterCapabilitiesEvent event) {
         event.registerBlockEntity(
+                net.neoforged.neoforge.capabilities.Capabilities.ItemHandler.BLOCK,
+                BlockRegistries.VAULT_BE.get(),
+                (vault, side) -> new net.neoforged.neoforge.items.wrapper.SidedInvWrapper(vault,
+                                side == null ? net.minecraft.core.Direction.UP : side));
+
+        event.registerBlockEntity(
                 net.neoforged.neoforge.capabilities.Capabilities.FluidHandler.BLOCK,
                 BlockRegistries.TANK_BE.get(),
                 (tank, side) -> {
-                    if (!com.nstut.economy.config.EconomyConfig.getInstance().isExternalAutomationAllowed()) {
-                        return null;
-                    }
                     return new net.neoforged.neoforge.fluids.capability.IFluidHandler() {
                         @Override
                         public int getTanks() {
@@ -69,19 +72,21 @@ public final class EconomyNeoForge {
 
                         @Override
                         public boolean isFluidValid(int tankIndex, net.neoforged.neoforge.fluids.FluidStack stack) {
-                            return tankIndex == 0 && !stack.isEmpty()
+                            return tankIndex == 0 && !stack.isEmpty() && stack.getComponentsPatch().isEmpty()
                                     && (tank.getFluid().isEmpty() || tank.getFluid().getFluid() == stack.getFluid());
                         }
 
                         @Override
                         public int fill(net.neoforged.neoforge.fluids.FluidStack resource, FluidAction action) {
-                            if (resource.isEmpty()) return 0;
+                            if (resource.isEmpty() || !resource.getComponentsPatch().isEmpty()) return 0;
                             com.nstut.economy.trading.EconomyFluidStack probe = new com.nstut.economy.trading.EconomyFluidStack(resource.getFluid(), resource.getAmount());
                             return action.simulate() ? tank.simulateFill(probe) : tank.fill(probe);
                         }
 
                         @Override
                         public net.neoforged.neoforge.fluids.FluidStack drain(net.neoforged.neoforge.fluids.FluidStack resource, FluidAction action) {
+                            if (resource.isEmpty() || !resource.getComponentsPatch().isEmpty())
+                                return net.neoforged.neoforge.fluids.FluidStack.EMPTY;
                             if (action.simulate()) {
                                 com.nstut.economy.trading.EconomyFluidStack have = tank.getFluid();
                                 if (have.isEmpty() || have.getFluid() != resource.getFluid()) {

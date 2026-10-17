@@ -35,7 +35,6 @@ public class EconomyConfig {
     private int maxPriceDigits = 18;
 
     // Storage settings
-    private boolean allowExternalAutomation = false;
     private int tankCapacity = 128000;
 
     // Enabled by default; without an optional team provider only personal accounts are exposed.
@@ -97,16 +96,13 @@ public class EconomyConfig {
             try (var input = java.nio.file.Files.newInputStream(path)) { properties.load(input); }
         }
         String rawCapacity = properties.getProperty("tankCapacity", Integer.toString(tankCapacity)).trim();
-        String rawAutomation = properties.getProperty("allowExternalAutomation", Boolean.toString(allowExternalAutomation)).trim();
         try { tankCapacity = Math.max(1000, Integer.parseInt(rawCapacity)); }
         catch (NumberFormatException invalid) { throw new IllegalArgumentException("tankCapacity must be an integer >= 1000"); }
-        if (!rawAutomation.equalsIgnoreCase("true") && !rawAutomation.equalsIgnoreCase("false"))
-            throw new IllegalArgumentException("allowExternalAutomation must be true or false");
-        allowExternalAutomation = Boolean.parseBoolean(rawAutomation);
-        if (!java.nio.file.Files.exists(path) || !properties.containsKey("tankCapacity") || !properties.containsKey("allowExternalAutomation")) {
+        // Logistics is always available. Retire the old switch even when it was false or malformed.
+        boolean removedLegacyAutomation = properties.remove("allowExternalAutomation") != null;
+        if (!java.nio.file.Files.exists(path) || !properties.containsKey("tankCapacity") || removedLegacyAutomation) {
             java.nio.file.Files.createDirectories(path.toAbsolutePath().getParent());
             properties.setProperty("tankCapacity", Integer.toString(tankCapacity));
-            properties.setProperty("allowExternalAutomation", Boolean.toString(allowExternalAutomation));
             try (var output = java.nio.file.Files.newOutputStream(path)) {
                 properties.store(output, "Economy storage settings. tankCapacity is internal Tank capacity in mB.");
             }
@@ -133,7 +129,6 @@ public class EconomyConfig {
     public int getMaxOrderQuantity() { return maxOrderQuantity; }
     public int getMaxPriceScale() { return maxPriceScale; }
     public int getMaxPriceDigits() { return maxPriceDigits; }
-    public boolean isExternalAutomationAllowed() { return allowExternalAutomation; }
     public int getTankCapacity() { return tankCapacity; }
     public boolean isTeamEconomyEnabled() { return teamEconomyMode != TeamEconomyMode.PERSONAL_ONLY; }
     public TeamEconomyMode getTeamEconomyMode() { return teamEconomyMode; }
@@ -157,7 +152,6 @@ public class EconomyConfig {
     public void setMaxPriceDigits(int maxPriceDigits) {
         this.maxPriceDigits = Math.max(1, maxPriceDigits);
     }
-    public void setAllowExternalAutomation(boolean allow) { this.allowExternalAutomation = allow; }
     public void setTankCapacity(int capacity) { this.tankCapacity = Math.max(1000, capacity); }
     public void setTeamEconomyMode(TeamEconomyMode mode) { this.teamEconomyMode = java.util.Objects.requireNonNull(mode, "mode"); }
     public void setTeamViewRole(TeamRole role) { this.teamViewRole = java.util.Objects.requireNonNull(role, "role"); }

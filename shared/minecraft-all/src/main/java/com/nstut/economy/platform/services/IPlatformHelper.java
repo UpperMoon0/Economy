@@ -23,6 +23,11 @@ public interface IPlatformHelper {
      * example Forge fluid capabilities).
      */
     TankBlockEntity newTankBlockEntity(BlockPos pos, BlockState state);
+
+    /** Supplies a loader-specific vault when capability integration is needed. */
+    default com.nstut.economy.blocks.VaultBlockEntity newVaultBlockEntity(BlockPos pos, BlockState state) {
+        return new com.nstut.economy.blocks.VaultBlockEntity(pos, state);
+    }
 }
 
 

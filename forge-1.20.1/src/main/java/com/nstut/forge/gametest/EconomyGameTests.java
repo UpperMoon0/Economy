@@ -46,6 +46,80 @@ public final class EconomyGameTests {
     }
 
     @GameTest(template = "economy_gametest_empty", timeoutTicks = 40)
+    public static void pipeAndMachineCapabilitiesTransferOnEveryFace(GameTestHelper helper) {
+        BlockPos vaultPos = new BlockPos(0, 1, 0);
+        BlockPos tankPos = new BlockPos(1, 1, 0);
+        helper.setBlock(vaultPos, BlockRegistries.VAULT.get());
+        helper.setBlock(tankPos, BlockRegistries.TANK.get());
+        var vault = (VaultBlockEntity) helper.getLevel().getBlockEntity(helper.absolutePos(vaultPos));
+        var tank = (TankBlockEntity) helper.getLevel().getBlockEntity(helper.absolutePos(tankPos));
+        var sides = new java.util.ArrayList<net.minecraft.core.Direction>(java.util.List.of(net.minecraft.core.Direction.values()));
+        sides.add(null);
+        for (var side : sides) {
+            helper.assertTrue(vault.getSlotsForFace(side).length == 54
+                    && vault.canPlaceItemThroughFace(53, new ItemStack(Items.IRON_INGOT), side)
+                    && vault.canTakeItemThroughFace(53, new ItemStack(Items.IRON_INGOT), side),
+                    "Vanilla sided inventory logistics must always expose every slot");
+            for (var mode : VaultBlockEntity.VaultMode.values()) {
+                vault.setMode(mode);
+                var items = vault.getCapability(net.minecraftforge.common.capabilities.ForgeCapabilities.ITEM_HANDLER, side)
+                        .orElseThrow(() -> new AssertionError("Missing vault item capability on " + side));
+                helper.assertTrue(items.getSlots() == 54, "All vault slots must be visible to automation");
+                helper.assertTrue(items.insertItem(53, new ItemStack(Items.IRON_INGOT, 8), true).isEmpty()
+                        && vault.isEmpty(), "Simulated insertion must not change inventory");
+                helper.assertTrue(items.insertItem(53, new ItemStack(Items.IRON_INGOT, 8), false).isEmpty(),
+                        "Machine output must insert into vault");
+                helper.assertTrue(items.extractItem(53, 3, true).getCount() == 3 && vault.countItem(Items.IRON_INGOT) == 8,
+                        "Simulated extraction must preserve inventory");
+                helper.assertTrue(items.extractItem(53, 8, false).getCount() == 8 && vault.isEmpty(),
+                        "Machine input must extract from vault independently of market mode");
+            }
+            for (var mode : TankBlockEntity.TankMode.values()) {
+                tank.setMode(mode);
+                var fluids = tank.getCapability(net.minecraftforge.common.capabilities.ForgeCapabilities.FLUID_HANDLER, side)
+                        .orElseThrow(() -> new AssertionError("Missing tank fluid capability on " + side));
+                var water = new net.minecraftforge.fluids.FluidStack(Fluids.WATER, 1000);
+                var simulate = net.minecraftforge.fluids.capability.IFluidHandler.FluidAction.SIMULATE;
+                var execute = net.minecraftforge.fluids.capability.IFluidHandler.FluidAction.EXECUTE;
+                helper.assertTrue(fluids.fill(water, simulate) == 1000 && tank.getFluidAmount() == 0,
+                        "Simulated fill must not mutate tank");
+                var taggedWater = water.copy();
+                var variantTag = new net.minecraft.nbt.CompoundTag();
+                variantTag.putString("variant", "special");
+                taggedWater.setTag(variantTag);
+                helper.assertTrue(!fluids.isFluidValid(0, taggedWater)
+                        && fluids.fill(taggedWater, simulate) == 0
+                        && fluids.fill(taggedWater, execute) == 0 && tank.getFluidAmount() == 0,
+                        "Metadata-bearing fluids must not be accepted and silently stripped");
+                helper.assertTrue(fluids.fill(water, execute) == 1000, "Machine output must fill tank");
+                helper.assertTrue(fluids.drain(taggedWater, simulate).isEmpty()
+                        && fluids.drain(taggedWater, execute).isEmpty() && tank.getFluidAmount() == 1000,
+                        "Variant-specific extraction must not consume untagged stored fluid");
+                helper.assertTrue(fluids.fill(new net.minecraftforge.fluids.FluidStack(Fluids.LAVA, 1000), execute) == 0,
+                        "Incompatible fluid must be rejected");
+                helper.assertTrue(fluids.drain(250, simulate).getAmount() == 250 && tank.getFluidAmount() == 1000,
+                        "Simulated drain must preserve fluid");
+                helper.assertTrue(fluids.drain(water, execute).getAmount() == 1000 && tank.getFluidAmount() == 0,
+                        "Machine input must drain tank independently of market mode");
+            }
+        }
+        var reloadedVault = BlockRegistries.VAULT_BE.get().create(vault.getBlockPos(), vault.getBlockState());
+        helper.assertTrue(reloadedVault instanceof com.nstut.forge.ForgeVaultBlockEntity,
+                "Saved vaults must reload with the Forge item capability implementation");
+        var oldItems = vault.getCapability(net.minecraftforge.common.capabilities.ForgeCapabilities.ITEM_HANDLER);
+        var oldFluids = tank.getCapability(net.minecraftforge.common.capabilities.ForgeCapabilities.FLUID_HANDLER);
+        vault.invalidateCaps();
+        tank.invalidateCaps();
+        helper.assertTrue(!oldItems.isPresent() && !oldFluids.isPresent(), "Removed capabilities must invalidate cached references");
+        vault.reviveCaps();
+        tank.reviveCaps();
+        helper.assertTrue(vault.getCapability(net.minecraftforge.common.capabilities.ForgeCapabilities.ITEM_HANDLER).isPresent()
+                && tank.getCapability(net.minecraftforge.common.capabilities.ForgeCapabilities.FLUID_HANDLER).isPresent(),
+                "Capabilities must revive after reload");
+        helper.succeed();
+    }
+
+    @GameTest(template = "economy_gametest_empty", timeoutTicks = 40)
     public static void vaultAndTankOperateInRealServerWorld(GameTestHelper helper) {
         helper.assertTrue(EconomyApi.isReady(), "Economy API runtime must be bound before GameTests execute");
 

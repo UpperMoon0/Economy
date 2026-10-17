@@ -51,6 +51,7 @@ public class VaultBlockEntity extends BlockEntity implements WorldlyContainer {
     }
 
     private static final int SIZE = 54;
+    private static final int[] AUTOMATION_SLOTS = java.util.stream.IntStream.range(0, SIZE).toArray();
     private NonNullList<ItemStack> items;
     private UUID owner;
     private AccountKind ownerKind = AccountKind.PLAYER;
@@ -196,17 +197,17 @@ public class VaultBlockEntity extends BlockEntity implements WorldlyContainer {
 
     @Override
     public int[] getSlotsForFace(Direction side) {
-        return new int[0];
+        return AUTOMATION_SLOTS;
     }
 
     @Override
     public boolean canPlaceItemThroughFace(int index, ItemStack stack, @Nullable Direction direction) {
-        return false;
+        return index >= 0 && index < SIZE;
     }
 
     @Override
     public boolean canTakeItemThroughFace(int index, ItemStack stack, @Nullable Direction direction) {
-        return false;
+        return index >= 0 && index < SIZE;
     }
 
     @Override

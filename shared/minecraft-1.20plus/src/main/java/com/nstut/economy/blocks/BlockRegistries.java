@@ -21,7 +21,7 @@ public class BlockRegistries {
     public static final RegistrySupplier<Block> TANK = BLOCKS.register("tank", TankBlock::new);
 
     public static final RegistrySupplier<BlockEntityType<VaultBlockEntity>> VAULT_BE =
-            BLOCK_ENTITIES.register("vault", () -> BlockEntityType.Builder.of(VaultBlockEntity::new, VAULT.get()).build(null));
+            BLOCK_ENTITIES.register("vault", () -> BlockEntityType.Builder.of(com.nstut.economy.platform.Services.PLATFORM::newVaultBlockEntity, VAULT.get()).build(null));
     public static final RegistrySupplier<BlockEntityType<TankBlockEntity>> TANK_BE =
             BLOCK_ENTITIES.register("tank", () -> BlockEntityType.Builder.of(
                     Services.PLATFORM::newTankBlockEntity, TANK.get()).build(null));

@@ -43,10 +43,12 @@ public class EconomyFabric implements ModInitializer {
         ServerLifecycleEvents.SERVER_STOPPING.register(this::onServerStopping);
         ServerTickEvents.END_SERVER_TICK.register(this::onEndServerTick);
 
+        net.fabricmc.fabric.api.transfer.v1.item.ItemStorage.SIDED.registerForBlockEntity((vault, direction) -> {
+            return net.fabricmc.fabric.api.transfer.v1.item.InventoryStorage.of(vault,
+                    direction == null ? net.minecraft.core.Direction.UP : direction);
+        }, BlockRegistries.VAULT_BE.get());
+
         net.fabricmc.fabric.api.transfer.v1.fluid.FluidStorage.SIDED.registerForBlockEntity((tank, direction) -> {
-            if (!com.nstut.economy.config.EconomyConfig.getInstance().isExternalAutomationAllowed()) {
-                return null;
-            }
             return com.nstut.fabric.FabricTankStorage.get((com.nstut.economy.blocks.TankBlockEntity) tank);
         }, BlockRegistries.TANK_BE.get());
     }

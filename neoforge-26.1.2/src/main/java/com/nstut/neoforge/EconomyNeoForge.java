@@ -38,11 +38,23 @@ public final class EconomyNeoForge {
         MarketNetwork.init();
         Economy.init();
 
+        modEventBus.addListener(this::registerCapabilities);
+
         NeoForge.EVENT_BUS.addListener(this::onBlockBreak);
         NeoForge.EVENT_BUS.addListener(this::onRegisterCommands);
         NeoForge.EVENT_BUS.addListener(this::onLevelLoad);
         NeoForge.EVENT_BUS.addListener(this::onServerStopping);
         NeoForge.EVENT_BUS.addListener(this::onServerTick);
+    }
+
+    private void registerCapabilities(net.neoforged.neoforge.capabilities.RegisterCapabilitiesEvent event) {
+        event.registerBlockEntity(net.neoforged.neoforge.capabilities.Capabilities.Item.BLOCK,
+                BlockRegistries.VAULT_BE.get(), (vault, side) ->
+                        new net.neoforged.neoforge.transfer.item.WorldlyContainerWrapper(vault,
+                                        side == null ? net.minecraft.core.Direction.UP : side));
+        event.registerBlockEntity(net.neoforged.neoforge.capabilities.Capabilities.Fluid.BLOCK,
+                BlockRegistries.TANK_BE.get(), (tank, side) ->
+                        NeoForgeTankStorage.get(tank));
     }
 
     /**
