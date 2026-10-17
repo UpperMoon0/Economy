@@ -4,7 +4,9 @@
   "version": "${version}",
   "name": "${mod_name}",
   "description": "${mod_description}",
-  "authors": ["${mod_authors}"],
+  "authors": [
+    "${mod_authors}"
+  ],
   "contact": {
     "sources": "https://github.com/UpperMoon0/Economy",
     "issues": "https://github.com/UpperMoon0/Economy/issues"
@@ -12,15 +14,24 @@
   "license": "MIT",
   "environment": "*",
   "entrypoints": {
-    "main": ["com.nstut.fabric.EconomyFabric"],
-    "client": ["com.nstut.fabric.client.EconomyFabricClient"]
+    "main": [
+      "com.nstut.fabric.EconomyFabric"
+    ],
+    "client": [
+      "com.nstut.fabric.client.EconomyFabricClient"
+    ],
+    "preLaunch": [
+      "com.nstut.fabric.OpenUiDependencyCheck"
+    ]
   },
   "depends": {
     "fabricloader": ">=${fabric_loader_version}",
     "minecraft": "~${minecraft_version}",
     "java": ">=17",
     "fabric-api": "*",
-    "architectury": ">=${architectury_api_version}",
+    "architectury": ">=${architectury_api_version}"
+  },
+  "suggests": {
     "openui_mc": ">=${openui_version}"
   }
 }

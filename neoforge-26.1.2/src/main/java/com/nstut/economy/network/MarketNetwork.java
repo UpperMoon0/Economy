@@ -69,6 +69,7 @@ public class MarketNetwork {
         CHANNEL.registerC2S(RequestPlayerListPacket.class, RequestPlayerListPacket::encode, RequestPlayerListPacket::decode, RequestPlayerListPacket::handle);
         CHANNEL.registerS2C(SyncPlayerListPacket.class, SyncPlayerListPacket::encode, SyncPlayerListPacket::decode, SyncPlayerListPacket::handle);
         CHANNEL.registerC2S(PlayerPaymentPacket.class, PlayerPaymentPacket::encode, PlayerPaymentPacket::decode, PlayerPaymentPacket::handle);
+        CHANNEL.registerC2S(SetStorageRoutingPacket.class, SetStorageRoutingPacket::encode, SetStorageRoutingPacket::decode, SetStorageRoutingPacket::handle);
     }
 
     public enum Action { CREATE_ORDER, ACCEPT_ORDER, CANCEL_ORDER, EDIT_ORDER, WALLET, TREASURY, STORAGE, PAYMENT }
@@ -958,7 +959,8 @@ public class MarketNetwork {
                             }
                             net.minecraft.core.NonNullList<net.minecraft.world.item.ItemStack> reserved = net.minecraft.core.NonNullList.create();
                             if (!VaultManager.extractItemFromVaults(level, storageAccount, commodity, pkt.quantity, reserved)) {
-                                VaultManager.insertItemStacksToVaults(level, storageAccount, reserved);
+                                orderManager.restoreOrPreserveItemEscrow(identity, commodity, reserved, price, level,
+                                        "partial SELL extraction could not restore seller items");
                                 sendActionResult(player, Action.CREATE_ORDER, Result.WARNING, "ui.economy.error.insufficient_stock");
                                 sendItemDetail(player, pkt.itemId, pkt.commodityType);
                                 return;
@@ -1847,6 +1849,67 @@ public class MarketNetwork {
         net.minecraft.resources.ResourceKey<Level> key =
                 net.minecraft.resources.ResourceKey.create(net.minecraft.core.registries.Registries.DIMENSION, dimensionId);
         return player.level().getServer().getLevel(key);
+    }
+
+    /** Changes only the storage the player is currently viewing; revalidates team admin access. */
+    public static class SetStorageRoutingPacket {
+        public final String dimension;
+        public final net.minecraft.core.BlockPos pos;
+        public final boolean tank;
+        public final String filter;
+        public final int priority;
+        public final boolean blacklist;
+
+        public SetStorageRoutingPacket(String dimension, net.minecraft.core.BlockPos pos, boolean tank, String filter, int priority) {
+            this(dimension, pos, tank, filter, priority, false);
+        }
+        public SetStorageRoutingPacket(String dimension, net.minecraft.core.BlockPos pos, boolean tank, String filter, int priority, boolean blacklist) {
+            this.dimension = dimension; this.pos = pos; this.tank = tank; this.filter = filter; this.priority = priority; this.blacklist = blacklist;
+        }
+        public static void encode(SetStorageRoutingPacket pkt, FriendlyByteBuf buf) {
+            buf.writeUtf(pkt.dimension, 128); buf.writeBlockPos(pkt.pos); buf.writeBoolean(pkt.tank);
+            buf.writeUtf(pkt.filter, 4096); buf.writeInt(pkt.priority); buf.writeBoolean(pkt.blacklist);
+        }
+        public static SetStorageRoutingPacket decode(FriendlyByteBuf buf) {
+            return new SetStorageRoutingPacket(buf.readUtf(128), buf.readBlockPos(), buf.readBoolean(), buf.readUtf(4096), buf.readInt(), buf.readBoolean());
+        }
+        public static void handle(SetStorageRoutingPacket pkt, Supplier<NetworkManager.PacketContext> ctx) {
+            ctx.get().queue(() -> {
+                if (!(ctx.get().getPlayer() instanceof ServerPlayer player)) return;
+                // Never load arbitrary chunks/dimensions from a settings packet.
+                if (!player.level().dimension().identifier().toString().equals(pkt.dimension)
+                        || !player.level().hasChunkAt(pkt.pos)) return;
+                var block = player.level().getBlockEntity(pkt.pos);
+                com.nstut.economy.api.AccountRef owner;
+                if (pkt.tank && block instanceof TankBlockEntity storage
+                        && player.containerMenu instanceof com.nstut.economy.blocks.TankMenu menu
+                        && menu.getTankBlockEntity() == storage && menu.stillValid(player)) {
+                    owner = storage.getOwnerRef();
+                } else if (!pkt.tank && block instanceof VaultBlockEntity storage
+                        && player.containerMenu instanceof com.nstut.economy.blocks.VaultMenu menu
+                        && menu.getVaultBlockEntity() == storage && menu.stillValid(player)) {
+                    owner = storage.getOwnerRef();
+                } else return;
+                if (!com.nstut.economy.server.TeamStorageAccess.canAdmin(player.getUUID(), owner)) {
+                    sendStorageModeDenied(player, owner); return;
+                }
+                com.nstut.economy.config.StorageRoutingSettings settings;
+                try {
+                    settings = com.nstut.economy.config.StorageRoutingSettings.parse(pkt.filter, pkt.priority, pkt.blacklist);
+                    for (String id : settings.allowedIds()) {
+                        var key = com.nstut.economy.compat.Compat.rl(id);
+                        if (!(pkt.tank ? BuiltInRegistries.FLUID.containsKey(key) : BuiltInRegistries.ITEM.containsKey(key))
+                                || id.equals(pkt.tank ? "minecraft:empty" : "minecraft:air"))
+                            throw new IllegalArgumentException("Unknown item/fluid");
+                    }
+                } catch (IllegalArgumentException invalid) {
+                    sendActionResult(player, Action.STORAGE, Result.WARNING, "ui.economy.routing.invalid"); return;
+                }
+                if (block instanceof TankBlockEntity storage) storage.setRoutingSettings(settings);
+                else if (block instanceof VaultBlockEntity storage) storage.setRoutingSettings(settings);
+                sendActionResult(player, Action.STORAGE, Result.SUCCESS, "ui.economy.routing.saved");
+            });
+        }
     }
 
     public static class ToggleVaultModePacket {

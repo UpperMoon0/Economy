@@ -91,6 +91,11 @@ public class VaultManager {
             if (targetLevel.getBlockEntity(record.pos) instanceof VaultBlockEntity vault
                     && owner.equals(vault.getOwnerRef())) result.add(vault);
         }
+        result.sort(Comparator.comparingInt((VaultBlockEntity storage) -> storage.getRoutingSettings().priority()).reversed()
+                .thenComparing(storage -> storage.getLevel().dimension().location().toString())
+                .thenComparingInt(storage -> storage.getBlockPos().getX())
+                .thenComparingInt(storage -> storage.getBlockPos().getY())
+                .thenComparingInt(storage -> storage.getBlockPos().getZ()));
         return result;
     }
 
@@ -189,14 +194,7 @@ public class VaultManager {
         return simulateInsertItemStacksToVaults(level, AccountRef.player(owner), stacks);
     }
     public static NonNullList<ItemStack> simulateInsertItemStacksToVaults(Level level, AccountRef owner, List<ItemStack> stacks) {
-        List<List<ItemStack>> snapshots=new ArrayList<>();
-        for(VaultBlockEntity v:getVaults(level,owner)){
-            if(!v.getMode().canReceiveMarket())continue;
-            List<ItemStack> snapshot=new ArrayList<>(v.getContainerSize());
-            for(int i=0;i<v.getContainerSize();i++)snapshot.add(v.getItem(i));
-            snapshots.add(snapshot);
-        }
-        return VaultInventoryOps.simulateDistribute(snapshots,stacks);
+        return routeItems(level, owner, stacks, true, true);
     }
 
     public static int countMaxAcceptableItems(Level level, UUID owner, List<ItemStack> payload) {
@@ -211,15 +209,23 @@ public class VaultManager {
         return insertItemStacksToVaults(level, AccountRef.player(owner), stacks);
     }
     public static NonNullList<ItemStack> insertItemStacksToVaults(Level level, AccountRef owner, List<ItemStack> stacks) {
-        List<VaultBlockEntity> receivers=new ArrayList<>();
-        List<List<ItemStack>> inventories=new ArrayList<>();
-        for(VaultBlockEntity v:getVaults(level,owner)){
-            if(!v.getMode().canReceiveMarket())continue;
-            receivers.add(v);inventories.add(v.getItems());
-        }
-        int before=VaultInventoryOps.total(stacks);
-        NonNullList<ItemStack> remaining=VaultInventoryOps.distribute(inventories,stacks);
-        if(VaultInventoryOps.total(remaining)!=before)for(VaultBlockEntity receiver:receivers)receiver.setChanged();
+        return routeItems(level, owner, stacks, false, true);
+    }
+
+    public static NonNullList<ItemStack> restoreItemStacksToVaults(Level level, AccountRef owner, List<ItemStack> stacks, boolean simulate) {
+        return routeItems(level, owner, stacks, simulate, false);
+    }
+
+    private static NonNullList<ItemStack> routeItems(Level level, AccountRef owner, List<ItemStack> stacks, boolean simulate, boolean purchase) {
+        List<VaultBlockEntity> receivers = getVaults(level, owner).stream()
+                .filter(v -> !purchase || v.getMode().canReceiveMarket()).toList();
+        List<List<ItemStack>> inventories = new ArrayList<>();
+        for (var receiver : receivers) inventories.add(simulate
+                ? VaultInventoryOps.copySlots(receiver.getItems()) : receiver.getItems());
+        NonNullList<ItemStack> remaining = VaultInventoryOps.distribute(inventories, stacks,
+                (index, stack) -> !purchase || receivers.get(index).acceptsMarketItem(stack));
+        if (!simulate && VaultInventoryOps.total(remaining) != VaultInventoryOps.total(stacks))
+            for (var receiver : receivers) receiver.setChanged();
         return remaining;
     }
 }

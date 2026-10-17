@@ -107,5 +107,11 @@ public abstract class EconomyUiContainerScreen<M extends AbstractContainerMenu> 
     }
 
     public EconomyUiThemeMode currentThemeMode() { return themeMode.get(); }
+
+    protected void showStorageRouting(net.minecraft.world.level.block.entity.BlockEntity storage) {
+        if (storage == null || minecraft == null || minecraft.level == null) return;
+        StorageRoutingDialog.show(uiRuntime().overlays(), storage, minecraft.level.dimension().identifier().toString());
+    }
+
 }
 

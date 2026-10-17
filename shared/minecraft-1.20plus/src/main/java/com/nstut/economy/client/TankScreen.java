@@ -114,6 +114,8 @@ public class TankScreen extends EconomyUiContainerScreen<TankMenu> {
         modeBtn = EconomyUiComponents.configStateButton(modeLabel(currentMode), this::cycleMode);
         modeBtn.tooltip(modeTooltipWithPermission(currentMode));
         header.addChild(modeBtn);
+        header.addChild(EconomyUiComponents.routingButton(Component.translatable("ui.economy.routing.button"),
+                () -> showStorageRouting(menu.getTankBlockEntity())));
         header.addChild(buildCompactThemeToggle());
 
         HStack body = new HStack().gap(8).align(Alignment.CENTER);

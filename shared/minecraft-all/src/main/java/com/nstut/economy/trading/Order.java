@@ -457,11 +457,17 @@ public class Order implements IOrder {
         int delivered = amount;
         if (level != null && commodity instanceof ItemCommodity item) {
             NonNullList<ItemStack> extracted = NonNullList.create();
-            if (!VaultManager.extractItemFromVaults(level, sellerStorage, item, amount, extracted)) delivered = 0;
+            if (!VaultManager.extractItemFromVaults(level, sellerStorage, item, amount, extracted)) {
+                Economy.getOrderManager().restoreOrPreserveItemEscrow(seller, commodity, extracted, pricePerUnit, level,
+                        "partial built-in BUY extraction could not restore seller items");
+                delivered = 0;
+            }
             else if (!serverOrder) {
                 NonNullList<ItemStack> leftover = VaultManager.insertItemStacksToVaults(level, getStorageAccount(), extracted);
                 delivered = VaultInventoryOps.total(extracted) - VaultInventoryOps.total(leftover);
-                if (!leftover.isEmpty()) VaultManager.insertItemStacksToVaults(level, sellerStorage, leftover);
+                if (!leftover.isEmpty()) Economy.getOrderManager().restoreOrPreserveItemEscrow(
+                        seller, commodity, leftover, pricePerUnit, level,
+                        "rejected built-in BUY delivery could not restore seller items");
             }
         } else if (level != null && commodity instanceof FluidCommodity fluid) {
             List<EconomyFluidStack> extracted = new ArrayList<>();

@@ -8,7 +8,7 @@ A modern multi-loader order-book economy for Minecraft, with physical item and f
 
 ## Dependency
 
-The client UI requires [OpenUI MC](https://github.com/UpperMoon0/OpenUI-MC) 0.0.12 or newer, which must be installed alongside Economy. Economy owns the market-specific screens and logic; reusable layout, widget, rendering, scrolling, and animation primitives live in OpenUI MC. Use the dependency version declared by the Economy jar or its release page.
+The client UI requires [OpenUI MC](https://github.com/UpperMoon0/OpenUI-MC) 0.0.13 or newer, which must be installed alongside Economy. Economy owns the market-specific screens and logic; reusable layout, widget, rendering, scrolling, and animation primitives live in OpenUI MC. Use the dependency version declared by the Economy jar or its release page.
 
 ## Supported targets
 
@@ -78,6 +78,14 @@ Install the file matching both your Minecraft version and loader. A jar built fo
 - Tanks store base fluids only. Automation rejects NBT/component-bearing fluid variants rather than discarding their metadata.
 - Item and fluid logistics are always enabled on every face for both new and existing storage. There is no automation toggle; the old `allowExternalAutomation` setting is removed automatically. Compatibility uses the standard Forge capabilities, NeoForge capabilities/transfer API, Fabric Transfer API, and vanilla sided inventory interfaces, so logistics mods using those APIs can connect without a GregTech-specific adapter.
 - Includes its block/item model, texture, recipe, loot table, mining tags, and creative-tab entry.
+
+#### Purchase filters and usage priority
+
+- Open a Vault or Tank and choose **Routing**. Search by item/fluid name or ID and choose a dropdown result to add it. The filter list stays below search; **Remove** deletes an entry. **Whitelist** accepts listed purchases; **Blacklist** rejects them. Switching filter mode preserves the list, and both are saved separately from Input/Output mode. Up to 32 entries are supported; item filters include every variant. An empty list accepts all goods in either filter mode.
+- Purchase filters apply in `BOTH` and `OUTPUT ONLY` modes. In `INPUT ONLY`, the filter stays saved for later. Filters and priority survive mode changes and world reloads; existing containers default to unrestricted purchases and priority `0`.
+- Set priority from `-9999` to `9999`. Higher numbers are used first for both purchase delivery and sell-order supply. Full or incompatible receivers are skipped and goods overflow to the next eligible container. Equal priorities use dimension ID, then X/Y/Z coordinates in ascending order.
+- To keep a bought product in dedicated storage, whitelist it there and blacklist it on other catch-all receivers. An empty filter list remains a catch-all fallback.
+- Settings require the storage owner's administration permission, including team administration. Filters affect market purchases; manual transfers and pipes retain their existing behavior. Cancellation/recovery returns already-owned escrow regardless of the current purchase filter or mode.
 
 #### Containers Tab
 
@@ -194,3 +202,10 @@ Each loader module writes its compiled JAR to its own `build/libs/` directory. T
 ## License
 
 Licensed under the [MIT License](LICENSE). Created by **NsTut**.
+
+### OpenUI on clients and dedicated servers
+
+OpenUI MC is required on clients only. Dedicated servers can run without it.
+On Fabric, the client requirement is checked before client initialization; missing or
+incompatible OpenUI versions produce an installation error before the UI loads.
+Forge and NeoForge declare the dependency with `side="CLIENT"`.
