@@ -89,6 +89,25 @@ public class OrderManager implements IOrderManager {
         quarantineOrder(order.toSnapshot(), reason);
     }
 
+    /** Return already-owned items without purchase restrictions, retaining exact escrow if storage is unavailable. */
+    public boolean restoreOrPreserveItemEscrow(MarketIdentity escrowOwner, ICommodity commodity,
+                                               List<ItemStack> items, java.math.BigDecimal pricePerUnit,
+                                               net.minecraft.server.level.ServerLevel level, String reason) {
+        NonNullList<ItemStack> retained = copyStacks(items);
+        if (retained.isEmpty()) return true;
+        if (level != null && AtomicStorageRestore.restoreEscrow(level, escrowOwner.storageAccount(), retained, List.of()))
+            return true;
+        int amount = VaultInventoryOps.total(retained);
+        java.math.BigDecimal safePrice = pricePerUnit != null && pricePerUnit.signum() > 0
+                ? pricePerUnit : java.math.BigDecimal.ONE;
+        Order preserved = new Order(escrowOwner.storageOwner(), commodity, amount, amount, safePrice,
+                IOrder.OrderType.SELL, null, retained, new ArrayList<>(), false);
+        preserved.setIdentity(escrowOwner);
+        preserved.markQuarantined(reason);
+        quarantineOrder(preserved.toSnapshot(), reason);
+        return false;
+    }
+
     /** Preserve provider-owned escrow that could not be safely released or completed. */
     public void preserveProviderReservation(UUID escrowOwner, ICommodity commodity, StorageReservation reservation,
                                             java.math.BigDecimal pricePerUnit, String reason) {
@@ -462,7 +481,7 @@ public class OrderManager implements IOrderManager {
 
     private static UUID orderIdSafe(Order order) { return order.getOrderId(); }
 
-    private static NonNullList<ItemStack> copyStacks(NonNullList<ItemStack> original) {
+    private static NonNullList<ItemStack> copyStacks(List<ItemStack> original) {
         NonNullList<ItemStack> copy = NonNullList.create();
         if (original != null) for (ItemStack stack : original) if (stack != null && !stack.isEmpty()) copy.add(stack.copy());
         return copy;

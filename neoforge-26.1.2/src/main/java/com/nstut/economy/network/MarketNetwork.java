@@ -959,7 +959,8 @@ public class MarketNetwork {
                             }
                             net.minecraft.core.NonNullList<net.minecraft.world.item.ItemStack> reserved = net.minecraft.core.NonNullList.create();
                             if (!VaultManager.extractItemFromVaults(level, storageAccount, commodity, pkt.quantity, reserved)) {
-                                VaultManager.insertItemStacksToVaults(level, storageAccount, reserved);
+                                orderManager.restoreOrPreserveItemEscrow(identity, commodity, reserved, price, level,
+                                        "partial SELL extraction could not restore seller items");
                                 sendActionResult(player, Action.CREATE_ORDER, Result.WARNING, "ui.economy.error.insufficient_stock");
                                 sendItemDetail(player, pkt.itemId, pkt.commodityType);
                                 return;

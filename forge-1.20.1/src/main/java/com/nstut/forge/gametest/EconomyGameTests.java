@@ -178,6 +178,47 @@ public final class EconomyGameTests {
     }
 
     @GameTest(template = "economy_gametest_empty", timeoutTicks = 40)
+    public static void unreturnableItemsRetainExactSellerOwnedRecovery(GameTestHelper helper) {
+        var level = helper.getLevel();
+        var teamAccount = AccountRef.team(UUID.randomUUID());
+        var seller = new MarketIdentity(teamAccount, UUID.randomUUID(), teamAccount);
+        BlockPos pos = new BlockPos(0, 1, 0);
+        helper.setBlock(pos, BlockRegistries.VAULT.get());
+        var vault = (VaultBlockEntity) level.getBlockEntity(helper.absolutePos(pos));
+        vault.setOwner(teamAccount); vault.setMode(VaultBlockEntity.VaultMode.INPUT);
+        vault.setRoutingSettings(com.nstut.economy.config.StorageRoutingSettings.parse("minecraft:iron_ingot", 0, true));
+        for (int slot = 1; slot < vault.getContainerSize(); slot++)
+            vault.setItem(slot, new ItemStack(Items.COBBLESTONE, 64));
+        vault.setItem(0, new ItemStack(Items.IRON_INGOT, 63));
+        ItemStack namedIron = new ItemStack(Items.IRON_INGOT);
+        namedIron.setHoverName(net.minecraft.network.chat.Component.literal("Retained seller variant"));
+        var payload = java.util.List.of(new ItemStack(Items.IRON_INGOT, 2), namedIron);
+        var iron = new ItemCommodity(new ResourceLocation("minecraft", "iron_ingot"), Items.IRON_INGOT, BigDecimal.ONE);
+        var data = new com.nstut.economy.data.EconomyOrderData();
+        var manager = new OrderManager(); manager.setOrderData(data);
+        helper.assertTrue(!manager.restoreOrPreserveItemEscrow(seller, iron, payload, BigDecimal.ONE, level,
+                        "gametest rejected BUY recovery"), "Insufficient space must retain recovery escrow");
+        helper.assertTrue(vault.countItem(Items.IRON_INGOT) == 63,
+                "Failed atomic restoration must not partially insert items");
+        namedIron.setCount(7); // Recovery must own a defensive copy of the exact payload.
+        manager.saveAll();
+        helper.assertTrue(data.getOrders().size() == 1, "Recovery must be persisted as exactly one order");
+        var snapshot = data.getOrders().values().iterator().next();
+        helper.assertTrue(snapshot.identity.equals(seller) && snapshot.type.equals("SELL") && snapshot.quantity == 3,
+                "Recovery must belong to the original seller principal, actor and storage account");
+        helper.assertTrue(snapshot.reservedItems.size() == 2 && snapshot.reservedItems.get(0).getCount() == 2
+                        && snapshot.reservedItems.get(1).getCount() == 1
+                        && ItemStack.isSameItemSameTags(snapshot.reservedItems.get(1), namedIron),
+                "Recovery must preserve exact variants and counts independently of the caller");
+        helper.assertTrue(snapshot.addonMetadata.containsKey("economy:quarantine_reason"),
+                "Retained items must never become an executable SELL offer");
+        var reloaded = new OrderManager(); reloaded.loadFrom(data); reloaded.saveAll();
+        helper.assertTrue(data.getOrders().size() == 1 && data.getOrders().containsKey(snapshot.orderId),
+                "Quarantined seller escrow must survive manager reload and save");
+        helper.succeed();
+    }
+
+    @GameTest(template = "economy_gametest_empty", timeoutTicks = 40)
     public static void blacklistRoutesItemsAndFluidsWithoutChangingSelections(GameTestHelper helper) {
         var level = helper.getLevel(); var owner = UUID.randomUUID();
         BlockPos vp = new BlockPos(0, 1, 0), tp = new BlockPos(1, 1, 0);
