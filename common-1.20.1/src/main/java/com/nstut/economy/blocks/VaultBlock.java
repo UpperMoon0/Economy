@@ -106,6 +106,6 @@ public class VaultBlock extends DirectionalBlock implements EntityBlock {
     @Nullable
     @Override
     public BlockEntity newBlockEntity(@NotNull BlockPos pos, @NotNull BlockState state) {
-        return new VaultBlockEntity(pos, state);
+        return com.nstut.economy.platform.Services.PLATFORM.newVaultBlockEntity(pos, state);
     }
 }

@@ -35,7 +35,7 @@ public class EconomyConfig {
     private int maxPriceDigits = 18;
 
     // Storage settings
-    private boolean allowExternalAutomation = false;
+    private boolean allowExternalAutomation = true;
     private int tankCapacity = 128000;
 
     // Enabled by default; without an optional team provider only personal accounts are exposed.
@@ -97,7 +97,7 @@ public class EconomyConfig {
             try (var input = java.nio.file.Files.newInputStream(path)) { properties.load(input); }
         }
         String rawCapacity = properties.getProperty("tankCapacity", Integer.toString(tankCapacity)).trim();
-        String rawAutomation = properties.getProperty("allowExternalAutomation", Boolean.toString(allowExternalAutomation)).trim();
+        String rawAutomation = properties.getProperty("allowExternalAutomation", "true").trim();
         try { tankCapacity = Math.max(1000, Integer.parseInt(rawCapacity)); }
         catch (NumberFormatException invalid) { throw new IllegalArgumentException("tankCapacity must be an integer >= 1000"); }
         if (!rawAutomation.equalsIgnoreCase("true") && !rawAutomation.equalsIgnoreCase("false"))

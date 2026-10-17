@@ -41,4 +41,8 @@ public class ForgePlatformHelper implements IPlatformHelper {
     public TankBlockEntity newTankBlockEntity(BlockPos pos, BlockState state) {
         return new ForgeTankBlockEntity(pos, state);
     }
+    @Override
+    public com.nstut.economy.blocks.VaultBlockEntity newVaultBlockEntity(BlockPos pos, BlockState state) {
+        return new ForgeVaultBlockEntity(pos, state);
+    }
 }

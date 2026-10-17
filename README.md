@@ -74,6 +74,8 @@ Install the file matching both your Minecraft version and loader. A jar built fo
 - Renders its fluid on the Tank's front face using the fluid's true texture proportions.
 - Supports the same `BOTH`, `INPUT ONLY`, and `OUTPUT ONLY` market behavior as Vaults.
 - Storage modes govern market supply and delivery; direct inventory and fluid automation remains available independently.
+- Vaults expose item insertion/extraction and Tanks expose fluid filling/draining on every face through the loader's standard automation API, including compatible GregTech pipes and machine auto I/O. Vaults also support sided inventory automation such as hoppers.
+- External automation defaults to enabled for new storage configurations. Existing servers that have `allowExternalAutomation=false` in `config/economy-storage.properties` must change it to `true` and restart the server to enable pipe/machine access. An explicit `false` remains respected. Automation operates independently of player ownership checks; use server claims/protection to control who can place pipes next to storage.
 - Includes its block/item model, texture, recipe, loot table, mining tags, and creative-tab entry.
 
 #### Containers Tab
