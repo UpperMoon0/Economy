@@ -8,7 +8,7 @@ A modern multi-loader order-book economy for Minecraft, with physical item and f
 
 ## Dependency
 
-The client UI requires [OpenUI MC](https://github.com/UpperMoon0/OpenUI-MC) 0.0.12 or newer, which must be installed alongside Economy. Economy owns the market-specific screens and logic; reusable layout, widget, rendering, scrolling, and animation primitives live in OpenUI MC. Use the dependency version declared by the Economy jar or its release page.
+The client UI requires [OpenUI MC](https://github.com/UpperMoon0/OpenUI-MC) 0.0.13 or newer, which must be installed alongside Economy. Economy owns the market-specific screens and logic; reusable layout, widget, rendering, scrolling, and animation primitives live in OpenUI MC. Use the dependency version declared by the Economy jar or its release page.
 
 ## Supported targets
 

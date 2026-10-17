@@ -2523,6 +2523,8 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
             content.addChild(header);
         }
 
+        content.addChild(Ui.spacer().flex());
+
         HStack meta = new HStack().gap(4);
         meta.fillWidth();
         UIComponent locationText = Ui.text(Component.literal(location)).style(TextStyle.CAPTION).nowrap().ellipsis();
