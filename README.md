@@ -202,3 +202,10 @@ Each loader module writes its compiled JAR to its own `build/libs/` directory. T
 ## License
 
 Licensed under the [MIT License](LICENSE). Created by **NsTut**.
+
+### OpenUI on clients and dedicated servers
+
+OpenUI MC is required on clients only. Dedicated servers can run without it.
+On Fabric, the client requirement is checked before client initialization; missing or
+incompatible OpenUI versions produce an installation error before the UI loads.
+Forge and NeoForge declare the dependency with `side="CLIENT"`.
