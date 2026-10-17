@@ -67,8 +67,8 @@ class StorageRoutingPersistenceTest {
     @Test void modeChangesAndDiskRoundtripRetainRouting(MinecraftServer server) {
         var vault = new VaultBlockEntity(BlockPos.ZERO, BlockRegistries.VAULT.get().defaultBlockState());
         var tank = new TankBlockEntity(BlockPos.ZERO, BlockRegistries.TANK.get().defaultBlockState());
-        var items = StorageRoutingSettings.parse("minecraft:iron_ingot,minecraft:gold_ingot", 55);
-        var fluids = StorageRoutingSettings.parse("minecraft:water", -7);
+        var items = StorageRoutingSettings.parse("minecraft:iron_ingot,minecraft:gold_ingot", 55, true);
+        var fluids = StorageRoutingSettings.parse("minecraft:water", -7, true);
         vault.setRoutingSettings(items); tank.setRoutingSettings(fluids);
         for (int i = 0; i < 3; i++) { vault.cycleMode(); tank.cycleMode(); }
         var vaultTag = vault.getUpdateTag(server.registryAccess());
@@ -77,6 +77,11 @@ class StorageRoutingPersistenceTest {
         vault.loadAdditional(TagValueInput.create(ProblemReporter.DISCARDING, server.registryAccess(), vaultTag));
         tank.loadAdditional(TagValueInput.create(ProblemReporter.DISCARDING, server.registryAccess(), tankTag));
         assertEquals(items, vault.getRoutingSettings()); assertEquals(fluids, tank.getRoutingSettings());
+        vaultTag.remove("PurchaseFilterBlacklist"); tankTag.remove("PurchaseFilterBlacklist");
+        vault.loadAdditional(TagValueInput.create(ProblemReporter.DISCARDING, server.registryAccess(), vaultTag));
+        tank.loadAdditional(TagValueInput.create(ProblemReporter.DISCARDING, server.registryAccess(), tankTag));
+        assertEquals(items.withBlacklist(false), vault.getRoutingSettings());
+        assertEquals(fluids.withBlacklist(false), tank.getRoutingSettings());
         vault.loadAdditional(TagValueInput.create(ProblemReporter.DISCARDING, server.registryAccess(), new CompoundTag()));
         tank.loadAdditional(TagValueInput.create(ProblemReporter.DISCARDING, server.registryAccess(), new CompoundTag()));
         assertEquals(StorageRoutingSettings.DEFAULT, vault.getRoutingSettings());

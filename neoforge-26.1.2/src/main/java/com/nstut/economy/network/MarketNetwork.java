@@ -1857,16 +1857,20 @@ public class MarketNetwork {
         public final boolean tank;
         public final String filter;
         public final int priority;
+        public final boolean blacklist;
 
         public SetStorageRoutingPacket(String dimension, net.minecraft.core.BlockPos pos, boolean tank, String filter, int priority) {
-            this.dimension = dimension; this.pos = pos; this.tank = tank; this.filter = filter; this.priority = priority;
+            this(dimension, pos, tank, filter, priority, false);
+        }
+        public SetStorageRoutingPacket(String dimension, net.minecraft.core.BlockPos pos, boolean tank, String filter, int priority, boolean blacklist) {
+            this.dimension = dimension; this.pos = pos; this.tank = tank; this.filter = filter; this.priority = priority; this.blacklist = blacklist;
         }
         public static void encode(SetStorageRoutingPacket pkt, FriendlyByteBuf buf) {
             buf.writeUtf(pkt.dimension, 128); buf.writeBlockPos(pkt.pos); buf.writeBoolean(pkt.tank);
-            buf.writeUtf(pkt.filter, 4096); buf.writeInt(pkt.priority);
+            buf.writeUtf(pkt.filter, 4096); buf.writeInt(pkt.priority); buf.writeBoolean(pkt.blacklist);
         }
         public static SetStorageRoutingPacket decode(FriendlyByteBuf buf) {
-            return new SetStorageRoutingPacket(buf.readUtf(128), buf.readBlockPos(), buf.readBoolean(), buf.readUtf(4096), buf.readInt());
+            return new SetStorageRoutingPacket(buf.readUtf(128), buf.readBlockPos(), buf.readBoolean(), buf.readUtf(4096), buf.readInt(), buf.readBoolean());
         }
         public static void handle(SetStorageRoutingPacket pkt, Supplier<NetworkManager.PacketContext> ctx) {
             ctx.get().queue(() -> {
@@ -1890,7 +1894,7 @@ public class MarketNetwork {
                 }
                 com.nstut.economy.config.StorageRoutingSettings settings;
                 try {
-                    settings = com.nstut.economy.config.StorageRoutingSettings.parse(pkt.filter, pkt.priority);
+                    settings = com.nstut.economy.config.StorageRoutingSettings.parse(pkt.filter, pkt.priority, pkt.blacklist);
                     for (String id : settings.allowedIds()) {
                         var key = com.nstut.economy.compat.Compat.rl(id);
                         if (!(pkt.tank ? BuiltInRegistries.FLUID.containsKey(key) : BuiltInRegistries.ITEM.containsKey(key))

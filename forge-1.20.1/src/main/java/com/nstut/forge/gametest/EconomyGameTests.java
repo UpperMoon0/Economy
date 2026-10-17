@@ -127,6 +127,37 @@ public final class EconomyGameTests {
     }
 
     @GameTest(template = "economy_gametest_empty", timeoutTicks = 40)
+    public static void blacklistRoutesItemsAndFluidsWithoutChangingSelections(GameTestHelper helper) {
+        var level = helper.getLevel(); var owner = UUID.randomUUID();
+        BlockPos vp = new BlockPos(0, 1, 0), tp = new BlockPos(1, 1, 0);
+        helper.setBlock(vp, BlockRegistries.VAULT.get()); helper.setBlock(tp, BlockRegistries.TANK.get());
+        var vault = (VaultBlockEntity)level.getBlockEntity(helper.absolutePos(vp));
+        var tank = (TankBlockEntity)level.getBlockEntity(helper.absolutePos(tp));
+        vault.setOwner(owner); tank.setOwner(owner);
+        vault.setMode(VaultBlockEntity.VaultMode.OUTPUT); tank.setMode(TankBlockEntity.TankMode.OUTPUT);
+        var itemSettings = com.nstut.economy.config.StorageRoutingSettings.parse("minecraft:iron_ingot", 17, true);
+        var fluidSettings = com.nstut.economy.config.StorageRoutingSettings.parse("minecraft:water", 17, true);
+        vault.setRoutingSettings(itemSettings); tank.setRoutingSettings(fluidSettings);
+        var iron = java.util.List.of(new ItemStack(Items.IRON_INGOT, 3));
+        var gold = java.util.List.of(new ItemStack(Items.GOLD_INGOT, 3));
+        helper.assertTrue(VaultManager.countMaxAcceptableItems(level, owner, iron) == 0
+                && !VaultManager.insertItemStacksToVaults(level, owner, iron).isEmpty(), "Blacklisted item must reject simulation and delivery");
+        helper.assertTrue(VaultManager.insertItemStacksToVaults(level, owner, gold).isEmpty(), "Unlisted item must be accepted in blacklist mode");
+        var water = new EconomyFluidStack(Fluids.WATER, 100);
+        var lava = new EconomyFluidStack(Fluids.LAVA, 100);
+        helper.assertTrue(com.nstut.economy.blocks.TankManager.simulateInsertFluidToTanks(level, owner, water) == 0
+                && com.nstut.economy.blocks.TankManager.insertFluidToTanks(level, owner, water) == 0, "Blacklisted fluid must reject simulation and delivery");
+        helper.assertTrue(com.nstut.economy.blocks.TankManager.insertFluidToTanks(level, owner, lava) == 100, "Unlisted fluid must be accepted in blacklist mode");
+        tank.drain(100);
+        vault.setRoutingSettings(itemSettings.withBlacklist(false)); tank.setRoutingSettings(fluidSettings.withBlacklist(false));
+        helper.assertTrue(vault.getRoutingSettings().allowedIds().equals(itemSettings.allowedIds())
+                && tank.getRoutingSettings().allowedIds().equals(fluidSettings.allowedIds()), "Switching filter modes must preserve both lists");
+        helper.assertTrue(VaultManager.insertItemStacksToVaults(level, owner, iron).isEmpty()
+                && com.nstut.economy.blocks.TankManager.insertFluidToTanks(level, owner, water) == 100, "Same lists must accept listed resources after switching to whitelist");
+        helper.succeed();
+    }
+
+    @GameTest(template = "economy_gametest_empty", timeoutTicks = 40)
     public static void routingPersistsAndTiesAreDeterministic(GameTestHelper helper) {
         UUID owner = UUID.randomUUID();
         var level = helper.getLevel();
@@ -137,9 +168,9 @@ public final class EconomyGameTests {
         var tank = (TankBlockEntity) level.getBlockEntity(helper.absolutePos(t));
         second.setOwner(owner); first.setOwner(owner); tank.setOwner(owner);
         helper.assertTrue(VaultManager.getVaults(level, owner).get(0) == first, "Equal priorities must use coordinates, not registration order");
-        var routing = com.nstut.economy.config.StorageRoutingSettings.parse("minecraft:iron_ingot,minecraft:gold_ingot", 99);
+        var routing = com.nstut.economy.config.StorageRoutingSettings.parse("minecraft:iron_ingot,minecraft:gold_ingot", 99, true);
         first.setRoutingSettings(routing);
-        var fluidRouting = com.nstut.economy.config.StorageRoutingSettings.parse("minecraft:water", -8);
+        var fluidRouting = com.nstut.economy.config.StorageRoutingSettings.parse("minecraft:water", -8, true);
         tank.setRoutingSettings(fluidRouting);
         for (int i = 0; i < 3; i++) { first.cycleMode(); tank.cycleMode(); }
         var vaultTag = first.saveWithoutMetadata(); var tankTag = tank.saveWithoutMetadata();
@@ -149,7 +180,14 @@ public final class EconomyGameTests {
         helper.assertTrue(first.getRoutingSettings().equals(routing) && tank.getRoutingSettings().equals(fluidRouting),
                 "Filters and priority must survive all mode transitions and disk roundtrip");
         helper.assertTrue(first.getUpdateTag().getString("PurchaseFilter").equals(routing.filterText())
-                && tank.getUpdateTag().getInt("StoragePriority") == -8, "Client update tags must include routing settings");
+                && tank.getUpdateTag().getInt("StoragePriority") == -8
+                && first.getUpdateTag().getBoolean("PurchaseFilterBlacklist")
+                && tank.getUpdateTag().getBoolean("PurchaseFilterBlacklist"), "Client update tags must include routing settings");
+        vaultTag.remove("PurchaseFilterBlacklist"); tankTag.remove("PurchaseFilterBlacklist");
+        first.load(vaultTag); tank.load(tankTag);
+        helper.assertTrue(first.getRoutingSettings().equals(routing.withBlacklist(false))
+                && tank.getRoutingSettings().equals(fluidRouting.withBlacklist(false)),
+                "Older filter data without a mode must retain its list as a whitelist");
         first.load(new net.minecraft.nbt.CompoundTag()); tank.load(new net.minecraft.nbt.CompoundTag());
         helper.assertTrue(first.getRoutingSettings().equals(com.nstut.economy.config.StorageRoutingSettings.DEFAULT)
                 && tank.getRoutingSettings().equals(com.nstut.economy.config.StorageRoutingSettings.DEFAULT),

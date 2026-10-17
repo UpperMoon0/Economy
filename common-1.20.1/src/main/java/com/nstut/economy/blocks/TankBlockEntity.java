@@ -381,7 +381,7 @@ public class TankBlockEntity extends BlockEntity implements WorldlyContainer {
             }
         }
         routingSettings = com.nstut.economy.config.StorageRoutingSettings.parse(
-                tag.getString("PurchaseFilter"), tag.getInt("StoragePriority"));
+                tag.getString("PurchaseFilter"), tag.getInt("StoragePriority"), tag.getBoolean("PurchaseFilterBlacklist"));
         if (tag.contains("Mode")) {
             mode = TankMode.byId(tag.getInt("Mode"));
         }
@@ -415,6 +415,7 @@ public class TankBlockEntity extends BlockEntity implements WorldlyContainer {
         tag.putInt("Mode", getMode().id);
         tag.putString("PurchaseFilter", routingSettings.filterText());
         tag.putInt("StoragePriority", routingSettings.priority());
+        tag.putBoolean("PurchaseFilterBlacklist", routingSettings.blacklist());
     }
 
     @Override
@@ -434,6 +435,7 @@ public class TankBlockEntity extends BlockEntity implements WorldlyContainer {
         tag.putInt("Mode", getMode().id);
         tag.putString("PurchaseFilter", routingSettings.filterText());
         tag.putInt("StoragePriority", routingSettings.priority());
+        tag.putBoolean("PurchaseFilterBlacklist", routingSettings.blacklist());
         return tag;
     }
 

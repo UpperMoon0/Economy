@@ -33,6 +33,10 @@ public final class EconomyUiComponents {
         return new ConfigStateButton(label, action);
     }
 
+    public static com.nstut.openui.controls.Card storageRoutingCard(UIComponent content) {
+        return new com.nstut.openui.controls.Card(content);
+    }
+
     public static ButtonWidget routingButton(Component label, Runnable action) {
         return new ConfigStateButton(label, action, true);
     }

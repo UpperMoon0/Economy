@@ -265,7 +265,7 @@ public class VaultBlockEntity extends BlockEntity implements WorldlyContainer {
                 .map(v -> { try { return AccountKind.valueOf(v); } catch (RuntimeException ignored) { return AccountKind.PLAYER; } })
                 .orElse(AccountKind.PLAYER);
         routingSettings = com.nstut.economy.config.StorageRoutingSettings.parse(
-                input.getStringOr("PurchaseFilter", ""), input.getIntOr("StoragePriority", 0));
+                input.getStringOr("PurchaseFilter", ""), input.getIntOr("StoragePriority", 0), input.getBooleanOr("PurchaseFilterBlacklist", false));
         input.getInt("Mode").ifPresent(modeId -> mode = VaultMode.byId(modeId));
     }
 
@@ -280,6 +280,7 @@ public class VaultBlockEntity extends BlockEntity implements WorldlyContainer {
         output.putInt("Mode", getMode().id);
         output.putString("PurchaseFilter", routingSettings.filterText());
         output.putInt("StoragePriority", routingSettings.priority());
+        output.putBoolean("PurchaseFilterBlacklist", routingSettings.blacklist());
     }
 
     @Override

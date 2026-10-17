@@ -37,6 +37,19 @@ class StorageFilterPickerModelTest {
         assertEquals(-7, picker.settings(-7).priority());
         assertFalse(picker.toggle("missing:item"));
     }
+    @Test void searchingAndChangingModeKeepTheSelectedListIndependent() {
+        var saved = StorageRoutingSettings.parse("minecraft:iron_ingot", 5, true);
+        var picker = new StorageFilterPickerModel(catalog, saved);
+        picker.search("gold");
+        assertEquals(List.of(catalog.get(0)), picker.search(""));
+        var whitelist = picker.settings(5).withBlacklist(false);
+        assertEquals(saved.allowedIds(), whitelist.allowedIds());
+        assertTrue(whitelist.accepts("minecraft:iron_ingot"));
+        assertFalse(saved.accepts("minecraft:iron_ingot"));
+        assertTrue(picker.toggle("minecraft:gold_ingot"));
+        assertEquals(2, picker.search("").size());
+        assertEquals(1, saved.allowedIds().size());
+    }
     @Test void selectionLimitSearchCapAndUnavailableSavedEntriesStaySafe() {
         var entries = IntStream.range(0, 70).mapToObj(i -> new StorageFilterPickerModel.Entry("mod:item" + i, "Item " + i)).toList();
         var picker = new StorageFilterPickerModel(entries, StorageRoutingSettings.parse("missing:item", 0));

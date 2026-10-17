@@ -33,6 +33,20 @@ public final class EconomyUiComponents {
         return new ConfigStateButton(label, action);
     }
 
+    public static com.nstut.openui.controls.Card storageRoutingCard(UIComponent content) {
+        return new com.nstut.openui.controls.Card(content) {
+            @Override public void render(GuiGraphics g, Font font, int mx, int my, float pt) {
+                // Vanilla slots use Z=100 and their count text adds 200. OpenUI's
+                // modal starts at 300: raise its card above that equal-depth text,
+                // while keeping item icons below the next overlay plane (812).
+                g.pose().pushPose();
+                g.pose().translate(0, 0, 256);
+                try { super.render(g, font, mx, my, pt); }
+                finally { g.pose().popPose(); }
+            }
+        };
+    }
+
     public static ButtonWidget routingButton(Component label, Runnable action) {
         return new ConfigStateButton(label, action, true);
     }
