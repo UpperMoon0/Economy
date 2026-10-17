@@ -1,7 +1,6 @@
 package com.nstut.forge;
 
 import com.nstut.economy.blocks.VaultBlockEntity;
-import com.nstut.economy.config.EconomyConfig;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.level.block.state.BlockState;
@@ -29,7 +28,7 @@ public class ForgeVaultBlockEntity extends VaultBlockEntity {
     @Override
     public @NotNull <T> LazyOptional<T> getCapability(@NotNull Capability<T> cap, @Nullable Direction side) {
         if (cap == ForgeCapabilities.ITEM_HANDLER) {
-            return !isRemoved() && EconomyConfig.getInstance().isExternalAutomationAllowed()
+            return !isRemoved()
                     ? items.cast() : LazyOptional.empty();
         }
         return super.getCapability(cap, side);

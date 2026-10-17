@@ -1,7 +1,6 @@
 package com.nstut.forge;
 
 import com.nstut.economy.blocks.TankBlockEntity;
-import com.nstut.economy.config.EconomyConfig;
 import com.nstut.economy.trading.EconomyFluidStack;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -15,8 +14,7 @@ import org.jetbrains.annotations.Nullable;
 
 /**
  * Forge tank block entity that re-exposes the tank's contents through the
- * Forge fluid capability so pipes and other automation can interact when the
- * config allows external automation.
+ * Forge fluid capability so pipes and other automation can interact on every face.
  */
 public class ForgeTankBlockEntity extends TankBlockEntity {
 
@@ -86,9 +84,6 @@ public class ForgeTankBlockEntity extends TankBlockEntity {
     @Override
     public @NotNull <T> LazyOptional<T> getCapability(@NotNull Capability<T> cap, @Nullable Direction side) {
         if (cap == ForgeCapabilities.FLUID_HANDLER) {
-            if (!EconomyConfig.getInstance().isExternalAutomationAllowed()) {
-                return LazyOptional.empty();
-            }
             return fluidCapability.cast();
         }
         return super.getCapability(cap, side);
