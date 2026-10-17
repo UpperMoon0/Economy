@@ -90,6 +90,8 @@ public class VaultScreen extends EconomyUiContainerScreen<VaultMenu> {
         modeBtn = EconomyUiComponents.configStateButton(modeLabel(currentMode), this::cycleMode);
         modeBtn.tooltip(modeTooltipWithPermission(currentMode));
         header.addChild(modeBtn);
+        header.addChild(EconomyUiComponents.configStateButton(Component.translatable("ui.economy.routing.button"),
+                () -> showStorageRouting(menu.getVaultBlockEntity())));
         header.addChild(buildCompactThemeToggle());
 
         VStack root = new VStack().gap(1);

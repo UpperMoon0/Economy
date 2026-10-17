@@ -80,6 +80,11 @@ public final class VaultInventoryOps {
      * Mutates the given slot lists.
      */
     public static NonNullList<ItemStack> distribute(List<List<ItemStack>> inventories, List<ItemStack> incoming) {
+        return distribute(inventories, incoming, (index, stack) -> true);
+    }
+
+    public static NonNullList<ItemStack> distribute(List<List<ItemStack>> inventories, List<ItemStack> incoming,
+                                                    java.util.function.BiPredicate<Integer, ItemStack> accepts) {
         NonNullList<ItemStack> leftovers = NonNullList.create();
         boolean blocked = false;
         for (ItemStack stack : incoming) {
@@ -91,9 +96,9 @@ public final class VaultInventoryOps {
 
             NonNullList<ItemStack> remainder = NonNullList.create();
             remainder.add(stack.copy());
-            for (List<ItemStack> slots : inventories) {
+            for (int index = 0; index < inventories.size(); index++) {
                 if (remainder.isEmpty()) break;
-                remainder = insert(slots, remainder);
+                if (accepts.test(index, stack)) remainder = insert(inventories.get(index), remainder);
             }
             if (!remainder.isEmpty()) {
                 for (ItemStack rest : remainder) {

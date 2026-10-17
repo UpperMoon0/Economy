@@ -157,11 +157,11 @@ public final class BuiltinContainerStorageProvider implements IStorageProvider {
         if (commodity instanceof ItemCommodity) {
             NonNullList<ItemStack> stacks = decodeStacks(level, reservation);
             if (stacks == null || VaultInventoryOps.total(stacks) != reservation.amount()) return false;
-            if (!VaultManager.simulateInsertItemStacksToVaults(level, owner, stacks).isEmpty()) return false;
+            if (!VaultManager.restoreItemStacksToVaults(level, owner, stacks, true).isEmpty()) return false;
 
             var vaults = VaultManager.getVaults(level, owner);
             List<NonNullList<ItemStack>> snapshots = snapshotVaults(vaults);
-            NonNullList<ItemStack> leftover = VaultManager.insertItemStacksToVaults(level, owner, stacks);
+            NonNullList<ItemStack> leftover = VaultManager.restoreItemStacksToVaults(level, owner, stacks, false);
             if (leftover.isEmpty()) return true;
 
             restoreVaultSnapshots(vaults, snapshots);
@@ -172,13 +172,13 @@ public final class BuiltinContainerStorageProvider implements IStorageProvider {
 
         if (commodity instanceof FluidCommodity fluid) {
             EconomyFluidStack payload = new EconomyFluidStack(fluid.getFluid(), reservation.amount());
-            if (TankManager.simulateInsertFluidToTanks(level, owner, payload) < reservation.amount()) return false;
+            if (TankManager.simulateInsertFluidToTanks(level, owner, payload, false) < reservation.amount()) return false;
 
             var tanks = TankManager.getTanks(level, owner);
             List<EconomyFluidStack> snapshots = new ArrayList<>(tanks.size());
             for (var tank : tanks) snapshots.add(tank.getFluid().copy());
 
-            int inserted = TankManager.insertFluidToTanks(level, owner, payload);
+            int inserted = TankManager.restoreFluidToTanks(level, owner, payload);
             if (inserted == reservation.amount()) return true;
 
             restoreTankSnapshots(tanks, snapshots);

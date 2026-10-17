@@ -46,6 +46,105 @@ public final class EconomyGameTests {
     }
 
     @GameTest(template = "economy_gametest_empty", timeoutTicks = 40)
+    public static void purchaseRoutingFiltersAndPriority(GameTestHelper helper) {
+        UUID owner = UUID.randomUUID();
+        var level = helper.getLevel();
+        var vaults = new java.util.ArrayList<VaultBlockEntity>();
+        var tanks = new java.util.ArrayList<TankBlockEntity>();
+        for (int i = 0; i < 3; i++) {
+            BlockPos vp = new BlockPos(i, 1, 0), tp = new BlockPos(i, 1, 1);
+            helper.setBlock(vp, BlockRegistries.VAULT.get());
+            helper.setBlock(tp, BlockRegistries.TANK.get());
+            var v = (VaultBlockEntity) level.getBlockEntity(helper.absolutePos(vp));
+            var t = (TankBlockEntity) level.getBlockEntity(helper.absolutePos(tp));
+            v.setOwner(owner); t.setOwner(owner);
+            v.setMode(VaultBlockEntity.VaultMode.OUTPUT); t.setMode(TankBlockEntity.TankMode.OUTPUT);
+            vaults.add(v); tanks.add(t);
+        }
+        // Registered in the opposite order to priority. Highest rejects iron/water.
+        vaults.get(0).setRoutingSettings(com.nstut.economy.config.StorageRoutingSettings.parse("", -10));
+        vaults.get(1).setRoutingSettings(com.nstut.economy.config.StorageRoutingSettings.parse("minecraft:iron_ingot", 10));
+        vaults.get(2).setRoutingSettings(com.nstut.economy.config.StorageRoutingSettings.parse("minecraft:gold_ingot", 20));
+        for (int slot = 1; slot < 54; slot++) vaults.get(1).setItem(slot, new ItemStack(Items.COBBLESTONE, 64));
+        vaults.get(1).setItem(0, new ItemStack(Items.IRON_INGOT, 60));
+        var payload = java.util.List.of(new ItemStack(Items.IRON_INGOT, 12));
+        helper.assertTrue(VaultManager.simulateInsertItemStacksToVaults(level, owner, payload).isEmpty(), "Allowed overflow must fit");
+        helper.assertTrue(vaults.get(1).countItem(Items.IRON_INGOT) == 60 && vaults.get(0).isEmpty(), "Simulation must not mutate");
+        helper.assertTrue(VaultManager.insertItemStacksToVaults(level, owner, payload).isEmpty(), "Commit must match simulation");
+        helper.assertTrue(vaults.get(1).countItem(Items.IRON_INGOT) == 64 && vaults.get(0).countItem(Items.IRON_INGOT) == 8
+                && vaults.get(2).isEmpty(), "Priority and rejection must route exact item overflow");
+        helper.assertTrue(VaultManager.insertItemStacksToVaults(level, owner, java.util.List.of(new ItemStack(Items.GOLD_INGOT, 7))).isEmpty()
+                && vaults.get(2).countItem(Items.GOLD_INGOT) == 7, "Second allowed item must route to its dedicated vault");
+        for (var v : vaults) v.setMode(VaultBlockEntity.VaultMode.INPUT);
+        NonNullList<ItemStack> extracted = NonNullList.create();
+        helper.assertTrue(VaultManager.extractItemFromVaults(level, owner, Items.IRON_INGOT, 3, extracted)
+                && vaults.get(1).countItem(Items.IRON_INGOT) == 61 && vaults.get(0).countItem(Items.IRON_INGOT) == 8,
+                "Sales must extract from higher priority first");
+        helper.assertTrue(VaultManager.countMaxAcceptableItems(level, owner, payload) == 0, "Input-only must reject purchases");
+        for (int i = 0; i < 3; i++) {
+            tanks.get(i).setCapacity(1000);
+            tanks.get(i).setRoutingSettings(com.nstut.economy.config.StorageRoutingSettings.parse(
+                    i == 2 ? "minecraft:lava" : i == 1 ? "minecraft:water" : "", i * 10));
+        }
+        var water = new EconomyFluidStack(Fluids.WATER, 1500);
+        helper.assertTrue(com.nstut.economy.blocks.TankManager.countAvailableFluidSpaceInTanks(level, owner, Fluids.WATER) == 2000,
+                "Capacity must exclude filter-rejecting tanks");
+        helper.assertTrue(com.nstut.economy.blocks.TankManager.simulateInsertFluidToTanks(level, owner, water) == 1500
+                && tanks.get(1).getFluidAmount() == 0, "Fluid simulation must honor filters without mutation");
+        helper.assertTrue(com.nstut.economy.blocks.TankManager.insertFluidToTanks(level, owner, water) == 1500
+                && tanks.get(1).getFluidAmount() == 1000 && tanks.get(0).getFluidAmount() == 500 && tanks.get(2).getFluidAmount() == 0,
+                "Water must fill higher-priority allowed tank, then overflow");
+        for (var t : tanks) t.setMode(TankBlockEntity.TankMode.INPUT);
+        var drained = new java.util.ArrayList<EconomyFluidStack>();
+        helper.assertTrue(com.nstut.economy.blocks.TankManager.extractFluidFromTanks(level, owner, Fluids.WATER, 250, drained) == 250
+                && tanks.get(1).getFluidAmount() == 750 && tanks.get(0).getFluidAmount() == 500,
+                "Fluid sales must use higher priority first");
+        for (var v : vaults) v.setRoutingSettings(com.nstut.economy.config.StorageRoutingSettings.parse("minecraft:gold_ingot", 0));
+        for (var t : tanks) t.setRoutingSettings(com.nstut.economy.config.StorageRoutingSettings.parse("minecraft:lava", 0));
+        helper.assertTrue(VaultManager.restoreItemStacksToVaults(level, AccountRef.player(owner), payload, true).isEmpty()
+                && VaultManager.restoreItemStacksToVaults(level, AccountRef.player(owner), payload, false).isEmpty(),
+                "Owned item escrow must return despite input-only mode and rejecting purchase filter");
+        helper.assertTrue(com.nstut.economy.blocks.TankManager.simulateInsertFluidToTanks(level, AccountRef.player(owner),
+                new EconomyFluidStack(Fluids.WATER, 100), false) == 100
+                && com.nstut.economy.blocks.TankManager.restoreFluidToTanks(level, owner, new EconomyFluidStack(Fluids.WATER, 100)) == 100,
+                "Owned fluid escrow must return despite purchase restrictions");
+        // Do not leave deliberately undersized test tanks in the reusable GameTest save.
+        for (var t : tanks) t.setCapacity(com.nstut.economy.config.EconomyConfig.getInstance().getTankCapacity());
+        helper.succeed();
+    }
+
+    @GameTest(template = "economy_gametest_empty", timeoutTicks = 40)
+    public static void routingPersistsAndTiesAreDeterministic(GameTestHelper helper) {
+        UUID owner = UUID.randomUUID();
+        var level = helper.getLevel();
+        BlockPos a = new BlockPos(0, 1, 0), b = new BlockPos(1, 1, 0), t = new BlockPos(0, 1, 1);
+        helper.setBlock(a, BlockRegistries.VAULT.get()); helper.setBlock(b, BlockRegistries.VAULT.get()); helper.setBlock(t, BlockRegistries.TANK.get());
+        var first = (VaultBlockEntity) level.getBlockEntity(helper.absolutePos(a));
+        var second = (VaultBlockEntity) level.getBlockEntity(helper.absolutePos(b));
+        var tank = (TankBlockEntity) level.getBlockEntity(helper.absolutePos(t));
+        second.setOwner(owner); first.setOwner(owner); tank.setOwner(owner);
+        helper.assertTrue(VaultManager.getVaults(level, owner).get(0) == first, "Equal priorities must use coordinates, not registration order");
+        var routing = com.nstut.economy.config.StorageRoutingSettings.parse("minecraft:iron_ingot,minecraft:gold_ingot", 99);
+        first.setRoutingSettings(routing);
+        var fluidRouting = com.nstut.economy.config.StorageRoutingSettings.parse("minecraft:water", -8);
+        tank.setRoutingSettings(fluidRouting);
+        for (int i = 0; i < 3; i++) { first.cycleMode(); tank.cycleMode(); }
+        var vaultTag = first.saveWithoutMetadata(); var tankTag = tank.saveWithoutMetadata();
+        first.setRoutingSettings(com.nstut.economy.config.StorageRoutingSettings.DEFAULT);
+        tank.setRoutingSettings(com.nstut.economy.config.StorageRoutingSettings.DEFAULT);
+        first.load(vaultTag); tank.load(tankTag);
+        helper.assertTrue(first.getRoutingSettings().equals(routing) && tank.getRoutingSettings().equals(fluidRouting),
+                "Filters and priority must survive all mode transitions and disk roundtrip");
+        helper.assertTrue(first.getUpdateTag().getString("PurchaseFilter").equals(routing.filterText())
+                && tank.getUpdateTag().getInt("StoragePriority") == -8, "Client update tags must include routing settings");
+        first.load(new net.minecraft.nbt.CompoundTag()); tank.load(new net.minecraft.nbt.CompoundTag());
+        helper.assertTrue(first.getRoutingSettings().equals(com.nstut.economy.config.StorageRoutingSettings.DEFAULT)
+                && tank.getRoutingSettings().equals(com.nstut.economy.config.StorageRoutingSettings.DEFAULT),
+                "Legacy block data must keep unrestricted default routing");
+        helper.succeed();
+    }
+
+    @GameTest(template = "economy_gametest_empty", timeoutTicks = 40)
     public static void pipeAndMachineCapabilitiesTransferOnEveryFace(GameTestHelper helper) {
         BlockPos vaultPos = new BlockPos(0, 1, 0);
         BlockPos tankPos = new BlockPos(1, 1, 0);

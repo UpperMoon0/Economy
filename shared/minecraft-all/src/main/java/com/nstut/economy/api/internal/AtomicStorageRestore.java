@@ -36,14 +36,14 @@ public final class AtomicStorageRestore {
         if (itemPayload.isEmpty() && fluidPayload.isEmpty()) return true;
 
         if (!itemPayload.isEmpty()
-                && !VaultManager.simulateInsertItemStacksToVaults(level, owner, itemPayload).isEmpty()) {
+                && !VaultManager.restoreItemStacksToVaults(level, owner, itemPayload, true).isEmpty()) {
             return false;
         }
 
         int fluidTotal = fluidPayload.stream().mapToInt(EconomyFluidStack::getAmount).sum();
         if (fluidTotal > 0) {
             EconomyFluidStack merged = TankManager.mergeFluids(fluidPayload);
-            if (TankManager.simulateInsertFluidToTanks(level, owner, merged) < fluidTotal) return false;
+            if (TankManager.simulateInsertFluidToTanks(level, owner, merged, false) < fluidTotal) return false;
         }
 
         var vaults = itemPayload.isEmpty() ? List.<Container>of() : VaultManager.getVaults(level, owner);
@@ -58,7 +58,7 @@ public final class AtomicStorageRestore {
 
         return commitWithRollback(() -> {
             if (!itemPayload.isEmpty()
-                    && !VaultManager.insertItemStacksToVaults(level, owner, itemPayload).isEmpty()) {
+                    && !VaultManager.restoreItemStacksToVaults(level, owner, itemPayload, false).isEmpty()) {
                 return false;
             }
             if (fluidTotal > 0) {

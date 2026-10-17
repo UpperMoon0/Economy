@@ -53,6 +53,7 @@ public class VaultBlockEntity extends BlockEntity implements WorldlyContainer {
     private static final int SIZE = 54;
     private static final int[] AUTOMATION_SLOTS = java.util.stream.IntStream.range(0, SIZE).toArray();
     private NonNullList<ItemStack> items;
+    private com.nstut.economy.config.StorageRoutingSettings routingSettings = com.nstut.economy.config.StorageRoutingSettings.DEFAULT;
     private UUID owner;
     private AccountKind ownerKind = AccountKind.PLAYER;
     private VaultMode mode = VaultMode.BOTH;
@@ -60,6 +61,21 @@ public class VaultBlockEntity extends BlockEntity implements WorldlyContainer {
     public VaultBlockEntity(BlockPos pos, BlockState state) {
         super(BlockRegistries.VAULT_BE.get(), pos, state);
         this.items = NonNullList.withSize(SIZE, ItemStack.EMPTY);
+    }
+
+    public com.nstut.economy.config.StorageRoutingSettings getRoutingSettings() { return routingSettings; }
+
+    public void setRoutingSettings(com.nstut.economy.config.StorageRoutingSettings settings) {
+        routingSettings = java.util.Objects.requireNonNull(settings);
+        setChanged();
+        if (level != null && !level.isClientSide) {
+            level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 3);
+        }
+    }
+
+    public boolean acceptsMarketItem(ItemStack resource) {
+        return !resource.isEmpty() && routingSettings.accepts(
+                net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(resource.getItem()).toString());
     }
 
     public VaultMode getMode() { return mode != null ? mode : VaultMode.BOTH; }
@@ -246,6 +262,8 @@ public class VaultBlockEntity extends BlockEntity implements WorldlyContainer {
                 catch (RuntimeException ignored) { ownerKind = AccountKind.PLAYER; }
             }
         }
+        routingSettings = com.nstut.economy.config.StorageRoutingSettings.parse(
+                tag.getString("PurchaseFilter"), tag.getInt("StoragePriority"));
         if (tag.contains("Mode")) {
             mode = VaultMode.byId(tag.getInt("Mode"));
         }
@@ -260,6 +278,13 @@ public class VaultBlockEntity extends BlockEntity implements WorldlyContainer {
             tag.putString("OwnerKind", ownerKind.name());
         }
         tag.putInt("Mode", getMode().id);
+        tag.putString("PurchaseFilter", routingSettings.filterText());
+        tag.putInt("StoragePriority", routingSettings.priority());
+    }
+
+    @Override
+    public net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket getUpdatePacket() {
+        return net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket.create(this);
     }
 
     @Override
@@ -271,6 +296,8 @@ public class VaultBlockEntity extends BlockEntity implements WorldlyContainer {
             tag.putString("OwnerKind", ownerKind.name());
         }
         tag.putInt("Mode", getMode().id);
+        tag.putString("PurchaseFilter", routingSettings.filterText());
+        tag.putInt("StoragePriority", routingSettings.priority());
         return tag;
     }
 }

@@ -358,5 +358,14 @@
   "ui.economy.theme.light_label": "☀ Light",
   "ui.economy.theme.dark_label": "☾ Dark",
   "ui.economy.theme.light_compact": "☀",
-  "ui.economy.theme.dark_compact": "☾"
+  "ui.economy.theme.dark_compact": "☾",
+  "ui.economy.routing.button": "Routing",
+  "ui.economy.routing.title": "Purchase filters & priority",
+  "ui.economy.routing.help": "Bought goods only. Empty accepts all.\nSaved across mode changes.",
+  "ui.economy.routing.items": "Allowed items (IDs, comma separated)",
+  "ui.economy.routing.fluids": "Allowed fluids (IDs, comma separated)",
+  "ui.economy.routing.priority": "Priority: -9999 to 9999 (higher first)",
+  "ui.economy.routing.invalid": "Invalid IDs or priority. Check values.",
+  "ui.economy.routing.priority_help": "Used for purchase delivery and sell-order supply. Up to 32 filter IDs.",
+  "ui.economy.routing.saved": "Storage routing saved."
 }

@@ -59,7 +59,12 @@ public class TankManager {
         for(var r:records){Level target=resolveRecordLevel(level,r.dimension);
             if(target==null||!target.dimension().identifier().toString().equals(r.dimension))continue;
             if(target.getBlockEntity(r.pos) instanceof TankBlockEntity tank&&owner.equals(tank.getOwnerRef()))result.add(tank);
-        }return result;
+        }result.sort(Comparator.comparingInt((TankBlockEntity storage) -> storage.getRoutingSettings().priority()).reversed()
+                .thenComparing(storage -> storage.getLevel().dimension().identifier().toString())
+                .thenComparingInt(storage -> storage.getBlockPos().getX())
+                .thenComparingInt(storage -> storage.getBlockPos().getY())
+                .thenComparingInt(storage -> storage.getBlockPos().getZ()));
+        return result;
     }
     public static void reassignOwner(Level level,AccountRef from,AccountRef to){
         if(from==null||to==null||from.equals(to))return;
@@ -79,7 +84,7 @@ public class TankManager {
     public static int countFluidInTanks(Level level,AccountRef owner,Fluid fluid){int c=0;for(var t:getTanks(level,owner))if(t.getMode().canSupplyMarket()&&t.getFluid().getFluid()==fluid)c+=t.getFluidAmount();return c;}
     public static int countAvailableFluidSpaceInTanks(Level level,UUID owner,Fluid fluid){return countAvailableFluidSpaceInTanks(level,AccountRef.player(owner),fluid);}
     public static int countAvailableFluidSpaceInTanks(Level level,AccountRef owner,Fluid fluid){
-        EconomyFluidStack probe=new EconomyFluidStack(fluid,1);int s=0;for(var t:getTanks(level,owner)){if(!t.getMode().canReceiveMarket())continue;
+        EconomyFluidStack probe=new EconomyFluidStack(fluid,1);int s=0;for(var t:getTanks(level,owner)){if(!t.getMode().canReceiveMarket() || !t.acceptsMarketFluid(probe))continue;
             if(t.getFluid().isEmpty())s+=t.getCapacity();else if(t.getFluid().isFluidEqual(probe))s+=t.getCapacity()-t.getFluidAmount();}return s;
     }
     public static int extractFluidFromTanks(Level level,UUID owner,Fluid fluid,int amount,List<EconomyFluidStack> dest){return extractFluidFromTanks(level,AccountRef.player(owner),fluid,amount,dest);}
@@ -93,14 +98,17 @@ public class TankManager {
     public static int insertFluidToTanks(Level level,AccountRef owner,EconomyFluidStack stack){return insertFluidToTanks(level,owner,stack,true);}
     public static int simulateInsertFluidToTanks(Level level,UUID owner,EconomyFluidStack stack){return simulateInsertFluidToTanks(level,AccountRef.player(owner),stack);}
     public static int simulateInsertFluidToTanks(Level level,AccountRef owner,EconomyFluidStack stack){
+        return simulateInsertFluidToTanks(level, owner, stack, true);
+    }
+    public static int simulateInsertFluidToTanks(Level level,AccountRef owner,EconomyFluidStack stack,boolean purchase){
         if(stack==null||stack.isEmpty())return 0;int remaining=stack.getAmount();
-        for(var t:getTanks(level,owner)){if(remaining<=0)break;if(!t.getMode().canReceiveMarket())continue;var ins=stack.copy();ins.setAmount(remaining);remaining-=t.simulateFill(ins);}
+        for(var t:getTanks(level,owner)){if(remaining<=0)break;if(purchase&&(!t.getMode().canReceiveMarket() || !t.acceptsMarketFluid(stack)))continue;var ins=stack.copy();ins.setAmount(remaining);remaining-=t.simulateFill(ins);}
         return stack.getAmount()-remaining;
     }
     public static int restoreFluidToTanks(Level level,UUID owner,EconomyFluidStack stack){return restoreFluidToTanks(level,AccountRef.player(owner),stack);}
     public static int restoreFluidToTanks(Level level,AccountRef owner,EconomyFluidStack stack){return insertFluidToTanks(level,owner,stack,false);}
     private static int insertFluidToTanks(Level level,AccountRef owner,EconomyFluidStack stack,boolean requireOutput){
-        int remaining=stack.getAmount();for(var t:getTanks(level,owner)){if(remaining<=0)break;if(requireOutput&&!t.getMode().canReceiveMarket())continue;
+        int remaining=stack.getAmount();for(var t:getTanks(level,owner)){if(remaining<=0)break;if(requireOutput&&(!t.getMode().canReceiveMarket() || !t.acceptsMarketFluid(stack)))continue;
             if(!t.getFluid().isEmpty()&&!t.getFluid().isFluidEqual(stack))continue;var ins=stack.copy();ins.setAmount(remaining);remaining-=t.fill(ins);}
         return stack.getAmount()-remaining;
     }

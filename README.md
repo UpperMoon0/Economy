@@ -79,6 +79,14 @@ Install the file matching both your Minecraft version and loader. A jar built fo
 - Item and fluid logistics are always enabled on every face for both new and existing storage. There is no automation toggle; the old `allowExternalAutomation` setting is removed automatically. Compatibility uses the standard Forge capabilities, NeoForge capabilities/transfer API, Fabric Transfer API, and vanilla sided inventory interfaces, so logistics mods using those APIs can connect without a GregTech-specific adapter.
 - Includes its block/item model, texture, recipe, loot table, mining tags, and creative-tab entry.
 
+#### Purchase filters and usage priority
+
+- Open a Vault or Tank and choose **Routing**. Enter a comma-separated allowlist of item or fluid IDs, for example `minecraft:iron_ingot, minecraft:gold_ingot` or `minecraft:water`. Up to 32 IDs are supported; item filters accept all variants of each listed item. Clear the field to accept everything.
+- Purchase filters apply in `BOTH` and `OUTPUT ONLY` modes. In `INPUT ONLY`, the filter stays saved for later. Filters and priority survive mode changes and world reloads; existing containers default to unrestricted purchases and priority `0`.
+- Set priority from `-9999` to `9999`. Higher numbers are used first for both purchase delivery and sell-order supply. Full or incompatible receivers are skipped and goods overflow to the next eligible container. Equal priorities use dimension ID, then X/Y/Z coordinates in ascending order.
+- To keep a bought product in dedicated storage, allow it only in those receivers and remove it from other receivers' allowlists. An empty allowlist remains a catch-all fallback.
+- Settings require the storage owner's administration permission, including team administration. Filters affect market purchases; manual transfers and pipes retain their existing behavior. Cancellation/recovery returns already-owned escrow regardless of the current purchase filter or mode.
+
 #### Containers Tab
 
 - The former `Vaults` tab is now `Containers`.

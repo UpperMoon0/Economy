@@ -65,6 +65,7 @@ public class TankBlockEntity extends BlockEntity implements WorldlyContainer {
 
     private int capacity = EconomyConfig.getInstance().getTankCapacity();
     private EconomyFluidStack fluid = EconomyFluidStack.EMPTY;
+    private com.nstut.economy.config.StorageRoutingSettings routingSettings = com.nstut.economy.config.StorageRoutingSettings.DEFAULT;
     private UUID owner;
     private AccountKind ownerKind = AccountKind.PLAYER;
     private TankMode mode = TankMode.BOTH;
@@ -228,6 +229,21 @@ public class TankBlockEntity extends BlockEntity implements WorldlyContainer {
         serverLevel.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 3);
     }
 
+    public com.nstut.economy.config.StorageRoutingSettings getRoutingSettings() { return routingSettings; }
+
+    public void setRoutingSettings(com.nstut.economy.config.StorageRoutingSettings settings) {
+        routingSettings = java.util.Objects.requireNonNull(settings);
+        setChanged();
+        if (level != null && !level.isClientSide) {
+            level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 3);
+        }
+    }
+
+    public boolean acceptsMarketFluid(EconomyFluidStack resource) {
+        return !resource.isEmpty() && routingSettings.accepts(
+                net.minecraft.core.registries.BuiltInRegistries.FLUID.getKey(resource.getFluid()).toString());
+    }
+
     public TankMode getMode() {
         return mode != null ? mode : TankMode.BOTH;
     }
@@ -368,6 +384,8 @@ public class TankBlockEntity extends BlockEntity implements WorldlyContainer {
                 catch (RuntimeException ignored) { ownerKind = AccountKind.PLAYER; }
             }
         }
+        routingSettings = com.nstut.economy.config.StorageRoutingSettings.parse(
+                tag.getString("PurchaseFilter"), tag.getInt("StoragePriority"));
         if (tag.contains("Mode")) {
             mode = TankMode.byId(tag.getInt("Mode"));
         }
@@ -399,6 +417,8 @@ public class TankBlockEntity extends BlockEntity implements WorldlyContainer {
             tag.putString("OwnerKind", ownerKind.name());
         }
         tag.putInt("Mode", getMode().id);
+        tag.putString("PurchaseFilter", routingSettings.filterText());
+        tag.putInt("StoragePriority", routingSettings.priority());
     }
 
     @Override
@@ -416,6 +436,8 @@ public class TankBlockEntity extends BlockEntity implements WorldlyContainer {
             tag.putString("OwnerKind", ownerKind.name());
         }
         tag.putInt("Mode", getMode().id);
+        tag.putString("PurchaseFilter", routingSettings.filterText());
+        tag.putInt("StoragePriority", routingSettings.priority());
         return tag;
     }
 
