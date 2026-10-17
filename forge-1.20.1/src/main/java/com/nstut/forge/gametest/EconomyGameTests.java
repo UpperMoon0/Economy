@@ -46,6 +46,19 @@ public final class EconomyGameTests {
     }
 
     @GameTest(template = "economy_gametest_empty", timeoutTicks = 40)
+    public static void vaultCraftingRecipeLoadsAndProducesVault(GameTestHelper helper) {
+        var level = helper.getLevel();
+        var recipe = level.getRecipeManager().byKey(new ResourceLocation("economy", "vault"));
+        helper.assertTrue(recipe.isPresent(), "Vault recipe must exist in the real server recipe manager");
+        var loaded = recipe.orElseThrow();
+        helper.assertTrue(loaded.getResultItem(level.registryAccess()).is(BlockRegistries.VAULT.get().asItem()),
+                "Vault recipe must produce the registered Vault item");
+        helper.assertTrue(loaded.getIngredients().stream().anyMatch(ingredient -> ingredient.test(new ItemStack(Items.CHEST))),
+                "Default Vault recipe must include the documented vanilla chest ingredient");
+        helper.succeed();
+    }
+
+    @GameTest(template = "economy_gametest_empty", timeoutTicks = 40)
     public static void purchaseRoutingFiltersAndPriority(GameTestHelper helper) {
         UUID owner = UUID.randomUUID();
         var level = helper.getLevel();

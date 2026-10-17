@@ -81,7 +81,7 @@ Install the file matching both your Minecraft version and loader. A jar built fo
 
 #### Purchase filters and usage priority
 
-- Open a Vault or Tank and choose **Routing**. Enter a comma-separated allowlist of item or fluid IDs, for example `minecraft:iron_ingot, minecraft:gold_ingot` or `minecraft:water`. Up to 32 IDs are supported; item filters accept all variants of each listed item. Clear the field to accept everything.
+- Open a Vault or Tank and choose **Routing**. Search by item/fluid name or ID, then use **Add** or **Remove** on the icon rows. **Selected** returns to the allowlist. Up to 32 entries are supported; item filters accept all variants of each listed item. An empty list explicitly shows **Accepting all items/fluids**.
 - Purchase filters apply in `BOTH` and `OUTPUT ONLY` modes. In `INPUT ONLY`, the filter stays saved for later. Filters and priority survive mode changes and world reloads; existing containers default to unrestricted purchases and priority `0`.
 - Set priority from `-9999` to `9999`. Higher numbers are used first for both purchase delivery and sell-order supply. Full or incompatible receivers are skipped and goods overflow to the next eligible container. Equal priorities use dimension ID, then X/Y/Z coordinates in ascending order.
 - To keep a bought product in dedicated storage, allow it only in those receivers and remove it from other receivers' allowlists. An empty allowlist remains a catch-all fallback.

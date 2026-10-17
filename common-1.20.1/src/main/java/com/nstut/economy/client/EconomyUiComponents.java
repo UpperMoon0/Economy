@@ -33,6 +33,18 @@ public final class EconomyUiComponents {
         return new ConfigStateButton(label, action);
     }
 
+    public static ButtonWidget routingButton(Component label, Runnable action) {
+        return new ConfigStateButton(label, action, true);
+    }
+
+    public static void drawRoutingFilterIcon(GuiGraphics g, int x, int y, int color) {
+        g.fill(x, y, x + 9, y + 1, color);
+        g.fill(x + 1, y + 1, x + 8, y + 2, color);
+        g.fill(x + 2, y + 2, x + 7, y + 3, color);
+        g.fill(x + 3, y + 3, x + 6, y + 4, color);
+        g.fill(x + 4, y + 4, x + 5, y + 7, color);
+    }
+
     public static void drawConfigSwitchIcon(GuiGraphics g, int x, int y, int color) {
         g.fill(x, y + 1, x + 8, y + 2, color);
         g.fill(x + 6, y, x + 7, y + 3, color);
@@ -43,8 +55,11 @@ public final class EconomyUiComponents {
     }
 
     private static final class ConfigStateButton extends ButtonWidget {
-        ConfigStateButton(Component label, Runnable action) {
+        private final boolean filterIcon;
+        ConfigStateButton(Component label, Runnable action) { this(label, action, false); }
+        ConfigStateButton(Component label, Runnable action, boolean filterIcon) {
             super(label);
+            this.filterIcon = filterIcon;
             onPress(action);
             outline();
             small();
@@ -66,7 +81,8 @@ public final class EconomyUiComponents {
             boolean hovered = mx >= x && mx < x + width && my >= y && my < y + height;
             int color = !isEnabled() ? theme().colors().onSurfaceDisabled()
                     : hovered ? theme().colors().primary() : theme().colors().onSurfaceMuted();
-            drawConfigSwitchIcon(g, sx, sy, color);
+            if (filterIcon) drawRoutingFilterIcon(g, sx, sy, color);
+            else drawConfigSwitchIcon(g, sx, sy, color);
         }
     }
 
