@@ -126,6 +126,57 @@ public final class EconomyGameTests {
         helper.succeed();
     }
 
+    @GameTest(template = "economy_gametest_empty", timeoutTicks = 60)
+    public static void rejectedBuyVariantReturnsDespiteSellerPurchaseRestrictions(GameTestHelper helper) {
+        helper.assertTrue(EconomyApi.isReady(), "Economy API must be ready for BUY rollback coverage");
+        var level = helper.getLevel();
+        UUID seller = UUID.randomUUID(), buyer = UUID.randomUUID();
+        BlockPos sellerPos = new BlockPos(0, 1, 0), buyerPos = new BlockPos(1, 1, 0);
+        helper.setBlock(sellerPos, BlockRegistries.VAULT.get());
+        helper.setBlock(buyerPos, BlockRegistries.VAULT.get());
+        var sellerVault = (VaultBlockEntity) level.getBlockEntity(helper.absolutePos(sellerPos));
+        var buyerVault = (VaultBlockEntity) level.getBlockEntity(helper.absolutePos(buyerPos));
+        sellerVault.setOwner(seller); buyerVault.setOwner(buyer);
+        buyerVault.setMode(VaultBlockEntity.VaultMode.OUTPUT);
+        for (int slot = 1; slot < buyerVault.getContainerSize(); slot++)
+            buyerVault.setItem(slot, new ItemStack(Items.COBBLESTONE, 64));
+        buyerVault.setItem(0, new ItemStack(Items.IRON_INGOT, 63));
+        ItemStack namedIron = new ItemStack(Items.IRON_INGOT);
+        namedIron.setHoverName(net.minecraft.network.chat.Component.literal("Seller's named ingot"));
+        var iron = new ItemCommodity(new ResourceLocation("minecraft", "iron_ingot"), Items.IRON_INGOT, BigDecimal.ONE);
+        var sellerAccount = EconomyApi.accounts().getOrCreatePlayerAccount(seller);
+        var buyerAccount = EconomyApi.accounts().getOrCreatePlayerAccount(buyer);
+        buyerAccount.credit(new BigDecimal("100"), null);
+        BigDecimal sellerBefore = sellerAccount.getBalance(), buyerBefore = buyerAccount.getBalance();
+
+        for (boolean blacklist : new boolean[]{false, true}) {
+            for (var mode : new VaultBlockEntity.VaultMode[]{VaultBlockEntity.VaultMode.BOTH, VaultBlockEntity.VaultMode.INPUT}) {
+                sellerVault.setMode(mode);
+                sellerVault.setRoutingSettings(com.nstut.economy.config.StorageRoutingSettings.parse(
+                        blacklist ? "minecraft:iron_ingot" : "minecraft:gold_ingot", 0, blacklist));
+                sellerVault.setItem(0, namedIron.copy());
+                // An ITEM_ONLY BUY can preflight a plain stack but receive a non-stacking named variant.
+                helper.assertTrue(VaultManager.countMaxAcceptableItems(level, buyer,
+                        java.util.List.of(new ItemStack(Items.IRON_INGOT))) == 1, "Plain representative must pass preflight");
+                helper.assertTrue(VaultManager.countMaxAcceptableItems(level, buyer,
+                        java.util.List.of(namedIron)) == 0, "Actual named variant must be rejected");
+                Order buy = new Order(buyer, iron, 1, BigDecimal.ONE, IOrder.OrderType.BUY, null);
+                var result = buy.execute(seller, level);
+                helper.assertTrue(!result.success && result.quantityTransferred == 0 && buy.getQuantity() == 1,
+                        "Rejected variant must not fill the order");
+                helper.assertTrue(sellerVault.countItem(Items.IRON_INGOT) == 1
+                                && ItemStack.isSameItemSameTags(sellerVault.getItem(0), namedIron),
+                        "Rejected item must return losslessly despite seller filter and mode: " + blacklist + "/" + mode);
+                helper.assertTrue(buyerVault.countItem(Items.IRON_INGOT) == 63,
+                        "Rejected variant must not change buyer inventory");
+                helper.assertTrue(sellerAccount.getBalance().compareTo(sellerBefore) == 0
+                                && buyerAccount.getBalance().compareTo(buyerBefore) == 0,
+                        "Rejected delivery must refund both wallets exactly");
+            }
+        }
+        helper.succeed();
+    }
+
     @GameTest(template = "economy_gametest_empty", timeoutTicks = 40)
     public static void blacklistRoutesItemsAndFluidsWithoutChangingSelections(GameTestHelper helper) {
         var level = helper.getLevel(); var owner = UUID.randomUUID();
