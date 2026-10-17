@@ -2,22 +2,18 @@ package com.nstut.economy.blocks;
 
 import com.nstut.neoforge.NeoForgeTankStorage;
 import net.minecraft.core.BlockPos;
-import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.material.Fluids;
 import net.neoforged.neoforge.transfer.fluid.FluidResource;
 import net.neoforged.neoforge.transfer.transaction.Transaction;
 import net.neoforged.testframework.junit.EphemeralTestServerProvider;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import java.util.Set;
 import static org.junit.jupiter.api.Assertions.*;
 
 @ExtendWith(EphemeralTestServerProvider.class)
 class NeoForgeTankStorageTest {
-    @Test void transactionsCommitAbortAndShareStateAcrossLookups() {
-        var type = new BlockEntityType<TankBlockEntity>((pos, state) -> null, Set.of(Blocks.IRON_BLOCK));
-        var tank = new TankBlockEntity(type, BlockPos.ZERO, Blocks.IRON_BLOCK.defaultBlockState());
+    @Test void transactionsCommitAbortAndShareStateAcrossLookups(net.minecraft.server.MinecraftServer server) {
+        var tank = new TankBlockEntity(BlockPos.ZERO, BlockRegistries.TANK.get().defaultBlockState());
         var storage = NeoForgeTankStorage.get(tank);
         assertSame(storage, NeoForgeTankStorage.get(tank));
         var water = FluidResource.of(Fluids.WATER);
@@ -51,4 +47,5 @@ class NeoForgeTankStorageTest {
         assertTrue(storage.getResource(0).isEmpty());
     }
 }
+
 
