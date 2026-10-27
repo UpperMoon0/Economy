@@ -65,12 +65,20 @@ public final class EconomyGameTests {
         BlockPos unloaded = new BlockPos(30000000, 100, 30000000);
         helper.assertTrue(!level.hasChunkAt(unloaded), "Remote test chunk must start unloaded");
         VaultManager.register(owner, unloaded, dimension);
+        ItemStack namedGold = new ItemStack(Items.GOLD_INGOT);
+        namedGold.setHoverName(net.minecraft.network.chat.Component.literal("Unloaded named gold"));
+        String exactGold = ItemCommodity.exactFromItemStack(level.registryAccess(), namedGold, BigDecimal.ZERO).getId().toString();
         data.portfolioStores().update(owner,
                 com.nstut.economy.api.internal.BuiltinContainerStorageProvider.storeKey("vault", dimension, unloaded),
-                java.util.Map.of("minecraft:gold_ingot", 7L), 1);
+                java.util.Map.of(exactGold, 7L), 1);
         var snapshot = com.nstut.economy.api.internal.BuiltinContainerStorageProvider.portfolioSnapshot(level, owner);
-        helper.assertTrue(snapshot.holdings().equals(java.util.Map.of("minecraft:gold_ingot", 7L)),
+        helper.assertTrue(snapshot.holdings().equals(java.util.Map.of(exactGold, 7L)),
                 "Only the last-known unloaded mark must remain");
+        var rows = com.nstut.economy.network.MarketNetwork.portfolioHoldingRows(snapshot.holdings(),
+                java.util.Map.of(), java.util.List.of());
+        helper.assertTrue(rows.size() == 1 && rows.get(0).itemId.equals(exactGold) && rows.get(0).quantity == 7,
+                "The request's exact-variant row/label path must preserve unloaded holdings without storage lookup");
+        helper.assertTrue(!rows.get(0).displayName.isBlank(), "Untraded variants must have a safe registry fallback label");
         helper.assertTrue(VaultManager.getVaultRecords(owner).size() == 1
                         && com.nstut.economy.blocks.TankManager.getTankRecords(owner).isEmpty(),
                 "Loaded missing records must be pruned from manager indexes");

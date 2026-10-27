@@ -23,6 +23,29 @@ class MarketClientStoreTeamWalletTest {
     }
 
     @Test
+    void switchingBetweenSameNameTeamsClearsOldPortfolioByExactAccountIdentity() {
+        String first = com.nstut.economy.api.AccountRef.team(java.util.UUID.randomUUID()).toString();
+        String second = com.nstut.economy.api.AccountRef.team(java.util.UUID.randomUUID()).toString();
+        MarketClientStore.applySyncItemList(new MarketNetwork.SyncItemListPacket(
+                "2", 1, List.of(), "HYBRID", true, "Same name", "99", "OWNER",
+                true, true, true, "OFFICER", "OWNER", "TEAM", first));
+        MarketClientStore.applySyncPortfolio(new MarketNetwork.SyncPortfolioPacket(
+                List.of(new MarketNetwork.PortfolioPointData(1, "12", "2", "10")),
+                List.of(new MarketNetwork.AssetHoldingData("minecraft:iron_ingot", "Iron", 1, "10")),
+                "TEAM", "fresh", first));
+        assertEquals(first, MarketClientStore.marketAccount.get());
+        assertFalse(MarketClientStore.portfolioPoints.get().isEmpty());
+        MarketClientStore.applySyncItemList(new MarketNetwork.SyncItemListPacket(
+                "2", 1, List.of(), "HYBRID", true, "Same name", "99", "OWNER",
+                true, true, true, "OFFICER", "OWNER", "TEAM", second));
+        assertEquals(second, MarketClientStore.marketAccount.get());
+        assertEquals("TEAM", MarketClientStore.marketPrincipal.get());
+        assertTrue(MarketClientStore.portfolioPoints.get().isEmpty());
+        assertTrue(MarketClientStore.assetHoldings.get().isEmpty());
+        assertEquals("Unknown", MarketClientStore.portfolioValuationStatus.get());
+    }
+
+    @Test
     void portfolioReplyReflectsPermissionFallbackToPersonalWallet() {
         MarketClientStore.marketPrincipal.set("TEAM");
         MarketClientStore.applySyncPortfolio(new MarketNetwork.SyncPortfolioPacket(

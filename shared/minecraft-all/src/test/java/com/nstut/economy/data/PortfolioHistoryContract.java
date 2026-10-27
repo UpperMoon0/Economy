@@ -16,6 +16,121 @@ abstract class PortfolioHistoryContract {
     protected abstract EconomyAccountData roundTrip(EconomyAccountData data);
     protected abstract EconomyAccountData load(CompoundTag encoded);
 
+    @Test void incompleteKnownOnlyMarksNeverBecomeLegacyFallbackAfterRefreshOrRestart() {
+        UUID id = UUID.randomUUID();
+        for (AccountRef account : java.util.List.of(AccountRef.player(id), AccountRef.team(id))) {
+            EconomyAccountData data = new EconomyAccountData();
+            var history = data.getPortfolioHistory(account);
+            BigDecimal first = PortfolioValuation.markedAssets(new BigDecimal("20"), 1, history);
+            data.addPortfolioPoint(account, BigDecimal.ZERO, first, PortfolioValuation.legacyAssetFallback(1, history));
+            data = roundTrip(data);
+            history = data.getPortfolioHistory(account);
+            assertFalse(history.get(0).legacyAssetFallback);
+            BigDecimal changed = PortfolioValuation.markedAssets(new BigDecimal("30"), 1, history);
+            assertEquals(new BigDecimal("30"), changed, "unknown store must not freeze fresh known assets");
+            data.addPortfolioPoint(account, BigDecimal.ZERO, changed, PortfolioValuation.legacyAssetFallback(1, history));
+            data = roundTrip(data);
+            history = data.getPortfolioHistory(account);
+            assertEquals(new BigDecimal("30"), history.get(history.size() - 1).assets);
+            assertFalse(history.get(history.size() - 1).legacyAssetFallback);
+            assertEquals(new BigDecimal("35"), PortfolioValuation.markedAssets(new BigDecimal("35"), 1, history),
+                    "new claims/known changes must still count after restart");
+        }
+    }
+
+    @Test void legacyFallbackProvenanceSurvivesMutationAndRestartButClearsOnceObserved() {
+        UUID id = UUID.randomUUID();
+        for (AccountRef account : java.util.List.of(AccountRef.player(id), AccountRef.team(id))) {
+            EconomyAccountData data = legacyAssetHistory(account, new BigDecimal("100"));
+            assertTrue(data.getPortfolioHistory(account).get(0).legacyAssetFallback);
+            // A cash event must preserve the mark's provenance when no newer world observation is available.
+            data.recordMutation(account, mutation(UUID.randomUUID(), "0", "1", "1"));
+            data = roundTrip(data);
+            var history = data.getPortfolioHistory(account);
+            assertTrue(history.get(history.size() - 1).legacyAssetFallback);
+            assertEquals(new BigDecimal("100"), PortfolioValuation.markedAssets(new BigDecimal("20"), 1, history));
+            // Even an equal-valued complete observation must clear provenance rather than being deduplicated.
+            data.addPortfolioPoint(account, BigDecimal.ONE, new BigDecimal("100"),
+                    PortfolioValuation.legacyAssetFallback(0, history));
+            data = roundTrip(data);
+            history = data.getPortfolioHistory(account);
+            assertEquals(3, history.size());
+            assertFalse(history.get(history.size() - 1).legacyAssetFallback);
+            assertEquals(new BigDecimal("30"), PortfolioValuation.markedAssets(new BigDecimal("30"), 1, history),
+                    "an ancient legacy point must not resurrect after complete observation");
+            data.recordMutation(account, mutation(UUID.randomUUID(), "1", "2", "1"));
+            history = roundTrip(data).getPortfolioHistory(account);
+            assertFalse(history.get(history.size() - 1).legacyAssetFallback);
+        }
+    }
+
+    private EconomyAccountData legacyAssetHistory(AccountRef account, BigDecimal assets) {
+        CompoundTag root = new CompoundTag(), histories = new CompoundTag(), point = new CompoundTag();
+        ListTag points = new ListTag();
+        point.putLong("TS", 1L); point.putString("NW", assets.toPlainString());
+        point.putString("BAL", "0"); point.putString("ASS", assets.toPlainString());
+        points.add(point);
+        histories.put(account.kind() == com.nstut.economy.api.AccountKind.PLAYER
+                ? account.id().toString() : account.toString(), points);
+        root.put(account.kind() == com.nstut.economy.api.AccountKind.PLAYER
+                ? "PortfolioHistory" : "TypedPortfolioHistory", histories);
+        return load(root);
+    }
+
+    @Test void groupedCashEventsUseFinalCashAndAssetsWithoutPhantomIntermediateNetWorth() {
+        UUID id = UUID.randomUUID();
+        String reason = "Grouped settlement final valuation; per-operation cash delta. Order purchase";
+        for (AccountRef account : java.util.List.of(AccountRef.player(id), AccountRef.team(id))) {
+            EconomyAccountData data = new EconomyAccountData();
+            // The deferred callbacks see the final holdings after two at-mark purchases (10 and 5).
+            data.addPortfolioPoint(account, new BigDecimal("85"), new BigDecimal("15"));
+            data.setAccountBalance(account, new BigDecimal("85"));
+            data.recordMutation(account, new BalanceMutation(UUID.randomUUID(), 1L, "economy:trade", reason,
+                    new BigDecimal("100"), new BigDecimal("90"), BigDecimal.ZERO, new BigDecimal("-10"), true));
+            data.recordMutation(account, new BalanceMutation(UUID.randomUUID(), 2L, "economy:trade", reason,
+                    new BigDecimal("90"), new BigDecimal("85"), BigDecimal.ZERO, new BigDecimal("-5"), true));
+            var history = roundTrip(data).getPortfolioHistory(account);
+            assertEquals(3, history.size());
+            for (var point : history.subList(1, 3)) {
+                assertEquals(new BigDecimal("85"), point.balance);
+                assertEquals(new BigDecimal("15"), point.assets);
+                assertEquals(new BigDecimal("100"), point.netWorth,
+                        "final assets must never pair with reconstructed cash90 and fabricate NW105");
+                assertEquals(BigDecimal.ZERO, point.externalFlow);
+                assertTrue(point.reason.startsWith("Grouped settlement final valuation; per-operation cash delta."));
+            }
+            assertEquals(new BigDecimal("-10"), history.get(1).cashDelta);
+            assertEquals(new BigDecimal("-5"), history.get(2).cashDelta);
+            assertNotEquals(history.get(1).operationId, history.get(2).operationId);
+        }
+    }
+
+    @Test void groupedDeletedAccountMarksMissingFinalCashAsZero() {
+        UUID id = UUID.randomUUID();
+        String reason = "Grouped settlement final valuation; per-operation cash delta. Deleted account";
+        for (AccountRef account : java.util.List.of(AccountRef.player(id), AccountRef.team(id))) {
+            EconomyAccountData data = new EconomyAccountData();
+            data.addPortfolioPoint(account, BigDecimal.ZERO, new BigDecimal("15"));
+            // Deletion before the deferred flush intentionally leaves no saved cash entry.
+            assertFalse(data.getAccountBalances().containsKey(account));
+            data.recordMutation(account, new BalanceMutation(UUID.randomUUID(), 1L, "economy:trade", reason,
+                    new BigDecimal("100"), new BigDecimal("90"), BigDecimal.ZERO, new BigDecimal("-10"), true));
+            data.recordMutation(account, new BalanceMutation(UUID.randomUUID(), 2L, "economy:account_deleted", reason,
+                    new BigDecimal("90"), BigDecimal.ZERO, new BigDecimal("-90"), new BigDecimal("-90"), true));
+            var restored = roundTrip(data);
+            assertFalse(restored.getAccountBalances().containsKey(account));
+            var history = restored.getPortfolioHistory(account);
+            assertEquals(3, history.size());
+            for (var point : history.subList(1, 3)) {
+                assertEquals(BigDecimal.ZERO, point.balance);
+                assertEquals(new BigDecimal("15"), point.netWorth,
+                        "missing deleted balance must not use reconstructed positive cash");
+            }
+            assertEquals(new BigDecimal("-10"), history.get(1).cashDelta);
+            assertEquals(new BigDecimal("-90"), history.get(2).cashDelta);
+        }
+    }
+
     @Test void perStoreMarksSurviveAdapterSaveAboveNbtStringLimit() {
         AccountRef account = AccountRef.player(UUID.randomUUID());
         EconomyAccountData data = new EconomyAccountData();

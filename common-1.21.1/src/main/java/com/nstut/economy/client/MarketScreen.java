@@ -191,7 +191,8 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                                     formatMoney(new BigDecimal(p.cashDelta)),
                                     formatMoney(new BigDecimal(p.externalFlow))).getString()
                                     + (p.reason.isBlank() ? "" : "\n" + p.reason)
-                            : Component.translatable("ui.economy.portfolio.legacy").getString())));
+                            : Component.translatable("ui.economy.portfolio.legacy").getString()
+                                    + ("economy:rollup".equals(p.source) && !p.reason.isBlank() ? "\n" + p.reason : ""))));
         }
         return out;
     });

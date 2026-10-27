@@ -21,7 +21,7 @@ import java.util.UUID;
 public final class PortfolioValuation {
     private PortfolioValuation() {}
     private record Cached(long observed, Map<String, Long> stored, Map<String, Long> owned,
-                          BigDecimal assets, String status) { }
+                          BigDecimal assets, String status, boolean legacyAssetFallback) { }
     private static final Map<EconomyAccountData, Map<AccountRef, Cached>> CACHE =
             java.util.Collections.synchronizedMap(new java.util.WeakHashMap<>());
 
@@ -39,17 +39,30 @@ public final class PortfolioValuation {
         var stores = BuiltinContainerStorageProvider.portfolioSnapshot(level, account);
         String status = stores.status();
         List<EconomyAccountData.PortfolioPoint> history = data.getPortfolioHistory(account);
+        boolean legacyAssetFallback = legacyAssetFallback(stores.unknown(), history);
         value = markedAssets(value, stores.unknown(), history);
-        if (stores.unknown() > 0) status += history.isEmpty()
-                ? "; incomplete known-only total"
-                : "; stale previous total asset mark (unknown stores)";
-        Cached next = new Cached(now, stored, Map.copyOf(owned), value, status);
+        if (stores.unknown() > 0) status += legacyAssetFallback
+                ? "; stale previous total asset mark (unknown stores)"
+                : "; incomplete known-only total";
+        Cached next = new Cached(now, stored, Map.copyOf(owned), value, status, legacyAssetFallback);
         accounts.put(account, next);
         return next;
     }
 
     static BigDecimal markedAssets(BigDecimal known, int unknown, List<EconomyAccountData.PortfolioPoint> history) {
-        return unknown > 0 && !history.isEmpty() ? history.get(history.size() - 1).assets : known;
+        return legacyAssetFallback(unknown, history) ? history.get(history.size() - 1).assets : known;
+    }
+
+    static boolean legacyAssetFallback(int unknown, List<EconomyAccountData.PortfolioPoint> history) {
+        return unknown > 0 && !history.isEmpty() && history.get(history.size() - 1).legacyAssetFallback;
+    }
+
+    /** Value and provenance always describe the same cached observation. */
+    public record AssetMark(BigDecimal assets, boolean legacyAssetFallback) { }
+
+    public static AssetMark assetMark(ServerLevel level, AccountRef account) {
+        Cached current = snapshot(level, account);
+        return new AssetMark(current.assets, current.legacyAssetFallback);
     }
 
     public static Map<String, Long> holdings(ServerLevel level, AccountRef account) {

@@ -51,6 +51,8 @@ public final class MarketClientStore {
      * this state; Orders, New Order, Portfolio, Containers and Pay Player must all derive from this signal.
      */
     public static final Signal<String> marketPrincipal = Signals.of("PLAYER");
+    /** Exact server-selected typed identity; display names are not account identities. */
+    public static final Signal<String> marketAccount = Signals.of("");
 
     public static boolean isTeamPrincipal() {
         return "TEAM".equals(marketPrincipal.get());
@@ -71,7 +73,8 @@ public final class MarketClientStore {
 
     public static void applySyncItemList(MarketNetwork.SyncItemListPacket pkt) {
         Signals.batch(() -> {
-            if (!marketPrincipal.get().equals(pkt.marketPrincipal)
+            if ((!pkt.marketAccount.isEmpty() && !marketAccount.get().equals(pkt.marketAccount))
+                    || !marketPrincipal.get().equals(pkt.marketPrincipal)
                     || ("TEAM".equals(pkt.marketPrincipal) && !teamWallet.get().teamName().equals(pkt.teamName))) {
                 portfolioPoints.set(List.of());
                 portfolioValuationStatus.set("Unknown");
@@ -93,6 +96,7 @@ public final class MarketClientStore {
                             pkt.teamPayoutRole)
                     : TeamWalletState.hidden(pkt.teamMode, pkt.teamSpendRole, pkt.teamPayoutRole));
             marketPrincipal.set(pkt.marketPrincipal);
+            marketAccount.set(pkt.marketAccount);
             vaultCount.set(pkt.vaultCount);
         });
     }
@@ -113,6 +117,7 @@ public final class MarketClientStore {
         Signals.batch(() -> {
             // The server may have revoked team access since the last general market refresh.
             if (!pkt.marketPrincipal.isEmpty()) marketPrincipal.set(pkt.marketPrincipal);
+            if (!pkt.marketAccount.isEmpty()) marketAccount.set(pkt.marketAccount);
             portfolioPoints.set(List.copyOf(pkt.points));
             portfolioValuationStatus.set(pkt.valuationStatus);
             assetHoldings.set(List.copyOf(pkt.holdings));

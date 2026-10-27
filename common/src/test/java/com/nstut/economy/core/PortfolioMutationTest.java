@@ -35,6 +35,7 @@ class PortfolioMutationTest {
             assertTrue(f.account.debit(new BigDecimal("2.50"), TransactionContext.adminTake("take")));
             f.account.setBalance(new BigDecimal("25"));
             assertEquals(3, f.store.events.size());
+            assertTrue(f.store.events.stream().noneMatch(event -> event.mutation.groupedFinalMark()));
             assertEvent(f.store.events.get(0), f.ref, "0", "12.50", "12.50", "economy:admin_give");
             assertEvent(f.store.events.get(1), f.ref, "12.50", "10", "-2.50", "economy:admin_take");
             assertEvent(f.store.events.get(2), f.ref, "10", "25", "15", "economy:admin_set");
@@ -119,7 +120,7 @@ class PortfolioMutationTest {
         decimal("0", f.store.events.stream().map(e -> e.mutation.cashDelta()).reduce(BigDecimal.ZERO, BigDecimal::add));
     }
 
-    @Test void nestedTradeAggregatesPaymentAndPartialRefundIntoOneEventPerAccount() {
+    @Test void tradeAggregatesChildPaymentAndPartialRefundTransfersIntoOneEventPerAccount() {
         Fixture f = fixture(AccountKind.PLAYER);
         AccountRef seller = AccountRef.team(UUID.randomUUID());
         f.manager.getOrCreateAccount(seller);
@@ -128,9 +129,7 @@ class PortfolioMutationTest {
         PortfolioOperation operation = PortfolioOperation.trade("partial trade");
         try (operation) {
             assertTrue(f.manager.transfer(f.ref, seller, new BigDecimal("40"), tradeContext()));
-            try (var nested = PortfolioOperation.trade("delivery refund")) {
-                assertTrue(f.manager.transfer(seller, f.ref, new BigDecimal("15"), tradeContext()));
-            }
+            assertTrue(f.manager.transfer(seller, f.ref, new BigDecimal("15"), tradeContext()));
             assertTrue(f.store.events.isEmpty());
         }
         operation.close(); // callbacks/cleanup may close twice
@@ -227,12 +226,12 @@ class PortfolioMutationTest {
             assertTrue(f.manager.transfer(f.ref, seller, BigDecimal.TEN, tradeContext()));
         }
         assertEquals(5, f.store.events.size());
-        assertEquals("economy:admin_give", f.store.events.get(0).mutation.source());
-        decimal("10", f.store.events.get(0).mutation.externalFlow());
-        assertEvent(f.store.events.get(1), reward, "10", "9", "-1", "economy:transfer");
-        assertEvent(f.store.events.get(2), recipient, "0", "1", "1", "economy:transfer");
-        assertEvent(f.store.events.get(3), f.ref, "100", "90", "0", "economy:trade");
-        assertEvent(f.store.events.get(4), seller, "0", "10", "0", "economy:trade");
+        assertEvent(f.store.events.get(0), f.ref, "100", "90", "0", "economy:trade");
+        assertEvent(f.store.events.get(1), seller, "0", "10", "0", "economy:trade");
+        assertEquals("economy:admin_give", f.store.events.get(2).mutation.source());
+        decimal("10", f.store.events.get(2).mutation.externalFlow());
+        assertEvent(f.store.events.get(3), reward, "10", "9", "-1", "economy:transfer");
+        assertEvent(f.store.events.get(4), recipient, "0", "1", "1", "economy:transfer");
     }
 
     @Test void externalCreditBetweenTradePaymentAndRefundIsNotCountedTwice() {
@@ -247,12 +246,158 @@ class PortfolioMutationTest {
             assertTrue(f.manager.transfer(seller, f.ref, new BigDecimal("15"), tradeContext()));
         }
         assertEquals(3, f.store.events.size());
-        assertEvent(f.store.events.get(0), f.ref, "60", "65", "5", "economy:admin_give");
-        assertEvent(f.store.events.get(1), f.ref, "100", "80", "0", "economy:trade");
-        decimal("-25", f.store.events.get(1).mutation.cashDelta());
-        assertEvent(f.store.events.get(2), seller, "0", "25", "0", "economy:trade");
-        decimal("25", f.store.events.get(2).mutation.cashDelta());
+        assertEvent(f.store.events.get(0), f.ref, "100", "75", "0", "economy:trade");
+        decimal("-25", f.store.events.get(0).mutation.cashDelta());
+        assertEvent(f.store.events.get(1), seller, "0", "25", "0", "economy:trade");
+        decimal("25", f.store.events.get(1).mutation.cashDelta());
+        assertEvent(f.store.events.get(2), f.ref, "75", "80", "5", "economy:admin_give");
         decimal("80", f.account.getBalance());
+    }
+
+    @Test void nestedDistinctTradesKeepOperationIdentityAndHistoricalBalances() {
+        for (AccountKind kind : List.of(AccountKind.PLAYER, AccountKind.TEAM)) {
+            Fixture f = fixture(kind);
+            AccountRef seller = AccountRef.team(UUID.randomUUID());
+            f.manager.getOrCreateAccount(seller);
+            f.account.setBalance(new BigDecimal("100"));
+            f.store.events.clear();
+            try (var outer = PortfolioOperation.trade("Order outer")) {
+                assertTrue(f.manager.transfer(f.ref, seller, BigDecimal.TEN, tradeContext()));
+                try (var inner = PortfolioOperation.trade("Order inner")) {
+                    assertTrue(f.manager.transfer(f.ref, seller, new BigDecimal("5"), tradeContext()));
+                }
+                assertTrue(f.store.events.isEmpty(), "Provisional outer payments must not leak into history");
+            }
+            assertEquals(4, f.store.events.size());
+            assertEvent(f.store.events.get(0), f.ref, "100", "90", "0", "economy:trade");
+            assertEvent(f.store.events.get(1), seller, "0", "10", "0", "economy:trade");
+            assertEvent(f.store.events.get(2), f.ref, "90", "85", "0", "economy:trade");
+            assertEvent(f.store.events.get(3), seller, "10", "15", "0", "economy:trade");
+            assertTrue(f.store.events.stream().allMatch(event -> event.mutation.groupedFinalMark()));
+            assertTrue(f.store.events.get(0).mutation.reason().startsWith("Grouped settlement final valuation;"));
+            assertTrue(f.store.events.get(0).mutation.reason().endsWith("Order outer"));
+            assertTrue(f.store.events.get(2).mutation.reason().endsWith("Order inner"));
+            assertEquals(f.store.events.get(0).mutation.operationId(), f.store.events.get(1).mutation.operationId());
+            assertEquals(f.store.events.get(2).mutation.operationId(), f.store.events.get(3).mutation.operationId());
+            assertNotEquals(f.store.events.get(0).mutation.operationId(), f.store.events.get(2).mutation.operationId());
+            decimal("-10", f.store.events.get(0).mutation.cashDelta());
+            decimal("-5", f.store.events.get(2).mutation.cashDelta());
+            decimal("85", f.store.balances.get(f.ref));
+            decimal("15", f.store.balances.get(seller));
+        }
+    }
+
+    @Test void refundedOuterTradeDoesNotEraseCommittedInnerOrPersistProvisionalCash() {
+        Fixture f = fixture(AccountKind.PLAYER);
+        AccountRef seller = AccountRef.team(UUID.randomUUID());
+        f.manager.getOrCreateAccount(seller);
+        f.account.setBalance(new BigDecimal("100"));
+        f.store.events.clear();
+        try (var outer = PortfolioOperation.trade("Order refunded")) {
+            assertTrue(f.manager.transfer(f.ref, seller, new BigDecimal("40"), tradeContext()));
+            try (var inner = PortfolioOperation.trade("Order committed")) {
+                assertTrue(f.manager.transfer(f.ref, seller, new BigDecimal("5"), tradeContext()));
+            }
+            assertTrue(f.manager.transfer(seller, f.ref, new BigDecimal("40"), tradeContext()));
+        }
+        assertEquals(2, f.store.events.size());
+        assertEvent(f.store.events.get(0), f.ref, "100", "95", "0", "economy:trade");
+        assertEvent(f.store.events.get(1), seller, "0", "5", "0", "economy:trade");
+        assertEquals("Order committed", f.store.events.get(0).mutation.reason());
+        assertTrue(f.store.events.stream().noneMatch(event -> event.mutation.groupedFinalMark()));
+        decimal("-5", f.store.events.get(0).mutation.cashDelta());
+        decimal("5", f.store.events.get(1).mutation.cashDelta());
+        decimal("95", f.store.balances.get(f.ref));
+        decimal("5", f.store.balances.get(seller));
+    }
+
+    @Test void oppositeNestedTradesRetainBothOperationsEvenWhenCombinedCashIsZero() {
+        Fixture f = fixture(AccountKind.TEAM);
+        AccountRef other = AccountRef.player(UUID.randomUUID());
+        f.manager.getOrCreateAccount(other);
+        f.account.setBalance(new BigDecimal("100"));
+        f.store.events.clear();
+        try (var outer = PortfolioOperation.trade("Order outward")) {
+            assertTrue(f.manager.transfer(f.ref, other, BigDecimal.TEN, tradeContext()));
+            try (var inner = PortfolioOperation.trade("Order inward")) {
+                assertTrue(f.manager.transfer(other, f.ref, BigDecimal.TEN, tradeContext()));
+            }
+        }
+        assertEquals(4, f.store.events.size());
+        assertEvent(f.store.events.get(0), f.ref, "100", "90", "0", "economy:trade");
+        assertEvent(f.store.events.get(1), other, "0", "10", "0", "economy:trade");
+        assertEvent(f.store.events.get(2), other, "10", "0", "0", "economy:trade");
+        assertEvent(f.store.events.get(3), f.ref, "90", "100", "0", "economy:trade");
+        decimal("100", f.store.balances.get(f.ref));
+        decimal("0", f.store.balances.get(other));
+    }
+
+    @Test void externalGrantDuringRefundedAttemptIsJournaledWithoutProvisionalPayment() {
+        Fixture f = fixture(AccountKind.TEAM);
+        AccountRef other = AccountRef.player(UUID.randomUUID());
+        f.manager.getOrCreateAccount(other);
+        f.account.setBalance(new BigDecimal("100"));
+        f.store.events.clear();
+        try (var outer = PortfolioOperation.trade("Order refunded")) {
+            assertTrue(f.manager.transfer(f.ref, other, new BigDecimal("40"), tradeContext()));
+            assertTrue(f.account.credit(new BigDecimal("5"), TransactionContext.adminGive("Independent grant")));
+            assertTrue(f.manager.transfer(other, f.ref, new BigDecimal("40"), tradeContext()));
+        }
+        assertEquals(1, f.store.events.size());
+        assertEvent(f.store.events.get(0), f.ref, "100", "105", "5", "economy:admin_give");
+        decimal("5", f.store.events.get(0).mutation.cashDelta());
+        decimal("105", f.store.balances.get(f.ref));
+        decimal("0", f.store.balances.get(other));
+    }
+
+    @Test void deferredTradeSurvivesAccountDeletionWithoutResurrectingItsBalance() {
+        for (AccountKind kind : List.of(AccountKind.PLAYER, AccountKind.TEAM)) {
+            Fixture f = fixture(kind);
+            AccountRef seller = AccountRef.team(UUID.randomUUID());
+            f.manager.getOrCreateAccount(seller);
+            f.account.setBalance(new BigDecimal("100"));
+            f.store.events.clear();
+            try (var outer = PortfolioOperation.trade("Order before account deletion")) {
+                assertTrue(f.manager.transfer(f.ref, seller, BigDecimal.TEN, tradeContext()));
+                assertTrue(f.manager.deleteAccount(f.ref));
+                assertFalse(f.account.credit(BigDecimal.ONE, null));
+            }
+            assertEquals(3, f.store.events.size());
+            assertEvent(f.store.events.get(0), f.ref, "100", "90", "0", "economy:trade");
+            assertEvent(f.store.events.get(1), seller, "0", "10", "0", "economy:trade");
+            assertEvent(f.store.events.get(2), f.ref, "90", "0", "-90", "economy:account_deleted");
+            decimal("-10", f.store.events.get(0).mutation.cashDelta());
+            assertFalse(f.store.balances.containsKey(f.ref), "Deferred journal must not recreate a deleted balance");
+            assertTrue(f.manager.getAccount(f.ref).isEmpty());
+            decimal("10", f.store.balances.get(seller));
+        }
+    }
+
+    @Test void deferredOldHandleCannotOverwriteRecreatedTypedAccount() {
+        for (AccountKind kind : List.of(AccountKind.PLAYER, AccountKind.TEAM)) {
+            Fixture f = fixture(kind);
+            AccountRef seller = AccountRef.team(UUID.randomUUID());
+            f.manager.getOrCreateAccount(seller);
+            f.account.setBalance(new BigDecimal("100"));
+            f.store.events.clear();
+            IBankAccount replacement;
+            try (var outer = PortfolioOperation.trade("Order before recreation")) {
+                assertTrue(f.manager.transfer(f.ref, seller, BigDecimal.TEN, tradeContext()));
+                assertTrue(f.manager.deleteAccount(f.ref));
+                replacement = f.manager.getOrCreateAccount(f.ref);
+                assertTrue(replacement.credit(new BigDecimal("5"), TransactionContext.adminGive("New account grant")));
+            }
+            assertEquals(4, f.store.events.size());
+            assertEvent(f.store.events.get(0), f.ref, "100", "90", "0", "economy:trade");
+            assertEvent(f.store.events.get(2), f.ref, "90", "0", "-90", "economy:account_deleted");
+            assertEvent(f.store.events.get(3), f.ref, "0", "5", "5", "economy:admin_give");
+            assertTrue(f.store.events.stream().allMatch(event -> event.mutation.groupedFinalMark()));
+            assertSame(replacement, f.manager.getAccount(f.ref).orElseThrow());
+            assertFalse(f.account.credit(BigDecimal.ONE, null));
+            decimal("5", replacement.getBalance());
+            decimal("5", f.store.balances.get(f.ref));
+            decimal("10", f.store.balances.get(seller));
+        }
     }
 
     private static Fixture fixture(AccountKind kind) {
@@ -309,8 +454,7 @@ class PortfolioMutationTest {
         @Override public void removeBalance(UUID id) { balances.remove(AccountRef.player(id)); }
         @Override public void removeAccountBalance(AccountRef account) { balances.remove(account); }
         @Override public void recordMutation(AccountRef account, BalanceMutation mutation) {
-            // History is emitted after the final balance was persisted, including both transfer legs.
-            decimal(mutation.after().toPlainString(), balances.getOrDefault(account, BigDecimal.ZERO));
+            // Historical intermediate balances can differ from the actual persisted final balance.
             events.add(new Recorded(account, mutation));
         }
     }

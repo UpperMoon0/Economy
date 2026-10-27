@@ -13,6 +13,7 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 public abstract class PortfolioValuationCases {
     private static final EconomyId GOOD = EconomyId.parse("test:commodity");
@@ -115,6 +116,23 @@ public abstract class PortfolioValuationCases {
         assertEquals(new BigDecimal("100"), PortfolioValuation.markedAssets(BigDecimal.ZERO, 1, List.of(legacy)));
         assertEquals(new BigDecimal("20"), PortfolioValuation.markedAssets(new BigDecimal("20"), 0, List.of(legacy)));
         assertEquals(BigDecimal.ZERO, PortfolioValuation.markedAssets(BigDecimal.ZERO, 1, List.of()));
+    }
+
+    @Test
+    void onlyLatestExplicitLegacyProvenanceCanFreezeUnknownStoreValuation() {
+        var legacy = new EconomyAccountData.PortfolioPoint(1L, new BigDecimal("100"), BigDecimal.ZERO, new BigDecimal("100"));
+        var knownOnly = new EconomyAccountData.PortfolioPoint(2L, new BigDecimal("20"), BigDecimal.ZERO, new BigDecimal("20"),
+                "", "economy:valuation", "Incomplete known-only observation", BigDecimal.ZERO, BigDecimal.ZERO, true);
+        assertFalse(PortfolioValuation.legacyAssetFallback(1, List.of(knownOnly)));
+        assertEquals(new BigDecimal("30"), PortfolioValuation.markedAssets(new BigDecimal("30"), 1, List.of(knownOnly)));
+        assertFalse(PortfolioValuation.legacyAssetFallback(1, List.of(legacy, knownOnly)));
+        assertEquals(new BigDecimal("35"), PortfolioValuation.markedAssets(new BigDecimal("35"), 1, List.of(legacy, knownOnly)));
+        var propagated = new EconomyAccountData.PortfolioPoint(3L, new BigDecimal("101"), BigDecimal.ONE, new BigDecimal("100"),
+                "operation", "economy:credit", "Credit with stale legacy assets", BigDecimal.ONE, BigDecimal.ONE, true, true);
+        assertTrue(PortfolioValuation.legacyAssetFallback(1, List.of(legacy, propagated)));
+        assertEquals(new BigDecimal("100"), PortfolioValuation.markedAssets(new BigDecimal("30"), 1, List.of(propagated)));
+        assertFalse(PortfolioValuation.legacyAssetFallback(0, List.of(propagated)));
+        assertEquals(new BigDecimal("30"), PortfolioValuation.markedAssets(new BigDecimal("30"), 0, List.of(propagated)));
     }
 
     private void assertUnits(long expected, long available, List<EconomyOrderData.OrderSnapshot> orders) {

@@ -44,14 +44,24 @@ public class EconomyAccountData extends SavedData implements com.nstut.economy.c
         public final String operationId, source, reason;
         public final BigDecimal cashDelta, externalFlow;
         public final boolean attributed;
+        /** This mark preserves an unallocated legacy total while unloaded stores remain unknown. */
+        public final boolean legacyAssetFallback;
 
         public PortfolioPoint(long timestamp, BigDecimal netWorth, BigDecimal balance, BigDecimal assets) {
-            this(timestamp, netWorth, balance, assets, "", "legacy", "Legacy snapshot", BigDecimal.ZERO, BigDecimal.ZERO, false);
+            this(timestamp, netWorth, balance, assets, "", "legacy", "Legacy snapshot", BigDecimal.ZERO, BigDecimal.ZERO, false, true);
         }
 
         public PortfolioPoint(long timestamp, BigDecimal netWorth, BigDecimal balance, BigDecimal assets,
                               String operationId, String source, String reason, BigDecimal cashDelta,
                               BigDecimal externalFlow, boolean attributed) {
+            this(timestamp, netWorth, balance, assets, operationId, source, reason, cashDelta,
+                    externalFlow, attributed, false);
+        }
+
+        public PortfolioPoint(long timestamp, BigDecimal netWorth, BigDecimal balance, BigDecimal assets,
+                              String operationId, String source, String reason, BigDecimal cashDelta,
+                              BigDecimal externalFlow, boolean attributed, boolean legacyAssetFallback) {
+            this.legacyAssetFallback = legacyAssetFallback;
             this.timestamp = timestamp; this.netWorth = netWorth; this.balance = balance; this.assets = assets;
             this.operationId = operationId; this.source = source; this.reason = reason;
             this.cashDelta = cashDelta; this.externalFlow = externalFlow; this.attributed = attributed;
@@ -65,8 +75,13 @@ public class EconomyAccountData extends SavedData implements com.nstut.economy.c
         List<PortfolioPoint> current = getPortfolioHistory(account);
         if (current.stream().anyMatch(point -> point.operationId.equals(mutation.operationId().toString()))) return;
         BigDecimal assets = current.isEmpty() ? BigDecimal.ZERO : current.get(current.size() - 1).assets;
+        boolean legacyAssetFallback = !current.isEmpty() && current.get(current.size() - 1).legacyAssetFallback;
         if (portfolioLevel != null) {
-            try { assets = assetValue(account, portfolioLevel); }
+            try {
+                var mark = PortfolioValuation.assetMark(portfolioLevel, account);
+                assets = mark.assets();
+                legacyAssetFallback = mark.legacyAssetFallback();
+            }
             catch (RuntimeException failure) {
                 com.nstut.Economy.LOGGER.error("Portfolio valuation failed; retaining last asset mark for {}", account, failure);
             }
@@ -74,9 +89,13 @@ public class EconomyAccountData extends SavedData implements com.nstut.economy.c
         List<PortfolioPoint> list = account.kind() == AccountKind.PLAYER
                 ? portfolioHistory.computeIfAbsent(account.id(), key -> new ArrayList<>())
                 : typedPortfolioHistory.computeIfAbsent(account, key -> new ArrayList<>());
-        list.add(new PortfolioPoint(mutation.timestamp(), mutation.after().add(assets), mutation.after(), assets,
+        // Deferred independent operations share a final live asset observation. Pair it with
+        // the final saved cash balance; reconstructed intermediate cash would invent net worth.
+        BigDecimal observedBalance = mutation.groupedFinalMark()
+                ? getAccountBalances().getOrDefault(account, BigDecimal.ZERO) : mutation.after();
+        list.add(new PortfolioPoint(mutation.timestamp(), observedBalance.add(assets), observedBalance, assets,
                 mutation.operationId().toString(), mutation.source(), mutation.reason(), mutation.cashDelta(),
-                mutation.externalFlow(), true));
+                mutation.externalFlow(), true, legacyAssetFallback));
         compactPortfolio(list);
         setDirty();
     }
@@ -88,7 +107,7 @@ public class EconomyAccountData extends SavedData implements com.nstut.economy.c
             list.set(0, new PortfolioPoint(second.timestamp, second.netWorth, second.balance, second.assets,
                     "", "economy:rollup", "Earlier history aggregated; cash flows preserved",
                     first.cashDelta.add(second.cashDelta), first.externalFlow.add(second.externalFlow),
-                    first.attributed && second.attributed));
+                    first.attributed && second.attributed, second.legacyAssetFallback));
         }
     }
 
@@ -124,6 +143,10 @@ public class EconomyAccountData extends SavedData implements com.nstut.economy.c
     }
 
     public void addPortfolioPoint(AccountRef account, BigDecimal balance, BigDecimal assets) {
+        addPortfolioPoint(account, balance, assets, false);
+    }
+
+    public void addPortfolioPoint(AccountRef account, BigDecimal balance, BigDecimal assets, boolean legacyAssetFallback) {
         if (account == null) return;
         List<PortfolioPoint> list = account.kind() == AccountKind.PLAYER
                 ? portfolioHistory.computeIfAbsent(account.id(), k -> new ArrayList<>())
@@ -134,11 +157,11 @@ public class EconomyAccountData extends SavedData implements com.nstut.economy.c
             PortfolioPoint last = list.get(list.size() - 1);
             if (last.netWorth.compareTo(netWorth) == 0 &&
                 last.balance.compareTo(balance) == 0 &&
-                last.assets.compareTo(assets) == 0) {
+                last.assets.compareTo(assets) == 0 && last.legacyAssetFallback == legacyAssetFallback) {
                 return;
             }
         }
-        list.add(new PortfolioPoint(now, netWorth, balance, assets, "", "economy:valuation", "Valuation refresh", BigDecimal.ZERO, BigDecimal.ZERO, true));
+        list.add(new PortfolioPoint(now, netWorth, balance, assets, "", "economy:valuation", "Valuation refresh", BigDecimal.ZERO, BigDecimal.ZERO, true, legacyAssetFallback));
         compactPortfolio(list);
         setDirty();
     }
@@ -438,10 +461,12 @@ public class EconomyAccountData extends SavedData implements com.nstut.economy.c
     }
 
     private static PortfolioPoint readPortfolioPoint(CompoundTag tag, long ts, BigDecimal nw, BigDecimal bal, BigDecimal ass) {
-        if (!tag.contains("Operation")) return new PortfolioPoint(ts, nw, bal, ass);
+        if (!tag.contains("Operation")) return new PortfolioPoint(ts, nw, bal, ass, "", "legacy", "Legacy snapshot",
+                BigDecimal.ZERO, BigDecimal.ZERO, false,
+                !tag.contains("LegacyAssetFallback") || tag.getBoolean("LegacyAssetFallback"));
         return new PortfolioPoint(ts, nw, bal, ass, tag.getString("Operation"), tag.getString("Source"),
                 tag.getString("Reason"), new BigDecimal(tag.getString("CashDelta")),
-                new BigDecimal(tag.getString("ExternalFlow")), tag.getBoolean("Attributed"));
+                new BigDecimal(tag.getString("ExternalFlow")), tag.getBoolean("Attributed"), tag.getBoolean("LegacyAssetFallback"));
     }
 
     public static void recordSnapshot(UUID player, net.minecraft.server.level.ServerLevel level) {
@@ -454,9 +479,9 @@ public class EconomyAccountData extends SavedData implements com.nstut.economy.c
         EconomyAccountData accountData = get(level);
         BigDecimal balance = accountData.getAccountBalances().getOrDefault(account, BigDecimal.ZERO);
 
-        BigDecimal assetValue = assetValue(account, level);
+        var mark = PortfolioValuation.assetMark(level, account);
 
-        accountData.addPortfolioPoint(account, balance, assetValue);
+        accountData.addPortfolioPoint(account, balance, mark.assets(), mark.legacyAssetFallback());
     }
 
     static String portfolioCommodityId(net.minecraft.core.HolderLookup.Provider registries,
@@ -564,6 +589,7 @@ public class EconomyAccountData extends SavedData implements com.nstut.economy.c
                 ptTag.putString("NW", pt.netWorth.toPlainString());
                 ptTag.putString("BAL", pt.balance.toPlainString());
                 ptTag.putString("ASS", pt.assets.toPlainString());
+                ptTag.putBoolean("LegacyAssetFallback", pt.legacyAssetFallback);
                 if (pt.attributed || pt.source.equals("economy:rollup")) {
                     ptTag.putString("Operation", pt.operationId);
                     ptTag.putBoolean("Attributed", pt.attributed);
@@ -588,6 +614,7 @@ public class EconomyAccountData extends SavedData implements com.nstut.economy.c
                 ptTag.putString("NW", pt.netWorth.toPlainString());
                 ptTag.putString("BAL", pt.balance.toPlainString());
                 ptTag.putString("ASS", pt.assets.toPlainString());
+                ptTag.putBoolean("LegacyAssetFallback", pt.legacyAssetFallback);
                 if (pt.attributed || pt.source.equals("economy:rollup")) {
                     ptTag.putString("Operation", pt.operationId);
                     ptTag.putBoolean("Attributed", pt.attributed);

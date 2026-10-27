@@ -37,9 +37,9 @@ public class AccountManager implements IAccountManager {
         handle[0] = new BankAccount(owner, initialBalance, bal -> {
             if (accounts.get(owner) == handle[0]) persistBalance(owner, bal);
         });
-        handle[0].setMutationSink(mutation -> {
-            if (accounts.get(owner) == handle[0]) recordMutation(owner, mutation);
-        });
+        // Public mutations on retired handles are rejected before this hook. Already
+        // committed deferred operations must survive deletion/recreation before delivery.
+        handle[0].setMutationSink(mutation -> recordMutation(owner, mutation));
         return handle[0];
     }
 
@@ -55,12 +55,11 @@ public class AccountManager implements IAccountManager {
     private void recordMutation(AccountRef owner, BalanceMutation mutation) {
         BalanceStore data = backingData;
         if (data != null) {
-            BigDecimal actual = getAccount(owner).map(IBankAccount::getBalance).orElse(mutation.after());
-            BalanceMutation finalMutation = new BalanceMutation(mutation.operationId(), mutation.timestamp(),
-                    mutation.source(), mutation.reason(), mutation.before(), actual,
-                    mutation.externalFlow(), mutation.cashDelta());
-            persistBalance(owner, actual);
-            data.recordMutation(owner, finalMutation);
+            // Persist only a live handle's actual balance, never resurrect a deleted account
+            // from a deferred historical after-value. New handles with the same typed identity
+            // retain their own final balance while the old operation remains in the journal.
+            getAccount(owner).ifPresent(account -> persistBalance(owner, account.getBalance()));
+            data.recordMutation(owner, mutation);
         }
     }
 
