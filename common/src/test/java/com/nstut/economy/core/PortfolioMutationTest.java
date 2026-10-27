@@ -350,6 +350,41 @@ class PortfolioMutationTest {
         decimal("0", f.store.balances.get(other));
     }
 
+    @Test void nestedIndependentTransfersKeepFreshIdsWhenCallerReusesContext() {
+        Fixture f = fixture(AccountKind.PLAYER);
+        AccountRef target = AccountRef.team(UUID.randomUUID());
+        AccountRef otherSource = AccountRef.team(UUID.randomUUID());
+        AccountRef otherTarget = AccountRef.player(UUID.randomUUID());
+        f.manager.getOrCreateAccount(target);
+        BankAccount other = (BankAccount) f.manager.getOrCreateAccount(otherSource);
+        f.manager.getOrCreateAccount(otherTarget);
+        f.account.setBalance(new BigDecimal("100"));
+        other.setBalance(new BigDecimal("100"));
+        f.store.events.clear();
+        var reusedContext = TransactionContext.transfer("Reusable caller context", f.ref.id());
+        try (var listener = EconomyEvents.listen(EconomyEvents.TransferPre.class, event -> {
+            if (event.sourceRef().equals(f.ref)) {
+                assertTrue(f.manager.transfer(otherSource, otherTarget, new BigDecimal("20"), reusedContext));
+            }
+        })) {
+            assertTrue(f.manager.transfer(f.ref, target, BigDecimal.TEN, reusedContext));
+        }
+        assertEquals(4, f.store.events.size());
+        assertEvent(f.store.events.get(0), f.ref, "100", "90", "-10", "economy:transfer");
+        assertEvent(f.store.events.get(1), target, "0", "10", "10", "economy:transfer");
+        assertEvent(f.store.events.get(2), otherSource, "100", "80", "-20", "economy:transfer");
+        assertEvent(f.store.events.get(3), otherTarget, "0", "20", "20", "economy:transfer");
+        assertEquals(f.store.events.get(0).mutation.operationId(), f.store.events.get(1).mutation.operationId());
+        assertEquals(f.store.events.get(2).mutation.operationId(), f.store.events.get(3).mutation.operationId());
+        assertNotEquals(f.store.events.get(0).mutation.operationId(), f.store.events.get(2).mutation.operationId(),
+                "A reusable caller transaction ID must not merge independent committed transfers");
+        decimal("0", f.store.events.stream().map(event -> event.mutation.externalFlow()).reduce(BigDecimal.ZERO, BigDecimal::add));
+        decimal("90", f.store.balances.get(f.ref));
+        decimal("10", f.store.balances.get(target));
+        decimal("80", f.store.balances.get(otherSource));
+        decimal("20", f.store.balances.get(otherTarget));
+    }
+
     @Test void deferredTradeSurvivesAccountDeletionWithoutResurrectingItsBalance() {
         for (AccountKind kind : List.of(AccountKind.PLAYER, AccountKind.TEAM)) {
             Fixture f = fixture(kind);

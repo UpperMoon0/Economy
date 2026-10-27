@@ -93,8 +93,7 @@ public final class PortfolioOperation implements AutoCloseable {
             Pending value = entry.getValue();
             // Transfer/refund children belong to their enclosing order. A different nested
             // order has its own trade scope and must retain its own operation identity.
-            if (parent != null && contextId != null && ((parent.contextId == null && parent.source.equals(source))
-                    || contextId.equals(parent.contextId))) {
+            if (parent != null && contextId != null && parent.contextId == null && parent.source.equals(source)) {
                 Pending earlier = parent.pending.get(entry.getKey());
                 parent.pending.put(entry.getKey(), new Pending(earlier == null ? value.before : earlier.before,
                         value.after, (earlier == null ? BigDecimal.ZERO : earlier.delta).add(value.delta), value.sink));
