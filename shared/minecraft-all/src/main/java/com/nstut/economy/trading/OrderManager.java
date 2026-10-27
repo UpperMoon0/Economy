@@ -31,6 +31,10 @@ public class OrderManager implements IOrderManager {
     private final Map<UUID, Order> orders;
     private final Map<CommodityKey, List<Order>> commodityIndex;
     private final Map<UUID, EconomyOrderData.OrderSnapshot> quarantinedOrders;
+    // Visible only to valuation, never to order matching or management APIs.
+    private final Map<UUID, Order> incomingPortfolioOrders = new ConcurrentHashMap<>();
+    private final Map<AccountRef, Set<UUID>> portfolioAccountIndex = new HashMap<>();
+    private final Map<UUID, Set<AccountRef>> portfolioOrderAccounts = new HashMap<>();
     private EconomyOrderData backingData;
 
     public OrderManager() {
@@ -39,11 +43,79 @@ public class OrderManager implements IOrderManager {
         this.quarantinedOrders = new ConcurrentHashMap<>();
     }
 
-    public void setOrderData(EconomyOrderData data) { this.backingData = data; }
+    public void setOrderData(EconomyOrderData data) {
+        this.backingData = data;
+        portfolioAccountIndex.clear(); portfolioOrderAccounts.clear();
+        if (data != null) data.getOrders().values().forEach(this::indexPortfolioOrder);
+        quarantinedOrders.values().forEach(this::indexPortfolioOrder);
+        orders.values().forEach(this::indexPortfolioOrder);
+        incomingPortfolioOrders.values().forEach(this::indexPortfolioOrder);
+    }
+
+    /** Serialize only this typed owner's live orders; unrelated order books are never visited. */
+    public List<EconomyOrderData.OrderSnapshot> getPortfolioOrders(AccountRef account) {
+        List<EconomyOrderData.OrderSnapshot> result = new ArrayList<>();
+        for (UUID id : Set.copyOf(portfolioAccountIndex.getOrDefault(account, Set.of()))) {
+            Order live = incomingPortfolioOrders.get(id);
+            if (live == null) live = orders.get(id);
+            EconomyOrderData.OrderSnapshot snapshot = live == null ? quarantinedOrders.get(id) : live.toSnapshot();
+            if (snapshot == null && backingData != null) snapshot = backingData.getOrders().get(id);
+            if (snapshot != null) result.add(snapshot);
+        }
+        return List.copyOf(result);
+    }
+
+    private void indexPortfolioOrder(Order order) {
+        indexPortfolioOrder(order.getOrderId(), order.getIdentity(), order.getAddonMetadata());
+    }
+    private void indexPortfolioOrder(EconomyOrderData.OrderSnapshot snapshot) {
+        indexPortfolioOrder(snapshot.orderId, snapshot.identity, snapshot.addonMetadata);
+    }
+    private void indexPortfolioOrder(UUID id, MarketIdentity identity, Map<String, String> metadata) {
+        removePortfolioIndex(id);
+        Set<AccountRef> accounts = new HashSet<>();
+        accounts.add(identity.principal()); accounts.add(identity.storageAccount());
+        for (String key : List.of("recovery_storage_account", "economy:compensation_debtor", "economy:compensation_creditor")) {
+            String encoded = metadata.get(key);
+            if (encoded != null) try {
+                accounts.add(encoded.indexOf(':') < 0 ? AccountRef.player(UUID.fromString(encoded)) : AccountRef.parse(encoded));
+            } catch (IllegalArgumentException ignored) { }
+        }
+        portfolioOrderAccounts.put(id, Set.copyOf(accounts));
+        for (AccountRef account : accounts) portfolioAccountIndex.computeIfAbsent(account, ignored -> new HashSet<>()).add(id);
+    }
+    private void removePortfolioIndex(UUID id) {
+        for (AccountRef account : portfolioOrderAccounts.getOrDefault(id, Set.of())) {
+            Set<UUID> ids = portfolioAccountIndex.get(account);
+            if (ids != null && ids.remove(id) && ids.isEmpty()) portfolioAccountIndex.remove(account);
+        }
+        portfolioOrderAccounts.remove(id);
+    }
+    private void refreshPortfolioIndex(UUID id) {
+        Order live = incomingPortfolioOrders.get(id);
+        if (live == null) live = orders.get(id);
+        if (live != null) { indexPortfolioOrder(live); return; }
+        EconomyOrderData.OrderSnapshot snapshot = quarantinedOrders.get(id);
+        if (snapshot == null && backingData != null) snapshot = backingData.getOrders().get(id);
+        if (snapshot != null) indexPortfolioOrder(snapshot); else removePortfolioIndex(id);
+    }
+
+    /** Valuation view, including expired and recovery escrow until it is actually returned. */
+    public List<EconomyOrderData.OrderSnapshot> getPortfolioOrders() {
+        Map<UUID, EconomyOrderData.OrderSnapshot> snapshots = new HashMap<>();
+        if (backingData != null) snapshots.putAll(backingData.getOrders());
+        snapshots.putAll(quarantinedOrders);
+        // Live state wins over a stale persisted/quarantined copy of the same order.
+        orders.forEach((id, order) -> snapshots.put(id, order.toSnapshot()));
+        incomingPortfolioOrders.forEach((id, order) -> snapshots.put(id, order.toSnapshot()));
+        return List.copyOf(snapshots.values());
+    }
 
     public void loadFrom(EconomyOrderData data) {
         orders.clear(); commodityIndex.clear(); quarantinedOrders.clear(); this.backingData = data;
+        incomingPortfolioOrders.clear(); portfolioAccountIndex.clear(); portfolioOrderAccounts.clear();
         for (EconomyOrderData.OrderSnapshot snap : data.getOrders().values()) {
+            indexPortfolioOrder(snap);
             try {
                 Order order = Order.fromSnapshot(snap);
                 if (order.isValid()) {
@@ -73,6 +145,7 @@ public class OrderManager implements IOrderManager {
 
     private void quarantineOrder(EconomyOrderData.OrderSnapshot snap, String reason, boolean preserveWithoutRecoveryState) {
         if (snap == null || (!preserveWithoutRecoveryState && !hasRecoveryState(snap))) return;
+        indexPortfolioOrder(snap);
         if (quarantinedOrders.put(snap.orderId, snap) == null) {
             Economy.LOGGER.error("Quarantined {} ({}): {}. Recovery preserved - {} item stack(s), {} mB, providerEscrow={}, compensation={}",
                     reason, snap.orderId, snap.itemId, snap.reservedItems.size(),
@@ -105,6 +178,7 @@ public class OrderManager implements IOrderManager {
         preserved.setIdentity(escrowOwner);
         preserved.markQuarantined(reason);
         quarantineOrder(preserved.toSnapshot(), reason);
+        snapshotPortfolio(level, escrowOwner);
         return false;
     }
 
@@ -125,6 +199,7 @@ public class OrderManager implements IOrderManager {
         preserved.setExternalReservation(reservation);
         preserved.markQuarantined(reason);
         quarantineOrder(preserved.toSnapshot(), reason);
+        snapshotPortfolio(EconomyApi.serverLevel().orElse(null), escrowOwner);
     }
 
     public void saveAll() {
@@ -196,6 +271,9 @@ public class OrderManager implements IOrderManager {
         order.setIdentity(identity);
         if (external != null) order.setExternalReservation(external);
 
+        incomingPortfolioOrders.put(order.getOrderId(), order);
+        indexPortfolioOrder(order);
+        try {
         List<Order> matchingBuyOrders = getBuyOrders(commodity).stream()
                 .filter(b -> b.getPricePerUnit().compareTo(pricePerUnit) >= 0 && !b.getPrincipal().equals(identity.principal()))
                 .sorted(Comparator.comparing(Order::getPricePerUnit).reversed().thenComparing(Order::getCreatedAt))
@@ -230,6 +308,11 @@ public class OrderManager implements IOrderManager {
             backingData.removeOrder(order.getOrderId());
         }
         return CreateOrderResult.rejected(quantity, "ui.economy.error.order_rejected", List.of());
+        } finally {
+            incomingPortfolioOrders.remove(order.getOrderId());
+            refreshPortfolioIndex(order.getOrderId());
+            snapshotPortfolio(level, identity);
+        }
     }
 
     private CreateOrderResult rejectCancelledSell(MarketIdentity identity, ICommodity commodity, int quantity,
@@ -259,6 +342,7 @@ public class OrderManager implements IOrderManager {
             quarantineOrder(preserved.toSnapshot(), "OrderCreatePre cancellation could not fully restore pre-extracted escrow");
             Economy.LOGGER.error("Preserved {} unreturned escrow unit(s) for cancelled SELL creation by {}",
                     retained, owner);
+            snapshotPortfolio(level, identity);
         }
         return CreateOrderResult.rejected(quantity, "ui.economy.error.order_cancelled", List.of());
     }
@@ -439,6 +523,7 @@ public class OrderManager implements IOrderManager {
         if (backingData != null) backingData.putOrder(order.toSnapshot());
         EconomyEvents.post(new MarketEvents.OrderEdited(order));
         matchAllPendingOrders(level);
+        snapshotPortfolio(level, order.getIdentity());
         return true;
     }
 
@@ -505,6 +590,7 @@ public class OrderManager implements IOrderManager {
 
     private void registerOrder(Order order) {
         orders.put(order.getOrderId(), order);
+        indexPortfolioOrder(order);
         commodityIndex.computeIfAbsent(CommodityKey.of(order.getCommodity()), k -> new ArrayList<>()).add(order);
         if (backingData != null) backingData.putOrder(order.toSnapshot());
     }
@@ -553,7 +639,9 @@ public class OrderManager implements IOrderManager {
         }
 
         if (order.cancelInternal()) {
-            removeOrder(order); EconomyEvents.post(new MarketEvents.OrderCancelled(orderId, order.getIdentity())); return true;
+            removeOrder(order); EconomyEvents.post(new MarketEvents.OrderCancelled(orderId, order.getIdentity()));
+            snapshotPortfolio(level, order.getIdentity());
+            return true;
         }
         Economy.LOGGER.error("Order {} passed cancellability check but internal cancel failed; keeping order intact", orderId);
         return false;
@@ -564,6 +652,14 @@ public class OrderManager implements IOrderManager {
         List<Order> commodityOrders = commodityIndex.get(CommodityKey.of(order.getCommodity()));
         if (commodityOrders != null) commodityOrders.remove(order);
         if (backingData != null) backingData.removeOrder(order.getOrderId());
+        refreshPortfolioIndex(order.getOrderId());
+    }
+
+    private static void snapshotPortfolio(net.minecraft.server.level.ServerLevel level, MarketIdentity identity) {
+        if (level == null) return;
+        for (AccountRef account : Order.affectedPortfolioAccounts(identity))
+            com.nstut.economy.data.PortfolioValuation.invalidate(level, account);
+        if (!com.nstut.economy.core.PortfolioOperation.isActive()) Order.recordPortfolioSnapshots(level, identity);
     }
 
     public List<Order> getSellOrders(ICommodity commodity) {

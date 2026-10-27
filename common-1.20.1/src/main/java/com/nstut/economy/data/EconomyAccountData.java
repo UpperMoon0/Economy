@@ -21,6 +21,9 @@ public class EconomyAccountData extends SavedData implements com.nstut.economy.c
 
     private static final String NAME = "economy_accounts";
 
+    private final com.nstut.economy.core.PortfolioStoreCache portfolioStores = new com.nstut.economy.core.PortfolioStoreCache(this::setDirty);
+    public com.nstut.economy.core.PortfolioStoreCache portfolioStores() { return portfolioStores; }
+
     public static final class VaultRecord {
         public final BlockPos pos;
         public final String dimension;
@@ -36,12 +39,73 @@ public class EconomyAccountData extends SavedData implements com.nstut.economy.c
         public final BigDecimal netWorth;
         public final BigDecimal balance;
         public final BigDecimal assets;
+        public final String operationId, source, reason;
+        public final BigDecimal cashDelta, externalFlow;
+        public final boolean attributed;
+        /** This mark preserves an unallocated legacy total while unloaded stores remain unknown. */
+        public final boolean legacyAssetFallback;
 
         public PortfolioPoint(long timestamp, BigDecimal netWorth, BigDecimal balance, BigDecimal assets) {
-            this.timestamp = timestamp;
-            this.netWorth = netWorth;
-            this.balance = balance;
-            this.assets = assets;
+            this(timestamp, netWorth, balance, assets, "", "legacy", "Legacy snapshot", BigDecimal.ZERO, BigDecimal.ZERO, false, true);
+        }
+
+        public PortfolioPoint(long timestamp, BigDecimal netWorth, BigDecimal balance, BigDecimal assets,
+                              String operationId, String source, String reason, BigDecimal cashDelta,
+                              BigDecimal externalFlow, boolean attributed) {
+            this(timestamp, netWorth, balance, assets, operationId, source, reason, cashDelta,
+                    externalFlow, attributed, false);
+        }
+
+        public PortfolioPoint(long timestamp, BigDecimal netWorth, BigDecimal balance, BigDecimal assets,
+                              String operationId, String source, String reason, BigDecimal cashDelta,
+                              BigDecimal externalFlow, boolean attributed, boolean legacyAssetFallback) {
+            this.legacyAssetFallback = legacyAssetFallback;
+            this.timestamp = timestamp; this.netWorth = netWorth; this.balance = balance; this.assets = assets;
+            this.operationId = operationId; this.source = source; this.reason = reason;
+            this.cashDelta = cashDelta; this.externalFlow = externalFlow; this.attributed = attributed;
+        }
+    }
+
+    private transient net.minecraft.server.level.ServerLevel portfolioLevel;
+    private static final int MAX_PORTFOLIO_POINTS = 1024;
+
+    @Override public void recordMutation(AccountRef account, com.nstut.economy.core.BalanceMutation mutation) {
+        List<PortfolioPoint> current = getPortfolioHistory(account);
+        if (current.stream().anyMatch(point -> point.operationId.equals(mutation.operationId().toString()))) return;
+        BigDecimal assets = current.isEmpty() ? BigDecimal.ZERO : current.get(current.size() - 1).assets;
+        boolean legacyAssetFallback = !current.isEmpty() && current.get(current.size() - 1).legacyAssetFallback;
+        if (portfolioLevel != null) {
+            try {
+                var mark = PortfolioValuation.assetMark(portfolioLevel, account);
+                assets = mark.assets();
+                legacyAssetFallback = mark.legacyAssetFallback();
+            }
+            catch (RuntimeException failure) {
+                com.nstut.Economy.LOGGER.error("Portfolio valuation failed; retaining last asset mark for {}", account, failure);
+            }
+        }
+        List<PortfolioPoint> list = account.kind() == AccountKind.PLAYER
+                ? portfolioHistory.computeIfAbsent(account.id(), key -> new ArrayList<>())
+                : typedPortfolioHistory.computeIfAbsent(account, key -> new ArrayList<>());
+        // Deferred independent operations share a final live asset observation. Pair it with
+        // the final saved cash balance; reconstructed intermediate cash would invent net worth.
+        BigDecimal observedBalance = mutation.groupedFinalMark()
+                ? getAccountBalances().getOrDefault(account, BigDecimal.ZERO) : mutation.after();
+        list.add(new PortfolioPoint(mutation.timestamp(), observedBalance.add(assets), observedBalance, assets,
+                mutation.operationId().toString(), mutation.source(), mutation.reason(), mutation.cashDelta(),
+                mutation.externalFlow(), true, legacyAssetFallback));
+        compactPortfolio(list);
+        setDirty();
+    }
+
+    /** Keep recent observations plus an explicit older-history checkpoint with preserved cash flows. */
+    private static void compactPortfolio(List<PortfolioPoint> list) {
+        while (list.size() > MAX_PORTFOLIO_POINTS) {
+            PortfolioPoint first = list.remove(0), second = list.get(0);
+            list.set(0, new PortfolioPoint(second.timestamp, second.netWorth, second.balance, second.assets,
+                    "", "economy:rollup", "Earlier history aggregated; cash flows preserved",
+                    first.cashDelta.add(second.cashDelta), first.externalFlow.add(second.externalFlow),
+                    first.attributed && second.attributed, second.legacyAssetFallback));
         }
     }
 
@@ -68,8 +132,8 @@ public class EconomyAccountData extends SavedData implements com.nstut.economy.c
     public List<PortfolioPoint> getPortfolioHistory(AccountRef account) {
         if (account == null) return java.util.Collections.emptyList();
         return account.kind() == AccountKind.PLAYER
-                ? portfolioHistory.getOrDefault(account.id(), java.util.Collections.emptyList())
-                : typedPortfolioHistory.getOrDefault(account, java.util.Collections.emptyList());
+                ? List.copyOf(portfolioHistory.getOrDefault(account.id(), java.util.Collections.emptyList()))
+                : List.copyOf(typedPortfolioHistory.getOrDefault(account, java.util.Collections.emptyList()));
     }
 
     public void addPortfolioPoint(UUID player, BigDecimal balance, BigDecimal assets) {
@@ -77,6 +141,10 @@ public class EconomyAccountData extends SavedData implements com.nstut.economy.c
     }
 
     public void addPortfolioPoint(AccountRef account, BigDecimal balance, BigDecimal assets) {
+        addPortfolioPoint(account, balance, assets, false);
+    }
+
+    public void addPortfolioPoint(AccountRef account, BigDecimal balance, BigDecimal assets, boolean legacyAssetFallback) {
         if (account == null) return;
         List<PortfolioPoint> list = account.kind() == AccountKind.PLAYER
                 ? portfolioHistory.computeIfAbsent(account.id(), k -> new ArrayList<>())
@@ -87,12 +155,12 @@ public class EconomyAccountData extends SavedData implements com.nstut.economy.c
             PortfolioPoint last = list.get(list.size() - 1);
             if (last.netWorth.compareTo(netWorth) == 0 &&
                 last.balance.compareTo(balance) == 0 &&
-                last.assets.compareTo(assets) == 0) {
+                last.assets.compareTo(assets) == 0 && last.legacyAssetFallback == legacyAssetFallback) {
                 return;
             }
         }
-        list.add(new PortfolioPoint(now, netWorth, balance, assets));
-        while (list.size() > 40) list.remove(0);
+        list.add(new PortfolioPoint(now, netWorth, balance, assets, "", "economy:valuation", "Valuation refresh", BigDecimal.ZERO, BigDecimal.ZERO, true, legacyAssetFallback));
+        compactPortfolio(list);
         setDirty();
     }
 
@@ -272,7 +340,9 @@ public class EconomyAccountData extends SavedData implements com.nstut.economy.c
 
     public static EconomyAccountData get(net.minecraft.server.level.ServerLevel level) {
         net.minecraft.server.level.ServerLevel target = (level != null && level.getServer() != null) ? level.getServer().overworld() : level;
-        return target.getDataStorage().computeIfAbsent(EconomyAccountData::load, EconomyAccountData::new, NAME);
+        EconomyAccountData data = target.getDataStorage().computeIfAbsent(EconomyAccountData::load, EconomyAccountData::new, NAME);
+        data.portfolioLevel = target;
+        return data;
     }
 
     private static void readTeamWallets(CompoundTag tag, EconomyAccountData data) {
@@ -325,6 +395,7 @@ public class EconomyAccountData extends SavedData implements com.nstut.economy.c
     public static EconomyAccountData load(CompoundTag tag) {
         EconomyAccountData data = new EconomyAccountData();
         readTeamWallets(tag, data);
+        data.portfolioStores.decode(tag.getByteArray("PortfolioStores"));
         CompoundTag balancesTag = tag.getCompound("Balances");
         for (String key : balancesTag.getAllKeys()) {
             try {
@@ -359,8 +430,9 @@ public class EconomyAccountData extends SavedData implements com.nstut.economy.c
                     BigDecimal nw = new BigDecimal(ptTag.getString("NW"));
                     BigDecimal bal = new BigDecimal(ptTag.getString("BAL"));
                     BigDecimal ass = new BigDecimal(ptTag.getString("ASS"));
-                    list.add(new PortfolioPoint(ts, nw, bal, ass));
+                    list.add(readPortfolioPoint(ptTag, ts, nw, bal, ass));
                 }
+                compactPortfolio(list);
                 data.portfolioHistory.put(uuid, list);
             } catch (Exception e) {}
         }
@@ -377,12 +449,22 @@ public class EconomyAccountData extends SavedData implements com.nstut.economy.c
                     BigDecimal nw = new BigDecimal(ptTag.getString("NW"));
                     BigDecimal bal = new BigDecimal(ptTag.getString("BAL"));
                     BigDecimal ass = new BigDecimal(ptTag.getString("ASS"));
-                    list.add(new PortfolioPoint(ts, nw, bal, ass));
+                    list.add(readPortfolioPoint(ptTag, ts, nw, bal, ass));
                 }
+                compactPortfolio(list);
                 data.typedPortfolioHistory.put(account, list);
             } catch (RuntimeException ignored) {}
         }
         return data;
+    }
+
+    private static PortfolioPoint readPortfolioPoint(CompoundTag tag, long ts, BigDecimal nw, BigDecimal bal, BigDecimal ass) {
+        if (!tag.contains("Operation")) return new PortfolioPoint(ts, nw, bal, ass, "", "legacy", "Legacy snapshot",
+                BigDecimal.ZERO, BigDecimal.ZERO, false,
+                !tag.contains("LegacyAssetFallback") || tag.getBoolean("LegacyAssetFallback"));
+        return new PortfolioPoint(ts, nw, bal, ass, tag.getString("Operation"), tag.getString("Source"),
+                tag.getString("Reason"), new BigDecimal(tag.getString("CashDelta")),
+                new BigDecimal(tag.getString("ExternalFlow")), tag.getBoolean("Attributed"), tag.getBoolean("LegacyAssetFallback"));
     }
 
     public static void recordSnapshot(UUID player, net.minecraft.server.level.ServerLevel level) {
@@ -395,32 +477,9 @@ public class EconomyAccountData extends SavedData implements com.nstut.economy.c
         EconomyAccountData accountData = get(level);
         BigDecimal balance = accountData.getAccountBalances().getOrDefault(account, BigDecimal.ZERO);
 
-        BigDecimal assetValue = BigDecimal.ZERO;
-        List<com.nstut.economy.blocks.VaultBlockEntity> vaults = com.nstut.economy.blocks.VaultManager.getVaults(level, account);
-        Map<String, Integer> itemCounts = new HashMap<>();
-        for (com.nstut.economy.blocks.VaultBlockEntity vault : vaults) {
-            for (int slot = 0; slot < vault.getContainerSize(); slot++) {
-                net.minecraft.world.item.ItemStack stack = vault.getItem(slot);
-                if (!stack.isEmpty()) {
-                    String itemId = portfolioCommodityId(level.registryAccess(), stack);
-                    itemCounts.put(itemId, itemCounts.getOrDefault(itemId, 0) + stack.getCount());
-                }
-            }
-        }
-        for (com.nstut.economy.blocks.TankBlockEntity tank
-                : com.nstut.economy.blocks.TankManager.getTanks(level, account)) {
-            com.nstut.economy.trading.EconomyFluidStack fluid = tank.getFluid();
-            if (!fluid.isEmpty()) {
-                String fluidId = net.minecraft.core.registries.BuiltInRegistries.FLUID
-                        .getKey(fluid.getFluid()).toString();
-                itemCounts.put(fluidId, itemCounts.getOrDefault(fluidId, 0) + fluid.getAmount());
-            }
-        }
+        var mark = PortfolioValuation.assetMark(level, account);
 
-        com.nstut.economy.data.EconomyTradeData historyData = com.nstut.economy.data.EconomyTradeData.get(level);
-        assetValue = valueHoldings(itemCounts, historyData.getTrades());
-
-        accountData.addPortfolioPoint(account, balance, assetValue);
+        accountData.addPortfolioPoint(account, balance, mark.assets(), mark.legacyAssetFallback());
     }
 
     static String portfolioCommodityId(net.minecraft.core.HolderLookup.Provider registries,
@@ -430,25 +489,19 @@ public class EconomyAccountData extends SavedData implements com.nstut.economy.c
                 .getId().toString();
     }
 
+    public static BigDecimal assetValue(AccountRef account, net.minecraft.server.level.ServerLevel level) {
+        return PortfolioValuation.assets(level, account);
+    }
+
     static BigDecimal valueHoldings(Map<String, Integer> holdings,
                                     List<com.nstut.economy.data.EconomyTradeData.TradeSnapshot> trades) {
-        BigDecimal total = BigDecimal.ZERO;
-        for (Map.Entry<String, Integer> entry : holdings.entrySet()) {
-            BigDecimal unitPrice = BigDecimal.ZERO;
-            for (int i = trades.size() - 1; i >= 0; i--) {
-                if (trades.get(i).itemId.equalsIgnoreCase(entry.getKey())) {
-                    unitPrice = new BigDecimal(trades.get(i).price);
-                    break;
-                }
-            }
-            total = total.add(unitPrice.multiply(BigDecimal.valueOf(entry.getValue())));
-        }
-        return total;
+        return PortfolioValuation.valueHoldings(holdings, trades);
     }
 
     @Override
     public CompoundTag save(CompoundTag tag) {
         writeTeamWallets(tag);
+        tag.putByteArray("PortfolioStores", portfolioStores.encode());
         CompoundTag balancesTag = new CompoundTag();
         for (Map.Entry<UUID, BigDecimal> e : balances.entrySet())
             balancesTag.putString(e.getKey().toString(), e.getValue().toPlainString());
@@ -534,6 +587,15 @@ public class EconomyAccountData extends SavedData implements com.nstut.economy.c
                 ptTag.putString("NW", pt.netWorth.toPlainString());
                 ptTag.putString("BAL", pt.balance.toPlainString());
                 ptTag.putString("ASS", pt.assets.toPlainString());
+                ptTag.putBoolean("LegacyAssetFallback", pt.legacyAssetFallback);
+                if (pt.attributed || pt.source.equals("economy:rollup")) {
+                    ptTag.putString("Operation", pt.operationId);
+                    ptTag.putBoolean("Attributed", pt.attributed);
+                    ptTag.putString("Source", pt.source);
+                    ptTag.putString("Reason", pt.reason);
+                    ptTag.putString("CashDelta", pt.cashDelta.toPlainString());
+                    ptTag.putString("ExternalFlow", pt.externalFlow.toPlainString());
+                }
                 listTag.add(ptTag);
             }
             historyTag.put(e.getKey().toString(), listTag);
@@ -550,6 +612,15 @@ public class EconomyAccountData extends SavedData implements com.nstut.economy.c
                 ptTag.putString("NW", pt.netWorth.toPlainString());
                 ptTag.putString("BAL", pt.balance.toPlainString());
                 ptTag.putString("ASS", pt.assets.toPlainString());
+                ptTag.putBoolean("LegacyAssetFallback", pt.legacyAssetFallback);
+                if (pt.attributed || pt.source.equals("economy:rollup")) {
+                    ptTag.putString("Operation", pt.operationId);
+                    ptTag.putBoolean("Attributed", pt.attributed);
+                    ptTag.putString("Source", pt.source);
+                    ptTag.putString("Reason", pt.reason);
+                    ptTag.putString("CashDelta", pt.cashDelta.toPlainString());
+                    ptTag.putString("ExternalFlow", pt.externalFlow.toPlainString());
+                }
                 listTag.add(ptTag);
             }
             typedHistoryTag.put(e.getKey().toString(), listTag);

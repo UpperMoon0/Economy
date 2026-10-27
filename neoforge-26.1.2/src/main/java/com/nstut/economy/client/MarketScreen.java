@@ -153,6 +153,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
 
     private final Signal<Integer> detailChartOffset = Signals.of(0);
     private final Signal<Integer> portfolioChartOffset = Signals.of(0);
+    private int portfolioRefreshTicks;
 
     private final List<Computed<?>> computedList = new ArrayList<>();
     private final List<Subscription> subscriptions = new ArrayList<>();
@@ -199,7 +200,15 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                             + "\n" + Component.translatable("ui.economy.chart.tooltip.cash",
                             formatMoneyCompact(new BigDecimal(p.balance))).getString()
                             + "  |  " + Component.translatable("ui.economy.chart.tooltip.assets",
-                            formatMoneyCompact(new BigDecimal(p.assets))).getString()));
+                            formatMoneyCompact(new BigDecimal(p.assets))).getString()
+                            + "\n" + CHART_TIME_FMT.format(new Date(p.timestamp))
+                            + "\n" + (p.attributed
+                            ? Component.translatable("ui.economy.portfolio.attribution", p.source,
+                                    formatMoney(new BigDecimal(p.cashDelta)),
+                                    formatMoney(new BigDecimal(p.externalFlow))).getString()
+                                    + (p.reason.isBlank() ? "" : "\n" + p.reason)
+                            : Component.translatable("ui.economy.portfolio.legacy").getString()
+                                    + ("economy:rollup".equals(p.source) && !p.reason.isBlank() ? "\n" + p.reason : ""))));
         }
         return out;
     });
@@ -377,6 +386,21 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
             MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestRefreshPacket());
             MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestPortfolioPacket());
         }
+    }
+
+    @Override
+    protected void containerTick() {
+        super.containerTick();
+        if (view.get() != MarketView.PORTFOLIO) {
+            portfolioRefreshTicks = 0;
+            return;
+        }
+        if (++portfolioRefreshTicks >= 40) requestPortfolioRefresh();
+    }
+
+    private void requestPortfolioRefresh() {
+        portfolioRefreshTicks = 0;
+        MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestPortfolioPacket());
     }
 
     @Override
@@ -621,7 +645,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                 MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestPlayerListPacket());
                 MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestRefreshPacket());
             }
-            case PORTFOLIO -> MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestPortfolioPacket());
+            case PORTFOLIO -> requestPortfolioRefresh();
             case TEAM_TREASURY -> MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestRefreshPacket());
             case CONTAINERS -> MarketNetwork.CHANNEL.sendToServer(new MarketNetwork.RequestVaultInfoPacket());
             case DETAIL -> {
@@ -2162,6 +2186,19 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                 }
             }
         });
+        v.addChild(new UIComponent() {
+            @Override public int preferredWidth(Font f) { return 0; }
+            @Override public int preferredHeight(Font f) { return 12; }
+            @Override public void render(GuiGraphicsExtractor g, Font f, int mx, int my, float pt) {
+                String status = Component.translatable("ui.economy.portfolio.valuation_status",
+                        MarketClientStore.portfolioValuationStatus.get()).getString();
+                UiRender.text(g, f, fitText(f, status, width), x, y + 2, uiRuntime().theme().colors().primary());
+                if (mx >= x && mx < x + width && my >= y && my < y + height) {
+                    deferredTooltip = Component.literal(status + "\n")
+                            .append(Component.translatable("ui.economy.portfolio.valuation_status_help"));
+                }
+            }
+        });
         v.addChild(new TrendChartComponent(portfolioChartSamples, portfolioChartOffset, true));
         UIComponent holdingsList = Ui.switcher(holdingsEmpty)
                 .when(false, () -> Ui.list(visibleHoldings, this::buildHoldingRow)
@@ -2272,7 +2309,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                     UiRender.roundedRect(g, x, y + 1, width, 24, 3, c.surfaceRaised());
                 }
                 CommodityIconComponent.drawIcon(g, h.itemId, x + 4, y + 5, 16, 16);
-                String qty = isFluidCommodity(h.itemId) ? formatFluidAmount(h.quantity) : "x" + formatCompact(h.quantity);
+                String qty = isFluidCommodity(h.itemId) ? formatCompact(h.quantity) + " mB" : "x" + formatCompact(h.quantity);
                 String val = fitText(f, formatMoneyCompact(new BigDecimal(h.totalValue)), Math.max(0, width / 3));
                 int valueX = x + width - f.width(val) - 4;
                 int coinX = valueX - 10;
@@ -2689,6 +2726,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
             ChartLayout layout = new ChartLayout(font, visiblePoints(pts, off), off);
             if (mx >= layout.liveX && mx < layout.liveX + layout.liveW && my >= layout.liveY && my < layout.liveY + layout.liveH) {
                 if (offset.get() > 0) offset.set(0);
+                if (view.get() == MarketView.PORTFOLIO) requestPortfolioRefresh();
                 return true;
             }
             return false;
@@ -3163,7 +3201,7 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         MarketNetwork.SyncItemDetailPacket d = MarketClientStore.detail.get();
         if (d != null && (d.itemId.equalsIgnoreCase(q) || d.displayName.equalsIgnoreCase(q))) return d.vaultCount;
         for (var h : MarketClientStore.assetHoldings.get()) {
-            if (h.itemId.equalsIgnoreCase(q) || h.displayName.equalsIgnoreCase(q)) return h.quantity;
+            if (h.itemId.equalsIgnoreCase(q) || h.displayName.equalsIgnoreCase(q)) return (int) Math.min(Integer.MAX_VALUE, h.storedQuantity);
         }
         return 0;
     }
@@ -3172,9 +3210,9 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
         String q = query == null ? "" : query.trim().toLowerCase(Locale.ROOT);
         List<ItemSearchResult> results = new ArrayList<>();
         for (MarketNetwork.AssetHoldingData holding : MarketClientStore.assetHoldings.get()) {
-            if (holding == null || holding.quantity <= 0) continue;
+            if (holding == null || holding.storedQuantity <= 0) continue;
             if (!q.isEmpty() && !commoditySearchText(holding.itemId, holding.displayName).contains(q)) continue;
-            results.add(new ItemSearchResult(holding.itemId, holding.displayName, holding.quantity, true));
+            results.add(new ItemSearchResult(holding.itemId, holding.displayName, (int) Math.min(Integer.MAX_VALUE, holding.storedQuantity), true));
         }
         results.sort((a, b) -> {
             int byName = getPrimaryItemDisplayName(a.itemId, a.displayName)

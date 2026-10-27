@@ -42,7 +42,7 @@ import java.util.function.Supplier;
 
 public class MarketNetwork {
     public static final NetworkChannel CHANNEL = NetworkChannel.create(
-            ResourceLocation.fromNamespaceAndPath(Economy.MOD_ID, "market_v3"));
+            ResourceLocation.fromNamespaceAndPath(Economy.MOD_ID, "market_v4"));
 
     private static boolean initialized = false;
 
@@ -292,12 +292,23 @@ public class MarketNetwork {
         public final String teamSpendRole;
         public final String teamPayoutRole;
         public final String marketPrincipal;
+        public final String marketAccount;
 
         public SyncItemListPacket(String balance, int vaultCount, List<ItemCardData> cards,
                                   String teamMode, boolean teamWalletVisible, String teamName,
                                   String teamBalance, String teamRole, boolean teamCanDeposit,
                                   boolean teamCanSpend, boolean teamCanPayout, String teamSpendRole,
                                   String teamPayoutRole, String marketPrincipal) {
+            this(balance, vaultCount, cards, teamMode, teamWalletVisible, teamName, teamBalance, teamRole,
+                    teamCanDeposit, teamCanSpend, teamCanPayout, teamSpendRole, teamPayoutRole, marketPrincipal, "");
+        }
+
+        public SyncItemListPacket(String balance, int vaultCount, List<ItemCardData> cards,
+                                  String teamMode, boolean teamWalletVisible, String teamName,
+                                  String teamBalance, String teamRole, boolean teamCanDeposit,
+                                  boolean teamCanSpend, boolean teamCanPayout, String teamSpendRole,
+                                  String teamPayoutRole, String marketPrincipal, String marketAccount) {
+            this.marketAccount = marketAccount;
             this.balance = balance;
             this.vaultCount = vaultCount;
             this.cards = cards;
@@ -331,6 +342,7 @@ public class MarketNetwork {
             buf.writeUtf(pkt.teamSpendRole);
             buf.writeUtf(pkt.teamPayoutRole);
             buf.writeUtf(pkt.marketPrincipal);
+            buf.writeUtf(pkt.marketAccount);
         }
 
         public static SyncItemListPacket decode(FriendlyByteBuf buf) {
@@ -350,9 +362,10 @@ public class MarketNetwork {
             String teamSpendRole = buf.readUtf();
             String teamPayoutRole = buf.readUtf();
             String marketPrincipal = buf.readUtf();
+            String marketAccount = checkedMarketAccount(marketPrincipal, buf.readUtf());
             return new SyncItemListPacket(balance, vaultCount, cards, teamMode, teamWalletVisible,
                     teamName, teamBalance, teamRole, teamCanDeposit, teamCanSpend, teamCanPayout,
-                    teamSpendRole, teamPayoutRole, marketPrincipal);
+                    teamSpendRole, teamPayoutRole, marketPrincipal, marketAccount);
         }
 
         public static void handle(SyncItemListPacket pkt, Supplier<NetworkManager.PacketContext> ctx) {
@@ -1521,7 +1534,7 @@ public class MarketNetwork {
         CHANNEL.sendToPlayer(player, new SyncItemListPacket(
                 balance, vaultCount, cards,
                 teamMode, teamWalletVisible, teamName, teamBalance, teamRole,
-                teamCanDeposit, teamCanSpend, teamCanPayout, teamSpendRole, teamPayoutRole, marketPrincipal));
+                teamCanDeposit, teamCanSpend, teamCanPayout, teamSpendRole, teamPayoutRole, marketPrincipal, selectedStorage.toString()));
     }
 
     private static void sendItemDetail(ServerPlayer player, String itemId) {
@@ -2003,45 +2016,60 @@ public class MarketNetwork {
 
     public static class PortfolioPointData {
         public final long timestamp;
-        public final String netWorth;
-        public final String balance;
-        public final String assets;
+        public final String netWorth, balance, assets;
+        public final String source, reason, cashDelta, externalFlow;
+        public final boolean attributed;
 
         public PortfolioPointData(long timestamp, String netWorth, String balance, String assets) {
+            this(timestamp, netWorth, balance, assets, "legacy", "", "0", "0", false);
+        }
+
+        public PortfolioPointData(long timestamp, String netWorth, String balance, String assets,
+                                  String source, String reason, String cashDelta, String externalFlow,
+                                  boolean attributed) {
             this.timestamp = timestamp; this.netWorth = netWorth; this.balance = balance; this.assets = assets;
+            this.source = source; this.reason = reason; this.cashDelta = cashDelta;
+            this.externalFlow = externalFlow; this.attributed = attributed;
         }
 
         public void write(FriendlyByteBuf buf) {
             buf.writeLong(timestamp);
-            buf.writeUtf(netWorth);
-            buf.writeUtf(balance);
-            buf.writeUtf(assets);
+            buf.writeUtf(netWorth); buf.writeUtf(balance); buf.writeUtf(assets);
+            buf.writeUtf(source); buf.writeUtf(reason); buf.writeUtf(cashDelta); buf.writeUtf(externalFlow);
+            buf.writeBoolean(attributed);
         }
 
         public static PortfolioPointData read(FriendlyByteBuf buf) {
-            return new PortfolioPointData(buf.readLong(), buf.readUtf(), buf.readUtf(), buf.readUtf());
+            return new PortfolioPointData(buf.readLong(), buf.readUtf(), buf.readUtf(), buf.readUtf(),
+                    buf.readUtf(), buf.readUtf(), buf.readUtf(), buf.readUtf(), buf.readBoolean());
         }
     }
 
     public static class AssetHoldingData {
         public final String itemId;
         public final String displayName;
-        public final int quantity;
+        /** Total owned quantity, including reserved escrow. */
+        public final long quantity;
+        /** Quantity in provider stores, excluding reserved escrow; used by New Order hints. */
+        public final long storedQuantity;
         public final String totalValue;
 
-        public AssetHoldingData(String itemId, String displayName, int quantity, String totalValue) {
-            this.itemId = itemId; this.displayName = displayName; this.quantity = quantity; this.totalValue = totalValue;
+        public AssetHoldingData(String itemId, String displayName, long quantity, String totalValue) {
+            this(itemId, displayName, quantity, quantity, totalValue);
+        }
+
+        public AssetHoldingData(String itemId, String displayName, long quantity, long storedQuantity, String totalValue) {
+            this.itemId = itemId; this.displayName = displayName; this.quantity = quantity;
+            this.storedQuantity = storedQuantity; this.totalValue = totalValue;
         }
 
         public void write(FriendlyByteBuf buf) {
-            buf.writeUtf(itemId);
-            buf.writeUtf(displayName);
-            buf.writeInt(quantity);
-            buf.writeUtf(totalValue);
+            buf.writeUtf(itemId); buf.writeUtf(displayName);
+            buf.writeLong(quantity); buf.writeLong(storedQuantity); buf.writeUtf(totalValue);
         }
 
         public static AssetHoldingData read(FriendlyByteBuf buf) {
-            return new AssetHoldingData(buf.readUtf(), buf.readUtf(), buf.readInt(), buf.readUtf());
+            return new AssetHoldingData(buf.readUtf(), buf.readUtf(), buf.readLong(), buf.readLong(), buf.readUtf());
         }
     }
 
@@ -2061,26 +2089,56 @@ public class MarketNetwork {
     public static class SyncPortfolioPacket {
         public final List<PortfolioPointData> points;
         public final List<AssetHoldingData> holdings;
+        public final String marketPrincipal;
+        public final String marketAccount;
+        public final String valuationStatus;
 
         public SyncPortfolioPacket(List<PortfolioPointData> points, List<AssetHoldingData> holdings) {
-            this.points = points; this.holdings = holdings;
+            this(points, holdings, "");
+        }
+
+        public SyncPortfolioPacket(List<PortfolioPointData> points, List<AssetHoldingData> holdings, String marketPrincipal) {
+            this(points, holdings, marketPrincipal, "Unknown");
+        }
+
+        public SyncPortfolioPacket(List<PortfolioPointData> points, List<AssetHoldingData> holdings,
+                                   String marketPrincipal, String valuationStatus) {
+            this(points, holdings, marketPrincipal, valuationStatus, "");
+        }
+
+        public SyncPortfolioPacket(List<PortfolioPointData> points, List<AssetHoldingData> holdings,
+                                   String marketPrincipal, String valuationStatus, String marketAccount) {
+            this.marketAccount = marketAccount;
+            this.valuationStatus = valuationStatus;
+            this.points = List.copyOf(points); this.holdings = List.copyOf(holdings);
+            this.marketPrincipal = marketPrincipal;
         }
 
         public static void encode(SyncPortfolioPacket pkt, FriendlyByteBuf buf) {
+            buf.writeUtf(pkt.marketPrincipal);
+            buf.writeUtf(pkt.valuationStatus);
             buf.writeInt(pkt.points.size());
             for (PortfolioPointData p : pkt.points) p.write(buf);
             buf.writeInt(pkt.holdings.size());
             for (AssetHoldingData h : pkt.holdings) h.write(buf);
+            buf.writeUtf(pkt.marketAccount);
         }
 
         public static SyncPortfolioPacket decode(FriendlyByteBuf buf) {
+            String principal = buf.readUtf();
+            String valuationStatus = buf.readUtf();
+            if (!principal.isEmpty() && !principal.equals("PLAYER") && !principal.equals("TEAM"))
+                throw new io.netty.handler.codec.DecoderException("Invalid portfolio principal");
             int pCount = buf.readInt();
+            if (pCount < 0 || pCount > 1024) throw new io.netty.handler.codec.DecoderException("Invalid portfolio point count");
             List<PortfolioPointData> points = new ArrayList<>();
             for (int i = 0; i < pCount; i++) points.add(PortfolioPointData.read(buf));
             int hCount = buf.readInt();
+            if (hCount < 0 || hCount > MAX_DISPLAYED_HOLDINGS) throw new io.netty.handler.codec.DecoderException("Invalid portfolio holding count");
             List<AssetHoldingData> holdings = new ArrayList<>();
             for (int i = 0; i < hCount; i++) holdings.add(AssetHoldingData.read(buf));
-            return new SyncPortfolioPacket(points, holdings);
+            String account = checkedMarketAccount(principal, buf.readUtf());
+            return new SyncPortfolioPacket(points, holdings, principal, valuationStatus, account);
         }
 
         public static void handle(SyncPortfolioPacket pkt, Supplier<NetworkManager.PacketContext> ctx) {
@@ -2088,8 +2146,120 @@ public class MarketNetwork {
         }
     }
 
+    private static String checkedMarketAccount(String principal, String account) {
+        if (account.isEmpty()) return account; // Source-compatible legacy constructors omit this identity.
+        try {
+            var parsed = com.nstut.economy.api.AccountRef.parse(account);
+            if (!parsed.kind().name().equals(principal)) throw new IllegalArgumentException("Principal mismatch");
+            return parsed.toString();
+        } catch (IllegalArgumentException invalid) {
+            throw new io.netty.handler.codec.DecoderException("Invalid market account", invalid);
+        }
+    }
+
+    static final int MAX_DISPLAYED_HOLDINGS = 512;
+
+    /** Only the presentation list is bounded; net-worth valuation always includes every holding. */
+    static List<AssetHoldingData> topPortfolioHoldings(List<AssetHoldingData> holdings) {
+        return holdings.stream()
+                .sorted((a, b) -> {
+                    int valueOrder = new BigDecimal(b.totalValue).compareTo(new BigDecimal(a.totalValue));
+                    return valueOrder != 0 ? valueOrder : a.itemId.compareTo(b.itemId);
+                })
+                .limit(MAX_DISPLAYED_HOLDINGS).toList();
+    }
+
+    // Leave room for channel framing below the oldest supported client's 1 MiB payload cap.
+    static final int MAX_PORTFOLIO_BYTES = 768 * 1024;
+
+    private static int wireTextBytes(String value) {
+        if (value.length() > 32767) return MAX_PORTFOLIO_BYTES + 1;
+        return 5 + value.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+    }
+
+    private static int pointBytes(PortfolioPointData point) {
+        return 9 + wireTextBytes(point.netWorth) + wireTextBytes(point.balance) + wireTextBytes(point.assets)
+                + wireTextBytes(point.source) + wireTextBytes(point.reason)
+                + wireTextBytes(point.cashDelta) + wireTextBytes(point.externalFlow);
+    }
+
+    /** Bound encoded bytes as well as row counts; saved history and valuation stay complete. */
+    static SyncPortfolioPacket boundedPortfolioPacket(List<PortfolioPointData> points,
+                                                       List<AssetHoldingData> holdings,
+                                                       String principal, String status) {
+        return boundedPortfolioPacket(points, holdings, principal, status, "");
+    }
+
+    static SyncPortfolioPacket boundedPortfolioPacket(List<PortfolioPointData> points,
+                                                       List<AssetHoldingData> holdings,
+                                                       String principal, String status, String account) {
+        int remaining = MAX_PORTFOLIO_BYTES / 2;
+        int first = points.size();
+        while (first > 0 && points.size() - first < 1024) {
+            int size = pointBytes(points.get(first - 1));
+            if (size > remaining) break;
+            remaining -= size;
+            first--;
+        }
+        List<PortfolioPointData> recent = points.subList(first, points.size());
+        // Reserve 4 KiB for status, principal and collection/channel framing.
+        remaining += MAX_PORTFOLIO_BYTES / 2 - 4096;
+        List<AssetHoldingData> displayed = new ArrayList<>();
+        for (AssetHoldingData holding : topPortfolioHoldings(holdings)) {
+            int size = 16 + wireTextBytes(holding.itemId) + wireTextBytes(holding.displayName)
+                    + wireTextBytes(holding.totalValue);
+            if (size > remaining) continue;
+            displayed.add(holding);
+            remaining -= size;
+        }
+        if (recent.size() < points.size()) status += "; showing latest " + recent.size() + " of "
+                + points.size() + " history points (saved history retained; packet byte limit)";
+        if (displayed.size() < holdings.size()) status += "; showing " + displayed.size() + " of "
+                + holdings.size() + " holdings (totals include all; row/packet limits)";
+        return new SyncPortfolioPacket(recent, displayed, principal, status, account);
+    }
+
+    /** Presentation uses only the bounded trade ledger and registries, never world storage or the order book. */
+    public static List<AssetHoldingData> portfolioHoldingRows(Map<String, Long> owned,
+                                                             Map<String, Long> stored,
+                                                             List<com.nstut.economy.data.EconomyTradeData.TradeSnapshot> trades) {
+        Map<String, BigDecimal> latestPrices = new HashMap<>();
+        Map<String, String> latestNames = new HashMap<>();
+        for (var trade : trades) {
+            String key = trade.itemId.toLowerCase(java.util.Locale.ROOT);
+            try { latestPrices.put(key, new BigDecimal(trade.price)); }
+            catch (NumberFormatException invalid) { /* Preserve the latest valid mark, like shared valuation. */ }
+            if (trade.displayName != null && !trade.displayName.isBlank()) latestNames.put(key, trade.displayName);
+        }
+        List<AssetHoldingData> rows = new ArrayList<>();
+        for (var entry : owned.entrySet()) {
+            String id = entry.getKey();
+            String key = id.toLowerCase(java.util.Locale.ROOT);
+            long quantity = entry.getValue();
+            String name = latestNames.get(key);
+            if (name == null) {
+                Fluid fluid = BuiltInRegistries.FLUID.get(ResourceLocation.parse(id));
+                if (fluid != net.minecraft.world.level.material.Fluids.EMPTY
+                        && !com.nstut.economy.platform.Services.FLUID.isAir(fluid)) {
+                    name = com.nstut.economy.platform.Services.FLUID.displayName(fluid).getString();
+                } else {
+                    Item item = resolveItem(id);
+                    name = item == net.minecraft.world.item.Items.AIR ? id : new ItemStack(item).getHoverName().getString();
+                }
+            }
+            BigDecimal value = latestPrices.getOrDefault(key, BigDecimal.ZERO).multiply(BigDecimal.valueOf(quantity));
+            rows.add(new AssetHoldingData(id, name, quantity, stored.getOrDefault(id, 0L), exactDecimal(value)));
+        }
+        return List.copyOf(rows);
+    }
+
+    private static final Map<ServerPlayer, com.nstut.economy.core.PortfolioRefreshGate> PORTFOLIO_REFRESH =
+            new java.util.WeakHashMap<>();
+
     @SuppressWarnings("removal")
     public static void sendPortfolioInfo(ServerPlayer player) {
+        if (!PORTFOLIO_REFRESH.computeIfAbsent(player, p -> new com.nstut.economy.core.PortfolioRefreshGate())
+                .tryAcquire(System.nanoTime() / 1_000_000L)) return;
         com.nstut.economy.api.AccountRef selected = selectedMarketAccount(player);
         com.nstut.economy.data.EconomyAccountData.recordSnapshot(selected, player.serverLevel());
 
@@ -2101,59 +2271,18 @@ public class MarketNetwork {
             points.add(new PortfolioPointData(pt.timestamp,
                 exactDecimal(pt.netWorth),
                 exactDecimal(pt.balance),
-                exactDecimal(pt.assets)));
+                exactDecimal(pt.assets), pt.source, pt.reason,
+                exactDecimal(pt.cashDelta), exactDecimal(pt.externalFlow), pt.attributed));
         }
 
-        List<com.nstut.economy.blocks.VaultBlockEntity> vaults = com.nstut.economy.blocks.VaultManager.getVaults(player.serverLevel(), selected);
-        Map<String, Integer> itemCounts = new HashMap<>();
-        for (var v : vaults) {
-            for (int s = 0; s < v.getContainerSize(); s++) {
-                ItemStack stack = v.getItem(s);
-                if (!stack.isEmpty()) {
-                    ItemCommodity holdingCommodity = commodityForStack(player.serverLevel(), stack);
-                    if (holdingCommodity == null) continue;
-                    String id = holdingCommodity.getId().toString();
-                    itemCounts.put(id, itemCounts.getOrDefault(id, 0) + stack.getCount());
-                }
-            }
-        }
-        for (var tank : TankManager.getTanks(player.serverLevel(), selected)) {
-            var EconomyFluidStack = tank.getFluid();
-            if (!EconomyFluidStack.isEmpty()) {
-                String id = BuiltInRegistries.FLUID.getKey(EconomyFluidStack.getFluid()).toString();
-                itemCounts.put(id, itemCounts.getOrDefault(id, 0) + EconomyFluidStack.getAmount());
-            }
-        }
+        Map<String, Long> itemCounts = com.nstut.economy.data.PortfolioValuation.holdings(player.serverLevel(), selected);
+        Map<String, Long> storedCounts = com.nstut.economy.data.PortfolioValuation.storedHoldings(player.serverLevel(), selected);
 
-        com.nstut.economy.data.EconomyTradeData historyData = com.nstut.economy.data.EconomyTradeData.get(player.serverLevel());
-        List<AssetHoldingData> holdings = new ArrayList<>();
-        for (var entry : itemCounts.entrySet()) {
-            String id = entry.getKey();
-            int qty = entry.getValue();
-            BigDecimal unitPrice = BigDecimal.ZERO;
-            List<com.nstut.economy.data.EconomyTradeData.TradeSnapshot> trades = historyData.getTrades();
-            for (int i = trades.size() - 1; i >= 0; i--) {
-                if (trades.get(i).itemId.equalsIgnoreCase(id)) {
-                    unitPrice = new BigDecimal(trades.get(i).price);
-                    break;
-                }
-            }
-            BigDecimal totalVal = unitPrice.multiply(BigDecimal.valueOf(qty));
-            Fluid fluid = BuiltInRegistries.FLUID.get(ResourceLocation.parse(id));
-            String name;
-            if (fluid != net.minecraft.world.level.material.Fluids.EMPTY && !com.nstut.economy.platform.Services.FLUID.isAir(fluid)) {
-                name = com.nstut.economy.platform.Services.FLUID.displayName(fluid).getString();
-            } else {
-                ItemCommodity holdingCommodity = resolveItemCommodityForOrder(Economy.getOrderManager(), player.serverLevel(), player.getUUID(), id);
-                net.minecraft.world.item.Item it = resolveItem(id);
-                name = holdingCommodity != null ? holdingCommodity.getDisplayName(player.serverLevel().registryAccess()).getString()
-                        : new ItemStack(it).getHoverName().getString();
-            }
-            holdings.add(new AssetHoldingData(id, name, qty, exactDecimal(totalVal)));
-        }
+        List<AssetHoldingData> holdings = portfolioHoldingRows(itemCounts, storedCounts,
+                com.nstut.economy.data.EconomyTradeData.get(player.serverLevel()).getTrades());
 
-        holdings.sort((a, b) -> new BigDecimal(b.totalValue).compareTo(new BigDecimal(a.totalValue)));
-        CHANNEL.sendToPlayer(player, new SyncPortfolioPacket(points, holdings));
+        String status = com.nstut.economy.data.PortfolioValuation.status(player.serverLevel(), selected);
+        CHANNEL.sendToPlayer(player, boundedPortfolioPacket(points, holdings, selected.kind().name(), status, selected.toString()));
     }
 }
 

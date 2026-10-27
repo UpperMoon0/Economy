@@ -252,6 +252,95 @@ public final class BuiltinContainerStorageProvider implements IStorageProvider {
     @Override public String describe(ServerLevel level, UUID owner) { return "Economy Vaults and Tanks"; }
     @Override public String describe(ServerLevel level, AccountRef owner) { return "Economy Vaults and Tanks"; }
 
+    @Override
+    public Map<EconomyId, Long> portfolioHoldings(ServerLevel level, AccountRef owner) {
+        Map<EconomyId, Long> holdings = new HashMap<>();
+        portfolioSnapshot(level, owner).holdings().forEach((id, count) -> holdings.put(EconomyId.parse(id), count));
+        return Map.copyOf(holdings);
+    }
+
+    public static com.nstut.economy.core.PortfolioStoreCache.Snapshot portfolioSnapshot(ServerLevel level, AccountRef owner) {
+        var cache = com.nstut.economy.data.EconomyAccountData.get(level).portfolioStores();
+        return cache.snapshot(owner, System.currentTimeMillis(), () -> {
+            Set<String> keys = new HashSet<>(cache.keys(owner));
+            for (var record : VaultManager.getVaultRecords(owner)) keys.add(storeKey("vault", record.dimension, record.pos));
+            for (var record : TankManager.getTankRecords(owner)) keys.add(storeKey("tank", record.dimension, record.pos));
+            Map<String, com.nstut.economy.core.PortfolioStoreCache.Source> sources = new HashMap<>();
+            for (String key : keys) sources.put(key, source(level, owner, key));
+            return sources;
+        });
+    }
+
+    public static String storeKey(String kind, String dimension, net.minecraft.core.BlockPos pos) {
+        return kind + "|" + dimension + "|" + pos.asLong();
+    }
+
+    private static com.nstut.economy.core.PortfolioStoreCache.Source source(ServerLevel level, AccountRef owner, String key) {
+        String[] parts = key.split("\\|", 3);
+        ServerLevel target = null;
+        net.minecraft.core.BlockPos pos = net.minecraft.core.BlockPos.ZERO;
+        if (parts.length == 3) {
+            try {
+                net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level> dimension = net.minecraft.resources.ResourceKey.create(
+                        net.minecraft.core.registries.Registries.DIMENSION, com.nstut.economy.compat.Compat.rl(parts[1]));
+                target = level.getServer().getLevel(dimension);
+                pos = net.minecraft.core.BlockPos.of(Long.parseLong(parts[2]));
+            } catch (RuntimeException malformed) { /* Retain an unknown mark rather than loading anything. */ }
+        }
+        final ServerLevel resolved = target;
+        final net.minecraft.core.BlockPos position = pos;
+        final String kind = parts.length == 3 ? parts[0] : "";
+        return new com.nstut.economy.core.PortfolioStoreCache.Source() {
+            private net.minecraft.world.level.block.entity.BlockEntity block;
+            private boolean observed;
+            public boolean loaded() { return resolved != null && resolved.hasChunkAt(position); }
+            private net.minecraft.world.level.block.entity.BlockEntity block() {
+                if (!observed) { block = resolved.getBlockEntity(position); observed = true; }
+                return block;
+            }
+            public boolean exists() {
+                boolean exists = ("vault".equals(kind) && block() instanceof com.nstut.economy.blocks.VaultBlockEntity vault
+                        && owner.equals(vault.getOwnerRef()))
+                        || ("tank".equals(kind) && block() instanceof com.nstut.economy.blocks.TankBlockEntity tank
+                        && owner.equals(tank.getOwnerRef()));
+                // A loaded confirmation must prune the durable registration as well as its mark,
+                // otherwise the next refresh reintroduces the same demolished store forever.
+                if (!exists) {
+                    if ("vault".equals(kind)) VaultManager.unregister(owner, position, parts[1]);
+                    else if ("tank".equals(kind)) TankManager.unregister(owner, position, parts[1]);
+                }
+                return exists;
+            }
+            public Map<String, Long> holdings() {
+                // Called only after the cache's loaded() guard. This never requests a chunk.
+                var block = block();
+                Map<String, Long> holdings = new HashMap<>();
+                if ("vault".equals(kind) && block instanceof com.nstut.economy.blocks.VaultBlockEntity vault
+                        && owner.equals(vault.getOwnerRef())) {
+                    for (int slot = 0; slot < vault.getContainerSize(); slot++) {
+                        ItemStack stack = vault.getItem(slot);
+                        if (!stack.isEmpty()) holdings.merge(ItemCommodity.identityFromItemStack(
+                                resolved.registryAccess(), stack, java.math.BigDecimal.ZERO).getId().toString(),
+                                (long) stack.getCount(), Math::addExact);
+                    }
+                } else if ("tank".equals(kind) && block instanceof com.nstut.economy.blocks.TankBlockEntity tank
+                        && owner.equals(tank.getOwnerRef())) {
+                    EconomyFluidStack fluid = tank.getFluid();
+                    if (!fluid.isEmpty()) holdings.put(net.minecraft.core.registries.BuiltInRegistries.FLUID
+                            .getKey(fluid.getFluid()).toString(), (long) fluid.getAmount());
+                }
+                return Map.copyOf(holdings);
+            }
+        };
+    }
+
+    public static void storageChanged(ServerLevel level, AccountRef owner, String kind, String dimension, net.minecraft.core.BlockPos pos) {
+        String key = storeKey(kind, dimension, pos);
+        var source = source(level, owner, key);
+        if (source.loaded()) com.nstut.economy.data.EconomyAccountData.get(level).portfolioStores()
+                .update(owner, key, source.holdings(), System.currentTimeMillis());
+    }
+
     private static StorageDeliveryResult deliveryResult(StorageReservation before, int delivered,
                                                         Collection<ItemStack> exactRemaining, ServerLevel level) {
         int remaining = VaultInventoryOps.total(new ArrayList<>(exactRemaining));

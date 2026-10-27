@@ -14,6 +14,9 @@ import java.util.UUID;
  */
 public interface BalanceStore {
 
+    /** Called once after a committed operation; load and save never call this hook. */
+    default void recordMutation(AccountRef account, BalanceMutation mutation) { }
+
     /** Legacy player-only balance view retained for compatibility. */
     Map<UUID, BigDecimal> getBalances();
 
