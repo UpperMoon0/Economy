@@ -14,6 +14,37 @@ import java.util.function.Consumer;
 /** Groups payment and compensation into their final committed trade outcome. No balance rollback. */
 public final class PortfolioOperation implements AutoCloseable {
     private static final ThreadLocal<PortfolioOperation> CURRENT = new ThreadLocal<>();
+    private static final ThreadLocal<ExternalCreditPermit> EXTERNAL_CREDIT = new ThreadLocal<>();
+
+    /** One exact delegated credit can be a transfer leg even behind a transparent account wrapper. */
+    static final class ExternalCreditPermit implements AutoCloseable {
+        private final ExternalCreditPermit previous;
+        private final PortfolioOperation operation;
+        private final AccountRef account;
+        private final ITransactionContext context;
+        private final BigDecimal amount;
+        private boolean claimed;
+        private ExternalCreditPermit(AccountRef account, ITransactionContext context, BigDecimal amount) {
+            this.previous = EXTERNAL_CREDIT.get();
+            this.operation = CURRENT.get();
+            this.account = account; this.context = context; this.amount = amount;
+            EXTERNAL_CREDIT.set(this);
+        }
+        @Override public void close() { EXTERNAL_CREDIT.set(previous); }
+    }
+
+    static ExternalCreditPermit externalCreditLeg(AccountRef account, ITransactionContext context, BigDecimal amount) {
+        return new ExternalCreditPermit(account, context, amount);
+    }
+
+    static boolean claimExternalCreditLeg(AccountRef account, ITransactionContext context, BigDecimal amount) {
+        ExternalCreditPermit permit = EXTERNAL_CREDIT.get();
+        if (permit == null || permit.claimed || permit.operation != CURRENT.get()
+                || !permit.account.equals(account) || permit.context != context || permit.amount.compareTo(amount) != 0) return false;
+        permit.claimed = true;
+        return true;
+    }
+
     private final PortfolioOperation parent;
     private final UUID id = UUID.randomUUID();
     private final long timestamp = System.currentTimeMillis();
@@ -50,16 +81,21 @@ public final class PortfolioOperation implements AutoCloseable {
 
     static void committed(AccountRef account, BigDecimal before, BigDecimal after,
                           ITransactionContext context, Consumer<BalanceMutation> sink) {
+        committed(account, before, after, context, sink, false);
+    }
+
+    static void committed(AccountRef account, BigDecimal before, BigDecimal after,
+                          ITransactionContext context, Consumer<BalanceMutation> sink, boolean transferLeg) {
         if (before.compareTo(after) == 0) return;
         PortfolioOperation operation = CURRENT.get();
         if (operation != null) operation.root().openingBalances.putIfAbsent(account, before);
-        if (operation != null && operation.accepts(context)) {
+        if (transferLeg && operation != null && operation.accepts(context)) {
             Pending previous = operation.pending.get(account);
             operation.pending.put(account, new Pending(previous == null ? before : previous.before, after,
                     (previous == null ? BigDecimal.ZERO : previous.delta).add(after.subtract(before)), sink));
         } else {
             BigDecimal delta = after.subtract(before);
-            boolean internal = TransactionCauses.TRADE.equals(context.getCauseId());
+            boolean internal = transferLeg && TransactionCauses.TRADE.equals(context.getCauseId());
             BalanceMutation mutation = new BalanceMutation(UUID.randomUUID(), System.currentTimeMillis(),
                     context.getCauseId().toString(), context.getDescription(), before, after,
                     internal ? BigDecimal.ZERO : delta);
@@ -73,8 +109,7 @@ public final class PortfolioOperation implements AutoCloseable {
     }
 
     private boolean accepts(ITransactionContext context) {
-        return contextId != null ? contextId.equals(context.getTransactionId())
-                : source.equals(context.getCauseId().toString());
+        return contextId != null && contextId.equals(context.getTransactionId());
     }
 
     private static void deliver(Consumer<BalanceMutation> sink, BalanceMutation mutation) {

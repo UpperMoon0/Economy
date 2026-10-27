@@ -385,6 +385,99 @@ class PortfolioMutationTest {
         decimal("20", f.store.balances.get(otherTarget));
     }
 
+    @Test void directCreditAndDebitCallbacksNeverBorrowTransferIdentityFromReusedContext() {
+        Fixture f = fixture(AccountKind.PLAYER);
+        AccountRef target = AccountRef.team(UUID.randomUUID());
+        AccountRef addon = AccountRef.player(UUID.randomUUID());
+        f.manager.getOrCreateAccount(target);
+        IBankAccount addonAccount = f.manager.getOrCreateAccount(addon);
+        f.account.setBalance(new BigDecimal("100"));
+        addonAccount.credit(new BigDecimal("100"), null);
+        f.store.events.clear();
+        var reusedContext = TransactionContext.transfer("Reusable callback context", f.ref.id());
+        try (var listener = EconomyEvents.listen(EconomyEvents.TransferPre.class, event -> {
+            if (!event.sourceRef().equals(f.ref)) return;
+            assertTrue(addonAccount.credit(new BigDecimal("20"), reusedContext));
+            assertTrue(addonAccount.debit(new BigDecimal("5"), reusedContext));
+            assertTrue(addonAccount.credit(new BigDecimal("3"), reusedContext));
+        })) {
+            assertTrue(f.manager.transfer(f.ref, target, BigDecimal.TEN, reusedContext));
+        }
+        assertEquals(5, f.store.events.size());
+        assertEvent(f.store.events.get(0), f.ref, "100", "90", "-10", "economy:transfer");
+        assertEvent(f.store.events.get(1), target, "0", "10", "10", "economy:transfer");
+        assertEvent(f.store.events.get(2), addon, "100", "120", "20", "economy:transfer");
+        assertEvent(f.store.events.get(3), addon, "120", "115", "-5", "economy:transfer");
+        assertEvent(f.store.events.get(4), addon, "115", "118", "3", "economy:transfer");
+        assertEquals(4, f.store.events.stream().map(event -> event.mutation.operationId()).distinct().count());
+        decimal("18", f.store.events.stream().map(event -> event.mutation.externalFlow()).reduce(BigDecimal.ZERO, BigDecimal::add));
+        decimal("118", f.store.balances.get(addon));
+    }
+
+    @Test void directTradeCauseCallbackCreditAndDebitStayIndependentExternalFlows() {
+        Fixture f = fixture(AccountKind.TEAM);
+        AccountRef target = AccountRef.player(UUID.randomUUID());
+        AccountRef addon = AccountRef.team(UUID.randomUUID());
+        f.manager.getOrCreateAccount(target);
+        IBankAccount addonAccount = f.manager.getOrCreateAccount(addon);
+        f.account.setBalance(new BigDecimal("100"));
+        f.store.events.clear();
+        var reusedContext = tradeContext();
+        try (var listener = EconomyEvents.listen(EconomyEvents.TransferPre.class, event -> {
+            if (!event.sourceRef().equals(f.ref)) return;
+            assertTrue(addonAccount.credit(new BigDecimal("20"), reusedContext));
+            assertTrue(addonAccount.debit(new BigDecimal("5"), reusedContext));
+        }); var trade = PortfolioOperation.trade("Order with direct callback")) {
+            assertTrue(f.manager.transfer(f.ref, target, BigDecimal.TEN, reusedContext));
+        }
+        assertEquals(4, f.store.events.size());
+        assertEvent(f.store.events.get(0), f.ref, "100", "90", "0", "economy:trade");
+        assertEvent(f.store.events.get(1), target, "0", "10", "0", "economy:trade");
+        assertEvent(f.store.events.get(2), addon, "0", "20", "20", "economy:trade");
+        assertEvent(f.store.events.get(3), addon, "20", "15", "-5", "economy:trade");
+        assertEquals(3, f.store.events.stream().map(event -> event.mutation.operationId()).distinct().count());
+        decimal("15", f.store.events.stream().map(event -> event.mutation.externalFlow()).reduce(BigDecimal.ZERO, BigDecimal::add));
+        decimal("15", f.store.balances.get(addon));
+    }
+
+    @Test void transparentExternalWrapperKeepsActualTransferLegButNotCallbackCredit() {
+        Fixture f = fixture(AccountKind.PLAYER);
+        AccountRef target = AccountRef.team(UUID.randomUUID());
+        AccountRef addon = AccountRef.player(UUID.randomUUID());
+        IBankAccount delegate = f.manager.getOrCreateAccount(target);
+        IBankAccount addonAccount = f.manager.getOrCreateAccount(addon);
+        IBankAccount wrapper = new IBankAccount() {
+            public UUID getOwner() { return delegate.getOwner(); }
+            public AccountRef getAccountRef() { return delegate.getAccountRef(); }
+            public BigDecimal getBalance() { return delegate.getBalance(); }
+            public boolean credit(BigDecimal amount, com.nstut.economy.api.ITransactionContext ctx) { return delegate.credit(amount, ctx); }
+            public boolean debit(BigDecimal amount, com.nstut.economy.api.ITransactionContext ctx) { return delegate.debit(amount, ctx); }
+            public boolean transferTo(IBankAccount recipient, BigDecimal amount, com.nstut.economy.api.ITransactionContext ctx) { return delegate.transferTo(recipient, amount, ctx); }
+            public List<com.nstut.economy.api.ITransactionRecord> getRecentTransactions(int count) { return delegate.getRecentTransactions(count); }
+        };
+        f.account.setBalance(new BigDecimal("100"));
+        f.store.events.clear();
+        try (var listener = EconomyEvents.listen(EconomyEvents.BalanceChangePre.class, event -> {
+            if (event.accountRef().equals(target)) {
+                assertTrue(addonAccount.credit(new BigDecimal("2"), event.context()));
+            }
+        }); var trade = PortfolioOperation.trade("Order through wrapper")) {
+            assertTrue(f.account.transferTo(wrapper, BigDecimal.TEN, tradeContext()));
+        }
+        assertEquals(3, f.store.events.size());
+        var sourceEvent = f.store.events.stream().filter(event -> event.account.equals(f.ref)).findFirst().orElseThrow();
+        var targetEvent = f.store.events.stream().filter(event -> event.account.equals(target)).findFirst().orElseThrow();
+        var addonEvent = f.store.events.stream().filter(event -> event.account.equals(addon)).findFirst().orElseThrow();
+        assertEquals(sourceEvent.mutation.operationId(), targetEvent.mutation.operationId());
+        assertNotEquals(sourceEvent.mutation.operationId(), addonEvent.mutation.operationId());
+        decimal("0", sourceEvent.mutation.externalFlow());
+        decimal("0", targetEvent.mutation.externalFlow());
+        decimal("2", addonEvent.mutation.externalFlow());
+        decimal("90", f.store.balances.get(f.ref));
+        decimal("10", f.store.balances.get(target));
+        decimal("2", f.store.balances.get(addon));
+    }
+
     @Test void deferredTradeSurvivesAccountDeletionWithoutResurrectingItsBalance() {
         for (AccountKind kind : List.of(AccountKind.PLAYER, AccountKind.TEAM)) {
             Fixture f = fixture(kind);

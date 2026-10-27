@@ -31,7 +31,10 @@ public class BankAccount implements IBankAccount {
     private java.util.function.Consumer<BalanceMutation> mutationSink;
     void setMutationSink(java.util.function.Consumer<BalanceMutation> sink) { this.mutationSink = sink; }
     private void committed(BigDecimal before, ITransactionContext context) {
-        if (mutationSink != null) PortfolioOperation.committed(accountRef, before, balance, context, mutationSink);
+        committed(before, context, false);
+    }
+    private void committed(BigDecimal before, ITransactionContext context, boolean transferLeg) {
+        if (mutationSink != null) PortfolioOperation.committed(accountRef, before, balance, context, mutationSink, transferLeg);
     }
     private boolean mutationInProgress;
     private boolean retired;
@@ -99,7 +102,7 @@ public class BankAccount implements IBankAccount {
             balance = balance.add(amount);
             recordTransaction(ctx, amount, null);
             notifyBalanceChanged();
-            committed(previous, ctx);
+            committed(previous, ctx, PortfolioOperation.claimExternalCreditLeg(accountRef, ctx, amount));
             EconomyEvents.post(new EconomyEvents.BalanceChanged(accountRef, previous, balance, amount, ctx));
             return true;
         } finally {
@@ -204,8 +207,8 @@ public class BankAccount implements IBankAccount {
             target.recordTransaction(targetCtx, amount, accountRef);
             notifyBalanceChanged();
             target.notifyBalanceChanged();
-            committed(sourceBefore, ctx);
-            target.committed(targetBefore, targetCtx);
+            committed(sourceBefore, ctx, true);
+            target.committed(targetBefore, targetCtx, true);
 
             EconomyEvents.post(new EconomyEvents.BalanceChanged(
                     accountRef, sourceBefore, balance, amount.negate(), ctx));
@@ -253,7 +256,7 @@ public class BankAccount implements IBankAccount {
             }
 
             ITransactionContext targetCtx = counterpartContext(ctx, owner);
-            try {
+            try (var permit = PortfolioOperation.externalCreditLeg(targetOwner, targetCtx, amount)) {
                 if (!target.credit(amount, targetCtx)) {
                     return false;
                 }
@@ -272,7 +275,7 @@ public class BankAccount implements IBankAccount {
             balance = balance.subtract(amount);
             recordTransaction(ctx, amount.negate(), targetOwner);
             notifyBalanceChanged();
-            committed(sourceBefore, ctx);
+            committed(sourceBefore, ctx, true);
             EconomyEvents.post(new EconomyEvents.BalanceChanged(
                     accountRef, sourceBefore, balance, amount.negate(), ctx));
             EconomyEvents.post(new EconomyEvents.TransferCompleted(accountRef, targetOwner, amount, ctx));
