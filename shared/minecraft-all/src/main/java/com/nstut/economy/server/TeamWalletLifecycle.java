@@ -268,6 +268,10 @@ public final class TeamWalletLifecycle {
         AccountRef storageSuccessor = AccountRef.player(state.ownerId());
         com.nstut.economy.blocks.VaultManager.reassignOwner(level, teamAccount, storageSuccessor);
         com.nstut.economy.blocks.TankManager.reassignOwner(level, teamAccount, storageSuccessor);
+        com.nstut.economy.data.PortfolioValuation.invalidateStores(level, teamAccount);
+        com.nstut.economy.data.PortfolioValuation.invalidateStores(level, storageSuccessor);
+        EconomyAccountData.recordSnapshot(teamAccount, level);
+        EconomyAccountData.recordSnapshot(storageSuccessor, level);
         data.putTeamWallet(state.withStorageSettled());
     }
 }

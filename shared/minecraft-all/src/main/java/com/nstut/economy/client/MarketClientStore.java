@@ -63,6 +63,7 @@ public final class MarketClientStore {
     public static final Signal<MarketNetwork.SyncItemDetailPacket> detail = Signals.of(null);
     public static final Signal<List<HistoryEntry>> history = Signals.of(List.of());
     public static final Signal<List<MarketNetwork.VaultDetailEntry>> containerEntries = Signals.of(List.of());
+    public static final Signal<String> portfolioValuationStatus = Signals.of("Unknown");
     public static final Signal<List<MarketNetwork.PortfolioPointData>> portfolioPoints = Signals.of(List.of());
     public static final Signal<List<MarketNetwork.AssetHoldingData>> assetHoldings = Signals.of(List.of());
     public static final Signal<List<MarketNetwork.ActiveOrderEntry>> activeOrders = Signals.of(List.of());
@@ -70,6 +71,12 @@ public final class MarketClientStore {
 
     public static void applySyncItemList(MarketNetwork.SyncItemListPacket pkt) {
         Signals.batch(() -> {
+            if (!marketPrincipal.get().equals(pkt.marketPrincipal)
+                    || ("TEAM".equals(pkt.marketPrincipal) && !teamWallet.get().teamName().equals(pkt.teamName))) {
+                portfolioPoints.set(List.of());
+                portfolioValuationStatus.set("Unknown");
+                assetHoldings.set(List.of());
+            }
             cards.set(List.copyOf(pkt.cards));
             balance.set(pkt.balance);
             teamWallet.set(pkt.teamWalletVisible
@@ -104,7 +111,10 @@ public final class MarketClientStore {
 
     public static void applySyncPortfolio(MarketNetwork.SyncPortfolioPacket pkt) {
         Signals.batch(() -> {
+            // The server may have revoked team access since the last general market refresh.
+            if (!pkt.marketPrincipal.isEmpty()) marketPrincipal.set(pkt.marketPrincipal);
             portfolioPoints.set(List.copyOf(pkt.points));
+            portfolioValuationStatus.set(pkt.valuationStatus);
             assetHoldings.set(List.copyOf(pkt.holdings));
         });
     }

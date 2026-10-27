@@ -46,6 +46,45 @@ public final class EconomyGameTests {
     }
 
     @GameTest(template = "economy_gametest_empty", timeoutTicks = 40)
+    public static void portfolioPrunesConfirmedMissingRegistrationsAndKeepsUnloadedMarks(GameTestHelper helper) {
+        var level = helper.getLevel();
+        AccountRef owner = AccountRef.player(UUID.randomUUID());
+        var data = com.nstut.economy.data.EconomyAccountData.get(level);
+        String dimension = level.dimension().location().toString();
+        BlockPos missingVault = helper.absolutePos(new BlockPos(0, 1, 0));
+        BlockPos missingTank = helper.absolutePos(new BlockPos(1, 1, 0));
+        // Stale durable records can survive a restart or an out-of-band block removal.
+        VaultManager.register(owner, missingVault, dimension);
+        com.nstut.economy.blocks.TankManager.register(owner, missingTank, dimension);
+        data.portfolioStores().update(owner,
+                com.nstut.economy.api.internal.BuiltinContainerStorageProvider.storeKey("vault", dimension, missingVault),
+                java.util.Map.of("minecraft:iron_ingot", 9L), 1);
+        data.portfolioStores().update(owner,
+                com.nstut.economy.api.internal.BuiltinContainerStorageProvider.storeKey("tank", dimension, missingTank),
+                java.util.Map.of("minecraft:water", 1000L), 1);
+        BlockPos unloaded = new BlockPos(30000000, 100, 30000000);
+        helper.assertTrue(!level.hasChunkAt(unloaded), "Remote test chunk must start unloaded");
+        VaultManager.register(owner, unloaded, dimension);
+        data.portfolioStores().update(owner,
+                com.nstut.economy.api.internal.BuiltinContainerStorageProvider.storeKey("vault", dimension, unloaded),
+                java.util.Map.of("minecraft:gold_ingot", 7L), 1);
+        var snapshot = com.nstut.economy.api.internal.BuiltinContainerStorageProvider.portfolioSnapshot(level, owner);
+        helper.assertTrue(snapshot.holdings().equals(java.util.Map.of("minecraft:gold_ingot", 7L)),
+                "Only the last-known unloaded mark must remain");
+        helper.assertTrue(VaultManager.getVaultRecords(owner).size() == 1
+                        && com.nstut.economy.blocks.TankManager.getTankRecords(owner).isEmpty(),
+                "Loaded missing records must be pruned from manager indexes");
+        helper.assertTrue(data.getStorageVaults().get(owner).size() == 1
+                        && data.getStorageTanks().getOrDefault(owner, java.util.List.of()).isEmpty(),
+                "Pruning must survive save/restart through the durable registrations");
+        helper.assertTrue(data.portfolioStores().keys(owner).size() == 1 && snapshot.stale() == 1,
+                "Missing marks must be removed and unloaded mark explicitly stale");
+        helper.assertTrue(!level.hasChunkAt(unloaded), "Portfolio must never load the remote chunk");
+        VaultManager.unregister(owner, unloaded, dimension);
+        helper.succeed();
+    }
+
+    @GameTest(template = "economy_gametest_empty", timeoutTicks = 40)
     public static void vaultCraftingRecipeLoadsAndProducesVault(GameTestHelper helper) {
         var level = helper.getLevel();
         var recipe = level.getRecipeManager().byKey(new ResourceLocation("economy", "vault"));

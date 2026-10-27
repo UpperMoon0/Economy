@@ -254,12 +254,25 @@ public class TankBlockEntity extends BlockEntity implements WorldlyContainer {
     }
 
     public UUID getOwner() { return owner; }
+    @Override
+    public void setChanged() {
+        super.setChanged();
+        if (level instanceof net.minecraft.server.level.ServerLevel serverLevel && getOwnerRef() != null) {
+            com.nstut.economy.data.PortfolioValuation.storageChanged(serverLevel, getOwnerRef(), "tank",
+                    level.dimension().location().toString(), worldPosition);
+        }
+    }
+
     public AccountRef getOwnerRef() { return owner == null ? null : new AccountRef(ownerKind, owner); }
 
     public void setOwner(UUID owner) { setOwner(owner == null ? null : AccountRef.player(owner)); }
     public void setOwner(AccountRef newOwner) {
         AccountRef oldOwner = getOwnerRef();
         if (java.util.Objects.equals(oldOwner, newOwner)) return;
+        if (level instanceof net.minecraft.server.level.ServerLevel serverLevel) {
+            com.nstut.economy.data.PortfolioValuation.invalidateStores(serverLevel, oldOwner);
+            com.nstut.economy.data.PortfolioValuation.invalidateStores(serverLevel, newOwner);
+        }
         if (level != null && oldOwner != null) {
             TankManager.unregister(oldOwner, worldPosition, level.dimension().location().toString());
         }

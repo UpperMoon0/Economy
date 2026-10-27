@@ -26,6 +26,8 @@ public class AccountManager implements IAccountManager {
         this.accounts = new HashMap<>();
         this.serverAccount = new BankAccount(AccountRef.server(SERVER_ACCOUNT_ID), SERVER_INITIAL_BALANCE);
         this.taxAccount = new BankAccount(AccountRef.tax(TAX_ACCOUNT_ID), BigDecimal.ZERO);
+        serverAccount.setMutationSink(mutation -> recordMutation(serverAccount.getAccountRef(), mutation));
+        taxAccount.setMutationSink(mutation -> recordMutation(taxAccount.getAccountRef(), mutation));
         AccountManagerHolder.setInstance(this);
     }
 
@@ -34,6 +36,9 @@ public class AccountManager implements IAccountManager {
         BankAccount[] handle = new BankAccount[1];
         handle[0] = new BankAccount(owner, initialBalance, bal -> {
             if (accounts.get(owner) == handle[0]) persistBalance(owner, bal);
+        });
+        handle[0].setMutationSink(mutation -> {
+            if (accounts.get(owner) == handle[0]) recordMutation(owner, mutation);
         });
         return handle[0];
     }
@@ -45,6 +50,18 @@ public class AccountManager implements IAccountManager {
         }
         accounts.values().forEach(BankAccount::retire);
         accounts.clear();
+    }
+
+    private void recordMutation(AccountRef owner, BalanceMutation mutation) {
+        BalanceStore data = backingData;
+        if (data != null) {
+            BigDecimal actual = getAccount(owner).map(IBankAccount::getBalance).orElse(mutation.after());
+            BalanceMutation finalMutation = new BalanceMutation(mutation.operationId(), mutation.timestamp(),
+                    mutation.source(), mutation.reason(), mutation.before(), actual,
+                    mutation.externalFlow(), mutation.cashDelta());
+            persistBalance(owner, actual);
+            data.recordMutation(owner, finalMutation);
+        }
     }
 
     private void persistBalance(AccountRef owner, BigDecimal balance) {
@@ -194,6 +211,10 @@ public class AccountManager implements IAccountManager {
         if (removed && backingData != null) {
             if (account.kind() == AccountKind.PLAYER) backingData.removeBalance(account.id());
             else if (backingData.supportsTypedAccounts()) backingData.removeAccountBalance(account);
+            BalanceStore store = backingData;
+            PortfolioOperation.committed(account, current.getBalance(), BigDecimal.ZERO,
+                    new TransactionContext(com.nstut.economy.api.EconomyId.of("economy", "account_deleted"),
+                            "Account deleted", "API"), mutation -> store.recordMutation(account, mutation));
         }
         return removed;
     }

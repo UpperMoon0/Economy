@@ -383,5 +383,9 @@
   "ui.economy.routing.blacklist": "Blacklist",
   "ui.economy.routing.whitelist_help": "Only listed purchases. Saved across modes.",
   "ui.economy.routing.blacklist_help": "Block listed purchases. Saved across modes.",
-  "ui.economy.routing.mode_help": "Switch behavior without changing the list. Empty accepts all in either mode."
+  "ui.economy.routing.mode_help": "Switch behavior without changing the list. Empty accepts all in either mode.",
+  "ui.economy.portfolio.attribution": "%s | Cash change: %s | External cash flow: %s",
+  "ui.economy.portfolio.legacy": "Unattributed valuation snapshot; cash-flow attribution unavailable",
+  "ui.economy.portfolio.valuation_status": "Storage valuation: %s",
+  "ui.economy.portfolio.valuation_status_help": "Fresh stores are loaded and valued. Stale stores use their last saved contents. Unknown stores have no saved valuation and are unvalued; totals may be incomplete. Refresh never loads chunks."
 }

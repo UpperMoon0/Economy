@@ -104,6 +104,28 @@ public abstract class OrderSettlementRegressionCases {
         assertEquals(BigDecimal.ONE, accounts.getOrCreatePlayerAccount(seller).getBalance());
     }
 
+    @Test void incomingSellEscrowIsVisibleToValuationBeforeOrderBookRegistration() {
+        manager.createServerBuyOrder(iron(), 1, BigDecimal.ONE);
+        UUID seller = UUID.randomUUID();
+        NonNullList<ItemStack> escrow = NonNullList.create();
+        escrow.add(new ItemStack(Items.IRON_INGOT, 2));
+        AtomicInteger observedEscrow = new AtomicInteger();
+        try (var subscription = EconomyEvents.listen(EconomyEvents.TransferPre.class, event -> {
+            var snapshots = manager.getPortfolioOrders(com.nstut.economy.api.AccountRef.player(seller));
+            assertEquals(1, snapshots.size());
+            observedEscrow.set(snapshots.get(0).reservedItems.stream().mapToInt(ItemStack::getCount).sum());
+            assertTrue(manager.getPlayerOrders(seller).isEmpty(), "in-flight escrow must not enter the public order book early");
+        })) {
+            var result = manager.createSellOrder(seller, iron(), 2, BigDecimal.ONE, escrow, null);
+            assertEquals(1, result.filledQuantity());
+        }
+        assertEquals(2, observedEscrow.get());
+        var snapshots = manager.getPortfolioOrders(com.nstut.economy.api.AccountRef.player(seller));
+        assertEquals(1, snapshots.size(), "registered and incoming valuation views must not double count");
+        assertEquals(1, snapshots.get(0).reservedItems.stream().mapToInt(ItemStack::getCount).sum());
+        assertEquals(1, manager.getPlayerOrders(seller).size());
+    }
+
     private Order pendingPeriodicBuy() {
         NonNullList<ItemStack> escrow = NonNullList.create();
         escrow.add(new ItemStack(Items.IRON_INGOT));
@@ -197,5 +219,121 @@ public abstract class OrderSettlementRegressionCases {
         assertThrows(IllegalStateException.class, () -> sell.executePartial(buyer, 1, null));
         assertEquals(BigDecimal.TEN, accounts.getOrCreatePlayerAccount(buyer).getBalance());
         assertTrue(manager.cancelOrder(sell.getOrderId(), OrderManager.SERVER_ID));
+    }
+
+    @Test void committedOrderRecordsBothCashLegsOnceAsTradeRatherThanExternalFlow() {
+        RecordingBalances store = new RecordingBalances();
+        accounts.setAccountData(store);
+        accounts.getOrCreatePlayerAccount(buyer).credit(BigDecimal.TEN, null);
+        store.events.clear();
+        Order sell = manager.createServerSellOrder(iron(), 2, BigDecimal.ONE);
+        assertTrue(sell.executePartial(buyer, 1, null).success);
+        assertEquals(2, store.events.size());
+        var purchase = store.events.stream().filter(event -> event.account().equals(
+                com.nstut.economy.api.AccountRef.player(buyer))).findFirst().orElseThrow().mutation();
+        assertEquals(BigDecimal.ONE.negate(), purchase.cashDelta());
+        assertEquals(BigDecimal.ZERO, purchase.externalFlow());
+        assertEquals("economy:trade", purchase.source());
+        assertEquals(1, store.events.stream().map(event -> event.mutation().operationId()).distinct().count());
+        assertTrue(sell.executePartial(buyer, 1, null).success);
+        assertEquals(4, store.events.size());
+        assertEquals(2, store.events.stream().map(event -> event.mutation().operationId()).distinct().count());
+        accounts.saveAll();
+        assertEquals(4, store.events.size(), "save must not repeat operation history");
+    }
+
+    @Test void rejectedOrderPaymentCreatesNoPortfolioEvents() {
+        RecordingBalances store = new RecordingBalances();
+        accounts.setAccountData(store);
+        accounts.getOrCreatePlayerAccount(buyer).credit(BigDecimal.TEN, null);
+        store.events.clear();
+        Order sell = manager.createServerSellOrder(iron(), 1, BigDecimal.ONE);
+        try (var subscription = EconomyEvents.listen(EconomyEvents.TransferPre.class, event -> event.cancel())) {
+            assertFalse(sell.executePartial(buyer, 1, null).success);
+        }
+        assertTrue(store.events.isEmpty());
+        assertEquals(BigDecimal.TEN, accounts.getOrCreatePlayerAccount(buyer).getBalance());
+        assertEquals(1, sell.getQuantity());
+    }
+
+    private static final class RecordingBalances implements com.nstut.economy.core.BalanceStore {
+        private record Event(com.nstut.economy.api.AccountRef account, com.nstut.economy.core.BalanceMutation mutation) { }
+        final java.util.List<Event> events = new java.util.ArrayList<>();
+        final java.util.Map<UUID, BigDecimal> balances = new java.util.HashMap<>();
+        final java.util.Map<com.nstut.economy.api.AccountRef, BigDecimal> typed = new java.util.HashMap<>();
+        public java.util.Map<UUID, BigDecimal> getBalances() { return balances; }
+        public void setBalance(UUID id, BigDecimal balance) { balances.put(id, balance); }
+        public boolean supportsTypedAccounts() { return true; }
+        public void setAccountBalance(com.nstut.economy.api.AccountRef account, BigDecimal balance) { typed.put(account, balance); }
+        public void recordMutation(com.nstut.economy.api.AccountRef account, com.nstut.economy.core.BalanceMutation mutation) {
+            events.add(new Event(account, mutation));
+        }
+    }
+
+    @Test void ownerPortfolioLookupNeverSerializesUnrelatedLiveOrders() throws Exception {
+        var register = OrderManager.class.getDeclaredMethod("registerOrder", Order.class);
+        register.setAccessible(true);
+        java.util.List<CountedOrder> unrelated = new java.util.ArrayList<>();
+        for (int i = 0; i < 200; i++) {
+            CountedOrder order = new CountedOrder(UUID.randomUUID(), iron());
+            register.invoke(manager, order);
+            unrelated.add(order);
+        }
+        CountedOrder selected = new CountedOrder(buyer, iron());
+        register.invoke(manager, selected);
+        unrelated.forEach(order -> order.serializations = 0);
+        selected.serializations = 0;
+        var result = manager.getPortfolioOrders(com.nstut.economy.api.AccountRef.player(buyer));
+        assertEquals(1, result.size());
+        assertEquals(selected.getOrderId(), result.get(0).orderId);
+        assertEquals(1, selected.serializations);
+        assertEquals(0, unrelated.stream().mapToInt(order -> order.serializations).sum());
+        assertTrue(manager.cancelOrder(selected.getOrderId(), buyer));
+        assertTrue(manager.getPortfolioOrders(com.nstut.economy.api.AccountRef.player(buyer)).isEmpty());
+        assertEquals(0, unrelated.stream().mapToInt(order -> order.serializations).sum());
+    }
+
+    @Test void portfolioIndexTracksIncomingReservationRecoveryAndTypedCompensationReferences() {
+        var owner = com.nstut.economy.api.AccountRef.player(buyer);
+        var creditor = com.nstut.economy.api.AccountRef.team(UUID.randomUUID());
+        var debtor = com.nstut.economy.api.AccountRef.player(UUID.randomUUID());
+        var recoveryOwner = com.nstut.economy.api.AccountRef.team(UUID.randomUUID());
+        NonNullList<ItemStack> escrow = NonNullList.create();
+        escrow.add(new ItemStack(Items.IRON_INGOT, 2));
+        manager.createSellOrder(buyer, iron(), 2, BigDecimal.ONE, escrow, null);
+        var selected = manager.getPlayerOrders(buyer).get(0);
+        assertEquals(1, manager.getPortfolioOrders(owner).size());
+        selected.setAddonMetadata(java.util.Map.of(
+                "economy:compensation_creditor", creditor.toString(),
+                "economy:compensation_debtor", debtor.toString(),
+                "economy:compensation_amount", "3",
+                "recovery_storage_account", recoveryOwner.toString()));
+        selected.markQuarantined("manual recovery");
+        manager.preserveRecoveryOrder(selected, "test recovery");
+        manager.cleanupOrders();
+        assertTrue(manager.getPlayerOrders(buyer).isEmpty(), "recovery stays outside the public book");
+        for (var account : java.util.List.of(owner, creditor, debtor, recoveryOwner)) {
+            var snapshots = manager.getPortfolioOrders(account);
+            assertEquals(1, snapshots.size());
+            assertEquals(selected.getOrderId(), snapshots.get(0).orderId);
+        }
+        assertTrue(manager.getPortfolioOrders(com.nstut.economy.api.AccountRef.player(creditor.id())).isEmpty());
+        var data = new com.nstut.economy.data.EconomyOrderData();
+        data.putOrder(selected.toSnapshot());
+        OrderManager restarted = new OrderManager();
+        restarted.loadFrom(data);
+        assertEquals(1, restarted.getPortfolioOrders(creditor).size());
+        assertEquals(1, restarted.getPortfolioOrders(recoveryOwner).size());
+    }
+
+    private static final class CountedOrder extends Order {
+        int serializations;
+        CountedOrder(UUID owner, ItemCommodity commodity) {
+            super(owner, commodity, 1, BigDecimal.ONE, com.nstut.economy.api.IOrder.OrderType.BUY, null);
+        }
+        @Override public com.nstut.economy.data.EconomyOrderData.OrderSnapshot toSnapshot() {
+            serializations++;
+            return super.toSnapshot();
+        }
     }
 }

@@ -295,10 +295,22 @@ public class Order implements IOrder {
 
     private TransactionResult executeAmount(MarketIdentity trader, int requested, ServerLevel level) {
         if (!beginExecution()) return TransactionResult.failure("Order execution is already in progress");
-        try {
-            return executeGuarded(trader, requested, level);
+        boolean committed = false;
+        try (var operation = com.nstut.economy.core.PortfolioOperation.trade("Order " + orderId)) {
+            try {
+                TransactionResult result = executeGuarded(trader, requested, level);
+                committed = result.success;
+                return result;
+            } finally {
+                // Journal callbacks run when the scope closes, so expire final totals first.
+                // Built-in per-store marks were already updated by block-entity mutations.
+                if (level != null) for (AccountRef account : affectedPortfolioAccounts(identity, trader)) {
+                    com.nstut.economy.data.PortfolioValuation.invalidate(level, account);
+                }
+            }
         } finally {
             endExecution();
+            if (committed && level != null) recordPortfolioSnapshots(level, identity, trader);
         }
     }
 
@@ -359,7 +371,7 @@ public class Order implements IOrder {
 
         BigDecimal total = pricePerUnit.multiply(BigDecimal.valueOf(amount));
         if (!accounts.transfer(buyerAccount, sellerAccount, total,
-                TransactionContext.transfer("Purchase of " + commodity.getDisplayName().getString(), buyerId))) {
+                tradeContext("Purchase of " + commodity.getDisplayName().getString(), buyerId))) {
             return TransactionResult.failure("Payment failed");
         }
 
@@ -388,7 +400,7 @@ public class Order implements IOrder {
         if (amount <= 0) return TransactionResult.failure("Nothing to deliver");
         BigDecimal total = totalFor(amount);
         if (!accounts().transfer(buyerAccount, sellerAccount, total,
-                TransactionContext.transfer("Purchase of " + commodity.getDisplayName().getString(), buyerId))) {
+                tradeContext("Purchase of " + commodity.getDisplayName().getString(), buyerId))) {
             return TransactionResult.failure("Payment failed");
         }
 
@@ -450,7 +462,7 @@ public class Order implements IOrder {
 
         BigDecimal total = totalFor(amount);
         if (!accounts.transfer(buyerAccount, sellerAccount, total,
-                TransactionContext.transfer("Sale of " + commodity.getDisplayName().getString(), owner))) {
+                tradeContext("Sale of " + commodity.getDisplayName().getString(), owner))) {
             return TransactionResult.failure("Payment failed");
         }
 
@@ -510,7 +522,7 @@ public class Order implements IOrder {
         }
         BigDecimal total = totalFor(amount);
         if (!accounts().transfer(buyerAccount, sellerAccount, total,
-                TransactionContext.transfer("Sale of " + commodity.getDisplayName().getString(), owner))) {
+                tradeContext("Sale of " + commodity.getDisplayName().getString(), owner))) {
             releaseOrPreserve(provider, level, seller, reservation, "release failed after provider BUY payment rejection");
             return TransactionResult.failure("Payment failed");
         }
@@ -561,9 +573,6 @@ public class Order implements IOrder {
         boolean fluidLike = isFluidLike();
         notifyPlayerTrade(level, buyer.actor(), seller.actor(), true, commodity.getDisplayName().getString(), fluidLike, delivered, pricePerUnit, total);
         notifyPlayerTrade(level, seller.actor(), buyer.actor(), false, commodity.getDisplayName().getString(), fluidLike, delivered, pricePerUnit, total);
-        if (level != null) {
-            recordPortfolioSnapshots(level, buyer, seller);
-        }
         return TransactionResult.success(type == OrderType.SELL ? "Purchase successful" : "Sale successful", total, delivered);
     }
 
@@ -579,9 +588,13 @@ public class Order implements IOrder {
         return Set.copyOf(affected);
     }
 
-    private static void recordPortfolioSnapshots(ServerLevel level, MarketIdentity... identities) {
+    static void recordPortfolioSnapshots(ServerLevel level, MarketIdentity... identities) {
         for (AccountRef account : affectedPortfolioAccounts(identities)) {
-            com.nstut.economy.data.EconomyAccountData.recordSnapshot(account, level);
+            try {
+                com.nstut.economy.data.EconomyAccountData.recordSnapshot(account, level);
+            } catch (RuntimeException failure) {
+                Economy.LOGGER.error("Portfolio valuation failed after committed operation for {}", account, failure);
+            }
         }
     }
 
@@ -610,10 +623,14 @@ public class Order implements IOrder {
         return requested;
     }
 
+    private static TransactionContext tradeContext(String reason, UUID initiator) {
+        return new TransactionContext(com.nstut.economy.api.TransactionCauses.TRADE, reason, initiator.toString());
+    }
+
     private boolean refund(IBankAccount from, IBankAccount to, UUID initiator, BigDecimal amount, String reason) {
         if (amount.signum() <= 0) return true;
         try {
-            boolean success = accounts().transfer(from, to, amount, TransactionContext.transfer(reason, initiator));
+            boolean success = accounts().transfer(from, to, amount, tradeContext(reason, initiator));
             if (!success) Economy.LOGGER.error("FAILED TO REFUND {} coins ({}) on order {}", amount.toPlainString(), reason, orderId);
             return success;
         } catch (RuntimeException failure) {

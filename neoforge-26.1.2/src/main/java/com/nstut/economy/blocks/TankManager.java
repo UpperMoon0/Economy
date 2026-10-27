@@ -30,6 +30,10 @@ public class TankManager {
         BlockPos p=pos.immutable();String d=dim!=null?dim:"minecraft:overworld";
         for(var r:list)if(r.pos.equals(p)&&r.dimension.equals(d))return;
         list.add(new EconomyAccountData.VaultRecord(p,d));if(savedData!=null)savedData.addTank(owner,pos,dim);
+        com.nstut.economy.api.EconomyApi.serverLevel().ifPresent(level -> {
+            com.nstut.economy.data.PortfolioValuation.storeOwnerChanged(level, owner, "tank", d, p);
+            com.nstut.economy.data.PortfolioValuation.invalidateStores(level, owner);
+        });
     }
     public static void register(UUID owner,BlockPos pos){register(AccountRef.player(owner),pos,"minecraft:overworld");}
     public static void register(AccountRef owner,BlockPos pos){register(owner,pos,"minecraft:overworld");}
@@ -39,6 +43,8 @@ public class TankManager {
         BlockPos p=pos.immutable();String d=dim!=null?dim:"minecraft:overworld";
         list.removeIf(r->r.pos.equals(p)&&r.dimension.equals(d));if(list.isEmpty())tanks.remove(owner);
         if(savedData!=null)savedData.removeTank(owner,pos,dim);
+        com.nstut.economy.api.EconomyApi.serverLevel().ifPresent(level ->
+                com.nstut.economy.data.PortfolioValuation.invalidateStores(level, owner));
     }
     public static void unregister(BlockPos pos){
         for(var e:new ArrayList<>(tanks.entrySet()))for(var r:new ArrayList<>(e.getValue()))

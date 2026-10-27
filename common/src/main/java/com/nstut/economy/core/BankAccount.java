@@ -28,6 +28,11 @@ public class BankAccount implements IBankAccount {
     private final List<ITransactionRecord> transactionHistory;
     private final int maxHistory;
     private final Consumer<BigDecimal> onBalanceChanged;
+    private java.util.function.Consumer<BalanceMutation> mutationSink;
+    void setMutationSink(java.util.function.Consumer<BalanceMutation> sink) { this.mutationSink = sink; }
+    private void committed(BigDecimal before, ITransactionContext context) {
+        if (mutationSink != null) PortfolioOperation.committed(accountRef, before, balance, context, mutationSink);
+    }
     private boolean mutationInProgress;
     private boolean retired;
 
@@ -94,6 +99,7 @@ public class BankAccount implements IBankAccount {
             balance = balance.add(amount);
             recordTransaction(ctx, amount, null);
             notifyBalanceChanged();
+            committed(previous, ctx);
             EconomyEvents.post(new EconomyEvents.BalanceChanged(accountRef, previous, balance, amount, ctx));
             return true;
         } finally {
@@ -120,6 +126,7 @@ public class BankAccount implements IBankAccount {
             balance = balance.subtract(amount);
             recordTransaction(ctx, delta, null);
             notifyBalanceChanged();
+            committed(previous, ctx);
             EconomyEvents.post(new EconomyEvents.BalanceChanged(accountRef, previous, balance, delta, ctx));
             return true;
         } finally {
@@ -135,10 +142,10 @@ public class BankAccount implements IBankAccount {
             }
         }
         ctx = contextOrDefault(ctx, TransactionCauses.TRANSFER, "Legacy transfer");
-        if (target instanceof BankAccount bankTarget) {
-            return transferToBuiltIn(bankTarget, amount, ctx);
+        try (var operation = PortfolioOperation.transfer(ctx)) {
+            if (target instanceof BankAccount bankTarget) return transferToBuiltIn(bankTarget, amount, ctx);
+            return transferToExternal(target, amount, ctx);
         }
-        return transferToExternal(target, amount, ctx);
     }
 
     private boolean transferToBuiltIn(BankAccount target, BigDecimal amount, ITransactionContext ctx) {
@@ -197,6 +204,8 @@ public class BankAccount implements IBankAccount {
             target.recordTransaction(targetCtx, amount, accountRef);
             notifyBalanceChanged();
             target.notifyBalanceChanged();
+            committed(sourceBefore, ctx);
+            target.committed(targetBefore, targetCtx);
 
             EconomyEvents.post(new EconomyEvents.BalanceChanged(
                     accountRef, sourceBefore, balance, amount.negate(), ctx));
@@ -263,6 +272,7 @@ public class BankAccount implements IBankAccount {
             balance = balance.subtract(amount);
             recordTransaction(ctx, amount.negate(), targetOwner);
             notifyBalanceChanged();
+            committed(sourceBefore, ctx);
             EconomyEvents.post(new EconomyEvents.BalanceChanged(
                     accountRef, sourceBefore, balance, amount.negate(), ctx));
             EconomyEvents.post(new EconomyEvents.TransferCompleted(accountRef, targetOwner, amount, ctx));
@@ -321,8 +331,10 @@ public class BankAccount implements IBankAccount {
         if (retired || mutationInProgress) {
             throw new IllegalStateException("Cannot set balance on a retired or in-flight account");
         }
+        BigDecimal previous = balance;
         this.balance = Objects.requireNonNull(newBalance, "newBalance");
         notifyBalanceChanged();
+        committed(previous, new TransactionContext(EconomyId.of("economy", "admin_set"), "Set balance", "ADMIN"));
     }
 
     private static boolean validAmount(BigDecimal amount) {

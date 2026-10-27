@@ -71,4 +71,16 @@ public interface IStorageProvider {
     default String describe(ServerLevel level, AccountRef owner) {
         return owner != null && owner.kind() == AccountKind.PLAYER ? describe(level, owner.id()) : id().toString();
     }
+
+    /**
+     * Immutable, side-effect-free owned holdings for portfolio valuation, in the same units and
+     * exact commodity IDs used by trades. Exclude escrow represented by StorageReservation:
+     * Economy adds those reservations separately, including when a provider is unavailable.
+     * Providers must enumerate only their own stores and must not overlap another provider's
+     * holdings. Ordinary player inventories/chests are not implicitly Economy holdings.
+     * The default preserves compatibility; legacy providers must opt in to valuation.
+     */
+    default java.util.Map<EconomyId, Long> portfolioHoldings(ServerLevel level, AccountRef owner) {
+        return java.util.Map.of();
+    }
 }
