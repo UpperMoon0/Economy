@@ -9,7 +9,7 @@ contains a **nonpublishing** Jenkins candidate, not yet an authorized cutover.
 - Jenkinsfile selects the qualified general Linux worker label
   ci-role-general && ci-os-linux, never Windows or privileged host Docker.
 - CI_MODE=full runs source attestation, Python policy and OpenUI checks, pinned
-  OpenUI Maven publication, shared JVM tests, and all five loader builds with
+  OpenUI v0.0.16 (`40bb62363c705bd18221ef02f0e3e5605777e28c`) Maven publication, shared JVM tests, and all five loader builds with
   actual client/server joins and Forge GameTest. Failures accumulate per target
   but fail the overall build.
 - CI_MODE=dependency runs standalone OpenUI dependency unit tests.
