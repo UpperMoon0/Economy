@@ -83,6 +83,8 @@ test "$(java -version 2>&1 | head -1 | grep -oE '[0-9]+' | head -1)" = '21' ||
 export GRADLE_USER_HOME="$WORKSPACE/.ci-gradle"
 export JAVA_TOOL_OPTIONS="-Duser.home=$WORKSPACE/.ci-home"
 mkdir -p "$WORKSPACE/.ci-home/.m2/repository"
+# Do not trust a stale checkout or stale local Maven publication on reused workspaces.
+rm -rf .ci-openui "$WORKSPACE/.ci-home/.m2/repository/com/nstut"
 # Pin the upstream dependency to the exact revision used by the legacy CI.
 mkdir -p .ci-openui
 git -C .ci-openui init -q
