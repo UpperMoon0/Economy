@@ -48,7 +48,8 @@ class JenkinsCandidateContractTest(unittest.TestCase):
         self.assertIn("40bb62363c705bd18221ef02f0e3e5605777e28c", self.source)
         self.assertIn("-Duser.home=$WORKSPACE/.ci-home", self.source)
         self.assertIn("openui-maven-sha256.txt", self.source)
-        self.assertIn("sort -V", self.source)
+        self.assertIn("test \\"$actual\\" = \\"$required\\"", self.source)
+        self.assertIn("1c44920fcc40e486ec5edf1cf82b98c1b633d5bd", self.source)
 
     def test_no_publishing_token_or_release_side_effect(self):
         self.assertNotIn("withCredentials(", self.source)
