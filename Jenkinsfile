@@ -13,7 +13,7 @@ pipeline {
     }
 
     parameters {
-        choice(name: 'CI_MODE', choices: ['full', 'dependency', 'harness', 'live-join'],
+        choice(name: 'CI_MODE', choices: ['harness', 'dependency', 'full', 'live-join'],
                description: 'Host-admitted workflow route. Only full can become a release prerequisite.')
         string(name: 'SOURCE_SHA', defaultValue: '',
                description: 'Optional exact main commit from authenticated host event; mandatory for non-main')
