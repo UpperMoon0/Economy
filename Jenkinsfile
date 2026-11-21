@@ -89,16 +89,16 @@ rm -rf .ci-openui "$WORKSPACE/.ci-home/.m2/repository/com/nstut"
 mkdir -p .ci-openui
 git -C .ci-openui init -q
 git -C .ci-openui remote add origin https://github.com/UpperMoon0/OpenUI-MC.git
-git -C .ci-openui fetch -q --depth 1 origin 1c44920fcc40e486ec5edf1cf82b98c1b633d5bd
+git -C .ci-openui fetch -q --depth 1 origin 40bb62363c705bd18221ef02f0e3e5605777e28c
 git -C .ci-openui checkout -q --detach FETCH_HEAD
-test "$(git -C .ci-openui rev-parse HEAD)" = 1c44920fcc40e486ec5edf1cf82b98c1b633d5bd
+test "$(git -C .ci-openui rev-parse HEAD)" = 40bb62363c705bd18221ef02f0e3e5605777e28c
 required="$(sed -n 's/^openui_version[[:space:]]*=[[:space:]]*//p' gradle.properties | head -1 | xargs)"
 actual="$(sed -n 's/^mod_version[[:space:]]*=[[:space:]]*//p' .ci-openui/gradle.properties | head -1 | xargs)"
 test -n "$required" && test -n "$actual"
 test "$(printf '%s\\n%s\\n' "$required" "$actual" | sort -V | head -1)" = "$required" ||
   { echo "Pinned OpenUI version $actual is below Economy requirement $required" >&2; exit 1; }
 printf 'openui_sha=%s\\nopenui_version=%s\\nrequired=%s\\n' \
-  1c44920fcc40e486ec5edf1cf82b98c1b633d5bd "$actual" "$required" > ci-evidence/openui-source.txt
+  40bb62363c705bd18221ef02f0e3e5605777e28c "$actual" "$required" > ci-evidence/openui-source.txt
 chmod +x .ci-openui/gradlew gradlew
 (
   cd .ci-openui
