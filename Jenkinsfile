@@ -155,7 +155,7 @@ export JAVA_TOOL_OPTIONS="-Duser.home=$WORKSPACE/.ci-home"
                                            ? './gradlew :forge-1.20.1:runGameTestServer --build-cache --no-daemon --console=plain'
                                            : 'true')
                                     status = sh(
-                                        script: 'set -euo pipefail; export GRADLE_USER_HOME="$WORKSPACE/.ci-gradle"; ' +
+                                        script: '#!/bin/bash\nset -euo pipefail; export GRADLE_USER_HOME="$WORKSPACE/.ci-gradle"; ' +
                                                 'export JAVA_TOOL_OPTIONS="-Duser.home=$WORKSPACE/.ci-home"; ' +
                                                 '{ ' + command + '; python3 tools/live_join_test.py --target ' + name +
                                                 '; } 2>&1 | tee ci-evidence/' + name + '.log',
