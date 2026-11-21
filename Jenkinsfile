@@ -85,20 +85,24 @@ export JAVA_TOOL_OPTIONS="-Duser.home=$WORKSPACE/.ci-home"
 mkdir -p "$WORKSPACE/.ci-home/.m2/repository"
 # Do not trust a stale checkout or stale local Maven publication on reused workspaces.
 rm -rf .ci-openui "$WORKSPACE/.ci-home/.m2/repository/com/nstut"
-# Pin the upstream dependency to the exact revision used by the legacy CI.
+# Gradle resolves EXACT com.nstut:openui-*:<openui_version> Maven versions.
+# Never populate only 0.0.16 when current Economy main still requests 0.0.13.
+required="$(sed -n 's/^openui_version[[:space:]]*=[[:space:]]*//p' gradle.properties | head -1 | xargs)"
+case "$required" in
+  0.0.13) openui_pin=1c44920fcc40e486ec5edf1cf82b98c1b633d5bd ;;
+  0.0.16) openui_pin=40bb62363c705bd18221ef02f0e3e5605777e28c ;;
+  *) echo "Unreviewed Economy OpenUI Maven version $required" >&2; exit 1 ;;
+esac
 mkdir -p .ci-openui
 git -C .ci-openui init -q
 git -C .ci-openui remote add origin https://github.com/UpperMoon0/OpenUI-MC.git
-git -C .ci-openui fetch -q --depth 1 origin 40bb62363c705bd18221ef02f0e3e5605777e28c
+git -C .ci-openui fetch -q --depth 1 origin "$openui_pin"
 git -C .ci-openui checkout -q --detach FETCH_HEAD
-test "$(git -C .ci-openui rev-parse HEAD)" = 40bb62363c705bd18221ef02f0e3e5605777e28c
-required="$(sed -n 's/^openui_version[[:space:]]*=[[:space:]]*//p' gradle.properties | head -1 | xargs)"
+test "$(git -C .ci-openui rev-parse HEAD)" = "$openui_pin"
 actual="$(sed -n 's/^mod_version[[:space:]]*=[[:space:]]*//p' .ci-openui/gradle.properties | head -1 | xargs)"
-test -n "$required" && test -n "$actual"
-test "$(printf '%s\\n%s\\n' "$required" "$actual" | sort -V | head -1)" = "$required" ||
-  { echo "Pinned OpenUI version $actual is below Economy requirement $required" >&2; exit 1; }
+test "$actual" = "$required"
 printf 'openui_sha=%s\\nopenui_version=%s\\nrequired=%s\\n' \
-  40bb62363c705bd18221ef02f0e3e5605777e28c "$actual" "$required" > ci-evidence/openui-source.txt
+  "$openui_pin" "$actual" "$required" > ci-evidence/openui-source.txt
 chmod +x .ci-openui/gradlew gradlew
 (
   cd .ci-openui
