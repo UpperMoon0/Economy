@@ -16,8 +16,9 @@ repository, tracked under
   Untrusted fork PR code is **never** run on private/self-hosted runners.
 - The fixed central Jenkins job
   `UpperMoon0-economy-migration/economy-native-ci` executes on an explicitly
-  qualified `ci-role-general && ci-os-linux` worker. Jenkins agents have no
-  GitHub release token, Azure identity, CurseForge API token or Docker socket.
+  qualified `ci-role-general && ci-os-linux` worker on `cloud-1-linux-ci` or
+  `on-prem-1-linux-ci`. Jenkins agents have no GitHub release token, Azure
+  identity, CurseForge API token or Docker socket.
 - The **full** native gate runs the Python harness, dependency checks,
   immutable OpenUI Maven bootstrap, shared JVM tests, all five loader builds,
   Forge GameTest, and five real client/server joins. The successful build
