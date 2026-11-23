@@ -253,15 +253,18 @@ def prepare(root: Path, module: Path) -> tuple[Path, Path]:
     server.mkdir(parents=True, exist_ok=True)
     client.mkdir(parents=True, exist_ok=True)
     (server / "eula.txt").write_text("eula=true\n", encoding="utf-8")
-    (server / "server.properties").write_text(
+    properties = (
         "online-mode=false\nserver-port=25575\nlevel-name=live-join-world\n"
         "motd=Economy live join test\nspawn-protection=0\n"
-        "view-distance=3\nsimulation-distance=3\ngenerate-structures=false\n",
-        encoding="utf-8",
+        "view-distance=3\nsimulation-distance=3\ngenerate-structures=false\n"
     )
+    if module.name in {"fabric-1.20.1", "forge-1.20.1"}:
+        # Keep both resource-constrained 1.20.1 live-join fixtures from generating terrain during login.
+        properties += "level-type=minecraft:flat\n"
+    (server / "server.properties").write_text(properties, encoding="utf-8")
     (client / "options.txt").write_text(
         "narrator:0\nnarratorHotkey:false\nonboardAccessibility:false\n"
-        "skipMultiplayerWarning:true\nrenderDistance:3\nsimulationDistance:3\n"
+        "skipMultiplayerWarning:true\nrenderDistance:3\nsimulationDistance:5\n"
         "maxFps:60\nenableVsync:false\npauseOnLostFocus:false\n",
         encoding="utf-8",
     )

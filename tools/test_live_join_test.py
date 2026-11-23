@@ -47,6 +47,17 @@ class LiveHarnessContractTest(unittest.TestCase):
         self.assertEqual(list(live.TARGETS), targets)
         self.assertEqual(len(targets), len(set(targets)))
 
+    def test_flat_world_is_limited_to_both_1201_join_fixtures(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for target in live.TARGETS:
+                with self.subTest(target=target):
+                    server, _ = live.prepare(root, root / target)
+                    properties = (server / "server.properties").read_text(encoding="utf-8")
+                    self.assertEqual("level-type=minecraft:flat\n" in properties,
+                                     target in {"fabric-1.20.1", "forge-1.20.1"})
+                    self.assertIn("server-port=25575\n", properties)
+
     def test_exact_head_receipts_require_every_target(self):
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp)
