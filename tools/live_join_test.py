@@ -159,10 +159,19 @@ class OutputPump:
         return None
 
     def wait_for_server_ready(self, setup_timeout: int, ready_timeout: int) -> str | None:
+        return self.wait_for_after_setup(SERVER_READY_MARKERS, SERVER_BOOT_MARKERS,
+                                         setup_timeout, ready_timeout)
+
+    def wait_for_after_setup(self, markers: tuple[str, ...], boot_markers: tuple[str, ...],
+                             setup_timeout: int, ready_timeout: int, *,
+                             connect_markers: tuple[str, ...] = ()) -> str | None:
+        """Bound Gradle setup, game boot, and the actual network join separately."""
         setup_deadline = time.monotonic() + setup_timeout
         ready_deadline: float | None = None
+        startup_deadline: float | None = None
         while True:
-            deadline = ready_deadline if ready_deadline is not None else setup_deadline
+            deadline = ready_deadline if ready_deadline is not None else (
+                startup_deadline if startup_deadline is not None else setup_deadline)
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 return None
@@ -173,9 +182,16 @@ class OutputPump:
             except queue.Empty:
                 continue
             self._check(line)
-            if any(marker in line for marker in SERVER_READY_MARKERS):
+            if any(marker in line for marker in markers):
                 return line
-            if ready_deadline is None and any(marker in line for marker in SERVER_BOOT_MARKERS):
+            if ready_deadline is None and startup_deadline is None and any(
+                    marker in line for marker in boot_markers):
+                if connect_markers:
+                    startup_deadline = time.monotonic() + setup_timeout
+                else:
+                    ready_deadline = time.monotonic() + ready_timeout
+            if connect_markers and ready_deadline is None and any(
+                    marker in line for marker in connect_markers):
                 ready_deadline = time.monotonic() + ready_timeout
 
     def contains(self, marker: str) -> bool:
@@ -321,7 +337,13 @@ def run_target(root: Path, target: str, timeout: int, setup_timeout: int) -> Non
         for attempt in range(1, CLIENT_SETUP_ATTEMPTS + 1):
             client = start(client_command, root)
             client_output = OutputPump(client, f"{target}/client", client_log)
-            if client_output.wait_for((PASS_MARKER,), timeout) is not None:
+            # Cold Gradle setup and client resource loading each have bounded
+            # budgets. Start the real join deadline at the local connect attempt.
+            if client_output.wait_for_after_setup(
+                    (PASS_MARKER,), (f"> Task :{target}:runLiveJoinTestClient",),
+                    setup_timeout, timeout,
+                    connect_markers=("Connecting to 127.0.0.1, 25575",
+                                     "Connecting to 127.0.0.1:25575")) is not None:
                 break
 
             client_exit = client.poll()
@@ -380,7 +402,7 @@ def main() -> int:
     parser.add_argument("--timeout", type=int, default=360,
                         help="seconds allowed for Minecraft readiness/client join after game startup")
     parser.add_argument("--setup-timeout", type=int, default=900,
-                        help="seconds allowed for Gradle/Loom setup before the server begins booting")
+                        help="seconds allowed for Gradle/Loom setup before either game begins booting")
     args = parser.parse_args()
 
     if args.matrix:

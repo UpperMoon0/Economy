@@ -5,6 +5,8 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import Mock, patch
+import queue
 
 TOOLS = Path(__file__).resolve().parent
 if str(TOOLS) not in sys.path:
@@ -91,6 +93,60 @@ class LiveHarnessContractTest(unittest.TestCase):
             with self.subTest(line=line):
                 self.assertTrue(live.is_fatal_line(line))
         self.assertFalse(live.is_fatal_line("Economy data loaded for dimension minecraft:overworld"))
+
+    def test_client_setup_has_independent_bounded_join_window(self):
+        pump = live.OutputPump.__new__(live.OutputPump)
+        pump.process = Mock()
+        pump.process.poll.return_value = None
+        pump.prefix = "client"
+        pump.lines = queue.Queue()
+        for line in ("> Task :fabric-1.20.1:downloadAssets",
+                     "> Task :fabric-1.20.1:runLiveJoinTestClient",
+                     live.PASS_MARKER):
+            pump.lines.put(line)
+        with patch.object(live.time, "monotonic", side_effect=[0, 0, 500, 500, 700]):
+            self.assertEqual(pump.wait_for_after_setup(
+                (live.PASS_MARKER,), ("> Task :fabric-1.20.1:runLiveJoinTestClient",),
+                900, 360), live.PASS_MARKER)
+
+    def test_client_setup_timeout_does_not_pass_without_game_marker(self):
+        pump = live.OutputPump.__new__(live.OutputPump)
+        pump.process = Mock()
+        pump.process.poll.return_value = None
+        pump.prefix = "client"
+        pump.lines = queue.Queue()
+        pump.lines.put("> Task :fabric-1.20.1:downloadAssets")
+        with patch.object(live.time, "monotonic", side_effect=[0, 0, 901]):
+            self.assertIsNone(pump.wait_for_after_setup(
+                (live.PASS_MARKER,), ("> Task :fabric-1.20.1:runLiveJoinTestClient",),
+                900, 360))
+
+    def test_slow_client_boot_does_not_consume_network_join_budget(self):
+        pump = live.OutputPump.__new__(live.OutputPump)
+        pump.process = Mock()
+        pump.process.poll.return_value = None
+        pump.prefix = "client"
+        pump.lines = queue.Queue()
+        for line in ("> Task :forge-1.20.1:runLiveJoinTestClient",
+                     "Connecting to 127.0.0.1, 25575", live.PASS_MARKER):
+            pump.lines.put(line)
+        with patch.object(live.time, "monotonic", side_effect=[0, 0, 500, 850, 850, 1000]):
+            self.assertEqual(pump.wait_for_after_setup(
+                (live.PASS_MARKER,), ("> Task :forge-1.20.1:runLiveJoinTestClient",),
+                900, 360, connect_markers=("Connecting to 127.0.0.1, 25575",)),
+                live.PASS_MARKER)
+
+    def test_client_boot_remains_bounded_without_connect(self):
+        pump = live.OutputPump.__new__(live.OutputPump)
+        pump.process = Mock()
+        pump.process.poll.return_value = None
+        pump.prefix = "client"
+        pump.lines = queue.Queue()
+        pump.lines.put("> Task :forge-1.20.1:runLiveJoinTestClient")
+        with patch.object(live.time, "monotonic", side_effect=[0, 0, 500, 1401]):
+            self.assertIsNone(pump.wait_for_after_setup(
+                (live.PASS_MARKER,), ("> Task :forge-1.20.1:runLiveJoinTestClient",),
+                900, 360, connect_markers=("Connecting to 127.0.0.1, 25575",)))
 
     def test_only_asset_download_failures_are_retryable_client_setup_failures(self):
         self.assertTrue(live.is_transient_client_setup_failure([
