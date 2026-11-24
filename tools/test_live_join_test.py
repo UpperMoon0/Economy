@@ -121,6 +121,33 @@ class LiveHarnessContractTest(unittest.TestCase):
                 (live.PASS_MARKER,), ("> Task :fabric-1.20.1:runLiveJoinTestClient",),
                 900, 360))
 
+    def test_slow_client_boot_does_not_consume_network_join_budget(self):
+        pump = live.OutputPump.__new__(live.OutputPump)
+        pump.process = Mock()
+        pump.process.poll.return_value = None
+        pump.prefix = "client"
+        pump.lines = queue.Queue()
+        for line in ("> Task :forge-1.20.1:runLiveJoinTestClient",
+                     "Connecting to 127.0.0.1, 25575", live.PASS_MARKER):
+            pump.lines.put(line)
+        with patch.object(live.time, "monotonic", side_effect=[0, 0, 500, 850, 850, 1000]):
+            self.assertEqual(pump.wait_for_after_setup(
+                (live.PASS_MARKER,), ("> Task :forge-1.20.1:runLiveJoinTestClient",),
+                900, 360, connect_markers=("Connecting to 127.0.0.1, 25575",)),
+                live.PASS_MARKER)
+
+    def test_client_boot_remains_bounded_without_connect(self):
+        pump = live.OutputPump.__new__(live.OutputPump)
+        pump.process = Mock()
+        pump.process.poll.return_value = None
+        pump.prefix = "client"
+        pump.lines = queue.Queue()
+        pump.lines.put("> Task :forge-1.20.1:runLiveJoinTestClient")
+        with patch.object(live.time, "monotonic", side_effect=[0, 0, 500, 1401]):
+            self.assertIsNone(pump.wait_for_after_setup(
+                (live.PASS_MARKER,), ("> Task :forge-1.20.1:runLiveJoinTestClient",),
+                900, 360, connect_markers=("Connecting to 127.0.0.1, 25575",)))
+
     def test_only_asset_download_failures_are_retryable_client_setup_failures(self):
         self.assertTrue(live.is_transient_client_setup_failure([
             "> Task :forge-1.20.1:downloadAssets FAILED\n",
