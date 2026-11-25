@@ -43,6 +43,20 @@ class CiPolicyTest(unittest.TestCase):
 
 
 class LiveHarnessContractTest(unittest.TestCase):
+    def test_protected_direct_commands_prepare_both_before_launch(self):
+        import os
+        import runpy
+        capture = Mock(side_effect=[["server-direct"], ["client-direct"]])
+        with patch.dict(os.environ, {"NSTUT_DIRECT_JAVA_HELPER":"/protected/helper.py"}), \
+                patch.object(runpy, "run_path", return_value={"capture":capture}):
+            self.assertEqual(live.prepared_commands(Path("."), "fabric-1.21.1", 900),
+                             (["server-direct"], ["client-direct"]))
+        self.assertEqual([call.kwargs["role"] for call in capture.call_args_list],
+                         ["server", "client"])
+        for call in capture.call_args_list:
+            self.assertIn("--max-workers=1", call.args[1])
+            self.assertEqual(call.kwargs["timeout"], 2400)
+
     def test_matrix_contains_every_supported_loader_target_once(self):
         matrix = json.loads(live.matrix_json())
         targets = [entry["target"] for entry in matrix["include"]]

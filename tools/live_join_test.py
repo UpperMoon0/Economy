@@ -32,6 +32,7 @@ SERVER_BOOT_MARKERS = (
     "Starting minecraft server",
 )
 CRITICAL_RUNTIME_MARKERS = (
+    "OutOfMemoryError",
     "Critical injection failure",
     "InjectionError",
     "InvalidInjectionException",
@@ -206,6 +207,22 @@ def gradle(root: Path, task: str) -> list[str]:
     ]
 
 
+def prepared_commands(root: Path, target: str, setup_timeout: int) -> tuple[list[str], list[str]]:
+    """Use the protected CI launcher when supplied; retain local developer runs."""
+    server = gradle(root, f":{target}:runLiveJoinTestServer")
+    client = gradle(root, f":{target}:runLiveJoinTestClient")
+    helper = os.environ.get("NSTUT_DIRECT_JAVA_HELPER")
+    if helper:
+        import runpy
+        capture = runpy.run_path(helper)["capture"]
+        # Gradle preparation runs serially; the game JVMs overlap, not Gradle.
+        server = capture(root, [x.replace("--max-workers=4", "--max-workers=1") for x in server],
+                         role="server", timeout=max(2400, setup_timeout))
+        client = capture(root, [x.replace("--max-workers=4", "--max-workers=1") for x in client],
+                         role="client", timeout=max(2400, setup_timeout))
+    return server, client
+
+
 def start(command: list[str], root: Path) -> subprocess.Popen[str]:
     options: dict[str, object] = {
         "cwd": root,
@@ -316,7 +333,8 @@ def run_target(root: Path, target: str, timeout: int, setup_timeout: int) -> Non
     # The run task owns compilation for this runtime. CI may have built the target
     # already; Gradle then reuses those outputs rather than performing a duplicate
     # explicit :classes/build invocation here.
-    server = start(gradle(root, f":{target}:runLiveJoinTestServer"), root)
+    server_command, prepared_client = prepared_commands(root, target, setup_timeout)
+    server = start(server_command, root)
     server_output = OutputPump(server, f"{target}/server", server_log)
     client: subprocess.Popen[str] | None = None
     try:
@@ -326,7 +344,7 @@ def run_target(root: Path, target: str, timeout: int, setup_timeout: int) -> Non
             if server_output.wait_for((ECONOMY_SERVER_READY_MARKER,), 20) is None:
                 raise RuntimeError(f"{target}: server booted without completing Economy runtime binding")
 
-        client_command = gradle(root, f":{target}:runLiveJoinTestClient")
+        client_command = prepared_client
         if os.name != "nt" and not os.environ.get("DISPLAY"):
             xvfb = shutil.which("xvfb-run")
             if xvfb is None:
@@ -340,7 +358,8 @@ def run_target(root: Path, target: str, timeout: int, setup_timeout: int) -> Non
             # Cold Gradle setup and client resource loading each have bounded
             # budgets. Start the real join deadline at the local connect attempt.
             if client_output.wait_for_after_setup(
-                    (PASS_MARKER,), (f"> Task :{target}:runLiveJoinTestClient",),
+                    (PASS_MARKER,), (f"> Task :{target}:runLiveJoinTestClient",
+                                     "Launching prepared game JVM directly"),
                     setup_timeout, timeout,
                     connect_markers=("Connecting to 127.0.0.1, 25575",
                                      "Connecting to 127.0.0.1:25575")) is not None:
