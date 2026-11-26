@@ -1,58 +1,89 @@
 # Economy CI/CD: Jenkins migration (KAN-71)
 
-The original four Actions workflows remain **unavailable**. Do not dispatch,
-re-run, or use GitHub Actions runs as acceptance evidence. This repository
-contains a **nonpublishing** Jenkins candidate, not yet an authorized cutover.
+GitHub Actions execution is disabled and all four legacy workflow files have
+been removed. Do not dispatch, re-run, or use historical Actions artifacts
+or check results. The active Jenkins-only build and required-check routes
+are verified; final release-provider and diagnostic acceptance remains
+tracked in [KAN-71](https://nstut.atlassian.net/browse/KAN-71).
 
-## Native candidate
+## Active native CI
 
-- Jenkinsfile selects the qualified general Linux worker label
-  ci-role-general && ci-os-linux, never Windows or privileged host Docker.
-- CI_MODE=full runs source attestation, Python policy and OpenUI checks, pinned
-  OpenUI v0.0.16 (`40bb62363c705bd18221ef02f0e3e5605777e28c`) Maven publication, shared JVM tests, and all five loader builds with
-  actual client/server joins and Forge GameTest. Failures accumulate per target
-  but fail the overall build.
-- CI_MODE=dependency runs standalone OpenUI dependency unit tests.
-- CI_MODE=harness runs Python source-policy tests and py_compile.
-- CI_MODE=live-join runs pinned OpenUI bootstrap plus standalone five-target
-  live-join / Forge GameTest diagnostics.
-- Source SHA, worker identity, build number, logs and artifact fingerprints are
-  recorded. Provided SOURCE_SHA mismatches fail closed.
-- The candidate rejects all PRs until a host-approved, exact-head same-repo
-  PR admission route has native negative-path proof. Forks never execute on
-  private Jenkins workers.
+- Reviewed central `NsTut-CICD/jenkins/migration/economy/Economy.CI.Jenkinsfile`
+  runs on a qualified general Linux container with the 4 GiB worker and
+  physical-memory admission labels, without a privileged Docker socket
+  or publishing credentials. The repository Jenkinsfile is not the
+  authority for host admission or release.
+- `full` runs exact-source admission, Python and OpenUI dependency checks,
+  pinned Maven bootstrap, shared JVM tests, Forge GameTest, five native
+  loader builds and five actual client/server joins. Failures prevent a
+  successful release bundle. A successful full run archives the five
+  exact-version production JARs, SHA-256 checksums and provenance.
+- The immutable Economy `openui_version` determines the reviewed exact
+  OpenUI source: 0.0.13 at
+  `1c44920fcc40e486ec5edf1cf82b98c1b633d5bd` or 0.0.16 at
+  `40bb62363c705bd18221ef02f0e3e5605777e28c`. No floating coordinate.
+  The reviewed build-only Foojay compatibility shim preserves runtime source.
+  The pinned Maven cache uses exact pin, recipe, JDK and artifact hashes,
+  with separate main and owner-PR workspace slots; manual and tag runs
+  remain cold. A missing cache rebuilds the pinned dependency.
+- The protected HMAC dispatcher admits canonical main pushes, tags and
+  same-repository owner PRs. A signed host source attestation, immutable
+  source SHA and reviewed central control are required; external fork PRs
+  never execute on private workers.
+- Strict branch protection requires `jenkins/economy/native-full` from the
+  Jenkins GitHub App. Running signed owner PRs report in-progress, then
+  the same check completes from verified native evidence. Success requires
+  all five hashed artifacts. Failed or superseded builds cannot supply green
+  checks for another head.
 
-## Required work before cutover
+## Manual credential-free diagnostics
 
-Tracked by KAN-74..85. Source-only checks do not mean a ticket is complete.
+The protected cloud-1 host exposes the reviewed root-only
+`jenkins/migration/economy/manual_request.py` CLI. It resolves the exact
+canonical main source and reviewed control, rather than trusting a caller's
+arbitrary ref. Supported modes:
 
-1. Protected host webhook routing must map original PR/main/tag/manual events,
-   paths and modes once. The registry currently indexes reviewed main only.
-   Keep PR-only supersession, never cancel main/tag, reject untrusted forks.
-2. Run every mapping as a numbered Jenkins build at the exact source SHA,
-   archive outputs and prove negative event/status behavior. Confirm Java 21,
-   NeoForge Java 25 toolchain and Python 3.12 parity. The first cloud-1 worker
-   inspection found Java 21 and Python 3.13, not Python 3.12.
-3. Publisher must report distinct Economy build, OpenUI dependency and Python
-   verification contexts only on the verified exact commit, with failed-check
-   propagation and stale-head rejection. Replace legacy required checks only
-   after real native checks.
-4. Release publishing stays outside this unprivileged Jenkinsfile. Implement a
-   protected exact-main/tag gate (version bump, tag/version match, manual true
-   on main, negative cases) and host-scoped GitHub Release/CurseForge brokers,
-   with idempotent retries, verified five-target assets, receipts and rollback.
-5. Retire the four Actions source files only after all trigger and publishing
-   paths are proven natively. Preserve rollback evidence. Never run Actions.
-
-## Workflow map
-
-| Legacy Actions workflow | Candidate mode / pending host route |
+| Mode | Purpose |
 | --- | --- |
-| build-and-release.yml | full; separate protected release broker |
-| live-join-test.yml | live-join; manual admission |
-| openui-dependency.yml | dependency; PR-main/main/manual |
-| verification-harness.yml | harness; PR/manual |
+| harness | Python contract tests |
+| dependency | OpenUI dependency metadata checks |
+| shared | Pinned Maven bootstrap and shared JVM tests |
+| build | One explicitly selected loader build |
+| live-join | One explicitly selected loader's real client/server diagnostic |
+| full | Complete five-loader builds, joins, tests and release evidence |
 
-**Trust boundary:** Economy source can validate code but cannot authorize
-protected statuses, trusted events, or release publication. The central host
-dispatcher must reverify exact SHA, canonical repository identity, and event.
+The default manual request never publishes. A separate explicit full
+`--release` request creates an immutable root-only release intent; it is
+still subject to protected exact-source acceptance and all provider gates.
+Do not issue a release request simply to exercise CI.
+
+## Workflow replacement map
+
+| Removed Actions workflow | Native replacement |
+| --- | --- |
+| build-and-release.yml | Signed full native CI and protected release broker |
+| live-join-test.yml | Full joins and manual per-loader diagnostics |
+| openui-dependency.yml | Dependency stage in full CI and manual dependency mode |
+| verification-harness.yml | Harness stage in full CI and manual harness mode |
+
+## Release authority and rollback
+
+The protected host release broker is separate from the worker. It requires
+the original signed eligible version event or exact authorized manual intent,
+a successful source-bound full matrix, the verified App check, five JAR
+hashes, the matching version/changelog and immutable tag conditions.
+GitHub publishing uses a repository-scoped App installation token;
+CurseForge uses the approved Key Vault identity. No secrets are injected
+into Jenkins workers. Durable provider receipts prevent duplicate uploads
+and quarantine ambiguous responses instead of blindly retrying.
+
+A successful native run alone does not authorize release. Existing versions
+must not be republished. Live provider publication/reconciliation and
+remaining manual/cache acceptance are still required before final Jira
+closure.
+
+Rollback through reviewed central GitOps: disable the affected protected
+route if publication is uncertain, preserve native archives, exact-source
+checks and provider receipts, and revert the reviewed change without
+reenabling Actions or introducing an alternate publishing identity.
+
