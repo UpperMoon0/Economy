@@ -2,6 +2,7 @@ package com.nstut.economy.network;
 
 import com.nstut.Economy;
 import com.nstut.economy.api.IAccountManager;
+import com.nstut.economy.api.MarketPriceQuotes;
 import com.nstut.economy.api.IOrder;
 import com.nstut.economy.blocks.TankBlockEntity;
 import com.nstut.economy.blocks.TankManager;
@@ -49,6 +50,17 @@ public class MarketNetwork {
     public static synchronized void init() {
         if (initialized) return;
         initialized = true;
+        // Expose the existing Market quotation logic to addons without leaking
+        // OrderManager/TradeLedger implementation types into the public API.
+        MarketPriceQuotes.install(itemId -> {
+            try {
+                var manager = Economy.getOrderManager();
+                return manager == null ? java.util.Optional.empty()
+                        : java.util.Optional.ofNullable(getGlobalPrice(manager, itemId));
+            } catch (RuntimeException notReady) {
+                return java.util.Optional.empty();
+            }
+        });
 
         CHANNEL.registerC2S(RequestItemDetailPacket.class, RequestItemDetailPacket::encode, RequestItemDetailPacket::decode, RequestItemDetailPacket::handle);
         CHANNEL.registerS2C(SyncItemListPacket.class, SyncItemListPacket::encode, SyncItemListPacket::decode, SyncItemListPacket::handle);

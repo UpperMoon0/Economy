@@ -2186,19 +2186,6 @@ public class MarketScreen extends EconomyUiContainerScreen<MarketMenu> {
                 }
             }
         });
-        v.addChild(new UIComponent() {
-            @Override public int preferredWidth(Font f) { return 0; }
-            @Override public int preferredHeight(Font f) { return 12; }
-            @Override public void render(GuiGraphicsExtractor g, Font f, int mx, int my, float pt) {
-                String status = Component.translatable("ui.economy.portfolio.valuation_status",
-                        MarketClientStore.portfolioValuationStatus.get()).getString();
-                UiRender.text(g, f, fitText(f, status, width), x, y + 2, uiRuntime().theme().colors().primary());
-                if (mx >= x && mx < x + width && my >= y && my < y + height) {
-                    deferredTooltip = Component.literal(status + "\n")
-                            .append(Component.translatable("ui.economy.portfolio.valuation_status_help"));
-                }
-            }
-        });
         v.addChild(new TrendChartComponent(portfolioChartSamples, portfolioChartOffset, true));
         UIComponent holdingsList = Ui.switcher(holdingsEmpty)
                 .when(false, () -> Ui.list(visibleHoldings, this::buildHoldingRow)
